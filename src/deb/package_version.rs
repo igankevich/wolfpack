@@ -122,9 +122,7 @@ impl Ord for Version {
                 .chars()
                 .position(|ch| !ch.is_ascii_digit())
                 .unwrap_or(s2.len());
-            let v1: u64 = s1[..n1].parse().unwrap_or(0);
-            let v2: u64 = s2[..n2].parse().unwrap_or(0);
-            let ret = v1.cmp(&v2);
+            let ret = numerical_cmp(s1.chars().take(n1), s2.chars().take(n2));
             if ret != Ordering::Equal {
                 return ret;
             }
@@ -149,8 +147,7 @@ where
     I2: Iterator<Item = char>,
 {
     loop {
-        let (ch1, ch2) = (iter1.next(), iter2.next());
-        match (ch1, ch2) {
+        match (iter1.next(), iter2.next()) {
             (Some(ch1), Some(ch2)) => {
                 if ch1.is_alphabetic() && !ch2.is_alphabetic() {
                     return Ordering::Less;
@@ -177,6 +174,26 @@ where
                     Ordering::Greater
                 }
             }
+            (None, None) => return Ordering::Equal,
+        }
+    }
+}
+
+fn numerical_cmp<I1, I2>(mut iter1: I1, mut iter2: I2) -> Ordering
+where
+    I1: Iterator<Item = char>,
+    I2: Iterator<Item = char>,
+{
+    loop {
+        match (iter1.next(), iter2.next()) {
+            (Some(ch1), Some(ch2)) => {
+                let ret = ch1.cmp(&ch2);
+                if ret != Ordering::Equal {
+                    return ret;
+                }
+            }
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
             (None, None) => return Ordering::Equal,
         }
     }

@@ -3,6 +3,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 
 use crate::deb::Error;
+use crate::deb::SimpleValue;
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PackageVersion {
@@ -83,6 +84,13 @@ impl Display for PackageVersion {
             write!(f, "-{}", self.debian_revision.0)?;
         }
         Ok(())
+    }
+}
+
+impl TryFrom<SimpleValue> for PackageVersion {
+    type Error = Error;
+    fn try_from(other: SimpleValue) -> Result<Self, Self::Error> {
+        Self::try_from(other.as_str())
     }
 }
 

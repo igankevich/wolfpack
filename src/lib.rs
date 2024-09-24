@@ -1,3 +1,1 @@
-mod deb;
-
-pub use self::deb::*;
+pub mod deb;

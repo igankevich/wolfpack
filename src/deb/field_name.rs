@@ -3,6 +3,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::str::FromStr;
 
 use crate::deb::Error;
 
@@ -16,11 +17,21 @@ impl FieldName {
         }
         Ok(Self(name))
     }
+
+    pub(crate) fn new_unchecked(name: &str) -> Self {
+        Self(name.to_string())
+    }
 }
 
 impl PartialEq for FieldName {
     fn eq(&self, other: &Self) -> bool {
         self.0.eq_ignore_ascii_case(&other.0)
+    }
+}
+
+impl PartialEq<&str> for FieldName {
+    fn eq(&self, other: &&str) -> bool {
+        self.0.eq_ignore_ascii_case(other)
     }
 }
 
@@ -50,6 +61,13 @@ impl Hash for FieldName {
 impl Display for FieldName {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+impl FromStr for FieldName {
+    type Err = Error;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::try_from(value.to_string())
     }
 }
 

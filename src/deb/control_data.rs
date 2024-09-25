@@ -26,13 +26,13 @@ impl Display for ControlData {
         writeln!(f, "Version: {}", self.version)?;
         writeln!(f, "Architecture: {}", self.architecture)?;
         writeln!(f, "Maintainer: {}", self.maintainer)?;
-        writeln!(f, "Description: {}", self.description)?;
         if let Some(installed_size) = self.installed_size.as_ref() {
             writeln!(f, "Installed-Size: {}", installed_size)?;
         }
         for (name, value) in self.other.iter() {
             writeln!(f, "{}: {}", name, value)?;
         }
+        writeln!(f, "Description: {}", self.description)?;
         Ok(())
     }
 }

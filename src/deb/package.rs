@@ -1,4 +1,6 @@
+use std::fs::File;
 use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
 
 use flate2::write::GzEncoder;
@@ -6,7 +8,8 @@ use flate2::Compression;
 use walkdir::WalkDir;
 
 use crate::deb::ControlData;
-//use crate::deb::Error;
+use crate::deb::Md5Reader;
+use crate::deb::Md5Sums;
 
 pub struct Package {
     control: ControlData,
@@ -27,7 +30,7 @@ impl Package {
             Vec::with_capacity(4096),
             Compression::default(),
         ));
-        let mut md5sums = String::with_capacity(4096);
+        let mut md5sums = Md5Sums::new();
         for entry in WalkDir::new(self.directory.as_path()).into_iter() {
             let entry = entry?;
             let relative_path = entry
@@ -44,64 +47,51 @@ impl Package {
             header.set_gid(0);
             header.set_mtime(0);
             header.set_cksum();
-            let contents = std::fs::read(entry.path())?;
-            data.append(&header, contents.as_slice())?;
-            let md5_hash = md5::compute(&contents);
-            use std::fmt::Write;
-            let _ = writeln!(&mut md5sums, "{:x}  {}", md5_hash, relative_path.display());
+            let mut reader = Md5Reader::new(File::open(entry.path())?);
+            data.append(&header, &mut reader)?;
+            md5sums.append_file(relative_path, reader.digest());
         }
-        {
-            let control_data = self.control.to_string();
-            let mut header = tar::Header::new_old();
-            header.set_size(control_data.as_bytes().len() as u64);
-            header.set_uid(0);
-            header.set_gid(0);
-            header.set_mode(0o644);
-            header.set_entry_type(tar::EntryType::Regular);
-            header.set_path("control")?;
-            header.set_cksum();
-            control.append(&header, control_data.as_bytes())?;
-        }
-        {
-            let mut header = tar::Header::new_old();
-            header.set_size(md5sums.as_bytes().len() as u64);
-            header.set_uid(0);
-            header.set_gid(0);
-            header.set_mode(0o644);
-            header.set_entry_type(tar::EntryType::Regular);
-            header.set_path("md5sums")?;
-            header.set_cksum();
-            control.append(&header, md5sums.as_bytes())?;
-        }
-        let control_contents = control.into_inner()?.finish()?;
-        let data_contents = data.into_inner()?.finish()?;
+        tar_add_regular_file(&mut control, "control", self.control.to_string())?;
+        tar_add_regular_file(&mut control, "md5sums", md5sums.as_bytes())?;
+        let control = control.into_inner()?.finish()?;
+        let data = data.into_inner()?.finish()?;
         let mut package = ar::Builder::new(writer);
-        {
-            let file_name = "debian-binary";
-            let contents = "2.0";
-            let mut header = ar::Header::new(file_name.into(), contents.as_bytes().len() as u64);
-            header.set_uid(0);
-            header.set_gid(0);
-            header.set_mode(0o644);
-            package.append(&header, contents.as_bytes())?;
-        }
-        {
-            let file_name = "control.tar.gz";
-            let mut header = ar::Header::new(file_name.into(), control_contents.len() as u64);
-            header.set_uid(0);
-            header.set_gid(0);
-            header.set_mode(0o644);
-            package.append(&header, control_contents.as_slice())?;
-        }
-        {
-            let file_name = "data.tar.gz";
-            let mut header = ar::Header::new(file_name.into(), data_contents.len() as u64);
-            header.set_uid(0);
-            header.set_gid(0);
-            header.set_mode(0o644);
-            package.append(&header, data_contents.as_slice())?;
-        }
+        ar_add_regular_file(&mut package, "debian-binary", "2.0")?;
+        ar_add_regular_file(&mut package, "control.tar.gz", control)?;
+        ar_add_regular_file(&mut package, "data.tar.gz", data)?;
         package.into_inner()?;
         Ok(())
     }
+}
+
+fn tar_add_regular_file<W: Write, P: AsRef<Path>, C: AsRef<[u8]>>(
+    archive: &mut tar::Builder<W>,
+    path: P,
+    contents: C,
+) -> Result<(), std::io::Error> {
+    let contents = contents.as_ref();
+    let mut header = tar::Header::new_old();
+    header.set_size(contents.len() as u64);
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_mode(0o644);
+    header.set_entry_type(tar::EntryType::Regular);
+    header.set_path(path)?;
+    header.set_cksum();
+    archive.append(&header, contents)?;
+    Ok(())
+}
+
+fn ar_add_regular_file<W: Write, P: AsRef<[u8]>, C: AsRef<[u8]>>(
+    archive: &mut ar::Builder<W>,
+    file_name: P,
+    contents: C,
+) -> Result<(), std::io::Error> {
+    let contents = contents.as_ref();
+    let mut header = ar::Header::new(file_name.as_ref().into(), contents.len() as u64);
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_mode(0o644);
+    archive.append(&header, contents)?;
+    Ok(())
 }

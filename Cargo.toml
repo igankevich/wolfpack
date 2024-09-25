@@ -7,6 +7,6 @@ edition = "2021"
 ar = "0.9.0"
 flate2 = "1.0.33"
 md5 = "0.7.0"
-tar = { version = "0.4.41", features = [], default-features = false }
+tar = { version = "0.4.42", features = [], default-features = false }
 thiserror = "1.0.64"
 walkdir = "2.5.0"

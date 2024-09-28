@@ -1,10 +1,14 @@
-use std::fs::File;
 use std::collections::HashSet;
+use std::fs::File;
 
+use pgp::composed::cleartext::CleartextSignedMessage;
+use pgp::types::PublicKeyTrait;
+use pgp::types::SecretKeyTrait;
+use rand::rngs::OsRng;
 use wolfpack::deb::ControlData;
 use wolfpack::deb::Packages;
-use wolfpack::deb::SimpleValue;
 use wolfpack::deb::Release;
+use wolfpack::deb::SimpleValue;
 use wolfpack::DebPackage;
 use wolfpack::IpkPackage;
 
@@ -22,8 +26,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         architectures.insert(package.control.architecture);
     }
     let release = Release::new(".", architectures, SimpleValue::try_from("test".into())?)?;
-    print!("{}", release);
+    print!("release start `{}` release end", release);
+    let secret_key = generate_secret_key()?;
+    let public_key = secret_key.public_key();
+    println!("Key id: {:x}", public_key.key_id());
+    println!(
+        "Fingerprint: {}",
+        hex::encode(public_key.fingerprint().as_bytes())
+    );
+    // TODO trim?
+    let signed_release =
+        CleartextSignedMessage::sign(OsRng, release.to_string().trim(), &secret_key, || {
+            String::new()
+        })?;
+    signed_release.to_armored_writer(&mut File::create("InRelease")?, Default::default())?;
     Ok(())
+}
+
+fn generate_secret_key() -> Result<pgp::SignedSecretKey, pgp::errors::Error> {
+    use pgp::composed::*;
+    use pgp::crypto::{hash::HashAlgorithm, sym::SymmetricKeyAlgorithm};
+    use pgp::types::CompressionAlgorithm;
+    use smallvec::smallvec;
+    let mut key_params = SecretKeyParamsBuilder::default();
+    key_params
+        .key_type(KeyType::Rsa(2048))
+        .can_certify(false)
+        .can_sign(true)
+        .primary_user_id("Me <me@example.com>".into())
+        .preferred_symmetric_algorithms(smallvec![SymmetricKeyAlgorithm::AES256])
+        .preferred_hash_algorithms(smallvec![HashAlgorithm::SHA2_512])
+        .preferred_compression_algorithms(smallvec![CompressionAlgorithm::ZLIB]);
+    let secret_key_params = key_params
+        .build()
+        .expect("Must be able to create secret key params");
+    let secret_key = secret_key_params
+        .generate(OsRng)
+        .expect("Failed to generate a plain key.");
+    let signed_secret_key = secret_key
+        .sign(OsRng, || String::new())
+        .expect("Must be able to sign its own metadata");
+    Ok(signed_secret_key)
 }
 
 /*

@@ -10,6 +10,7 @@ use crate::deb::PackageName;
 use crate::deb::PackageVersion;
 use crate::deb::SimpleValue;
 
+#[derive(Clone)]
 pub struct ControlData {
     package: PackageName,
     version: PackageVersion,
@@ -32,7 +33,7 @@ impl Display for ControlData {
         for (name, value) in self.other.iter() {
             writeln!(f, "{}: {}", name, value)?;
         }
-        writeln!(f, "Description: {}", self.description)?;
+        write!(f, "Description: {}", self.description)?;
         Ok(())
     }
 }

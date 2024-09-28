@@ -10,10 +10,16 @@ pub enum Error {
     FieldName(String),
     #[error("invalid field value {0:?}")]
     FieldValue(String),
-    #[error("invalid control data {0:?}")]
+    #[error("invalid line in control data: {0:?}")]
     ControlData(String),
     #[error("{0:?} is missing")]
     MissingField(&'static str),
     #[error("duplicate field {0:?}")]
     DuplicateField(String),
+    #[error("`{0}` is missing in the archive")]
+    MissingFile(String),
+    #[error("i/o error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("directory traversing error: {0}")]
+    WalkDir(#[from] walkdir::Error),
 }

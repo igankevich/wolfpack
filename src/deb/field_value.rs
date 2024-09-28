@@ -12,7 +12,7 @@ impl SimpleValue {
         validate_simple_value(&value)?;
         Ok(Self(value))
     }
-    
+
     pub fn from_folded(value: String) -> Self {
         if value.chars().any(|ch| char::is_whitespace(ch) && ch != ' ') {
             let mut folded = String::with_capacity(value.len());

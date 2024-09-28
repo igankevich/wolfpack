@@ -1,17 +1,23 @@
+mod basic_package;
 mod control_data;
 mod error;
 mod field_name;
 mod field_value;
+mod hashing_reader;
 mod md5_sums;
 mod package;
 mod package_name;
 mod package_version;
+mod packages;
 
+pub(crate) use self::basic_package::*;
 pub use self::control_data::*;
 pub use self::error::*;
 pub use self::field_name::*;
 pub use self::field_value::*;
+pub use self::hashing_reader::*;
 pub use self::md5_sums::*;
 pub use self::package::*;
 pub use self::package_name::*;
 pub use self::package_version::*;
+pub use self::packages::*;

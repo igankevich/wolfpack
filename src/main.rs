@@ -1,14 +1,19 @@
 use std::fs::File;
 
 use wolfpack::deb::ControlData;
-use wolfpack::deb::Package;
+use wolfpack::deb::Packages;
+use wolfpack::DebPackage;
+use wolfpack::IpkPackage;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let control_file = std::env::args().nth(1).unwrap();
     let directory = std::env::args().nth(2).unwrap();
     let control_data: ControlData = std::fs::read_to_string(control_file)?.parse()?;
-    let pkg = Package::new(control_data, directory.into());
-    pkg.build(File::create("test.deb")?)?;
+    let deb = DebPackage::new(control_data.clone(), directory.clone().into());
+    deb.build(File::create("test.deb")?)?;
+    IpkPackage::new(control_data, directory.into()).build(File::create("test.ipk")?)?;
+    let packages = Packages::new(["."])?;
+    print!("{}", packages);
     Ok(())
 }
 

@@ -9,6 +9,7 @@ mod package;
 mod package_name;
 mod package_version;
 mod packages;
+mod release;
 
 pub(crate) use self::basic_package::*;
 pub use self::control_data::*;
@@ -21,3 +22,4 @@ pub use self::package::*;
 pub use self::package_name::*;
 pub use self::package_version::*;
 pub use self::packages::*;
+pub use self::release::*;

@@ -60,6 +60,14 @@ impl Packages {
         }
         Ok(Self { packages })
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &ExtendedControlData> {
+        self.packages.iter()
+    }
+
+    pub fn into_iter(self) -> impl IntoIterator<Item = ExtendedControlData> {
+        self.packages.into_iter()
+    }
 }
 
 impl Display for Packages {
@@ -72,7 +80,8 @@ impl Display for Packages {
 }
 
 pub struct ExtendedControlData {
-    control: ControlData,
+    pub control: ControlData,
+    // TODO Checksums
     md5: Md5Digest,
     sha1: Sha1Digest,
     sha256: Sha2Digest,

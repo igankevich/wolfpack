@@ -1,7 +1,10 @@
 use std::fs::File;
+use std::collections::HashSet;
 
 use wolfpack::deb::ControlData;
 use wolfpack::deb::Packages;
+use wolfpack::deb::SimpleValue;
+use wolfpack::deb::Release;
 use wolfpack::DebPackage;
 use wolfpack::IpkPackage;
 
@@ -14,6 +17,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     IpkPackage::new(control_data, directory.into()).build(File::create("test.ipk")?)?;
     let packages = Packages::new(["."])?;
     print!("{}", packages);
+    let mut architectures: HashSet<SimpleValue> = HashSet::new();
+    for package in packages.into_iter() {
+        architectures.insert(package.control.architecture);
+    }
+    let release = Release::new(".", architectures, SimpleValue::try_from("test".into())?)?;
+    print!("{}", release);
     Ok(())
 }
 

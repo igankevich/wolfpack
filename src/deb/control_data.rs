@@ -14,7 +14,7 @@ use crate::deb::SimpleValue;
 pub struct ControlData {
     package: PackageName,
     version: PackageVersion,
-    architecture: SimpleValue,
+    pub architecture: SimpleValue,
     maintainer: SimpleValue,
     description: MultilineValue,
     installed_size: Option<u64>,

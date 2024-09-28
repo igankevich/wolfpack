@@ -104,6 +104,8 @@ impl FromStr for ControlData {
                 return Err(Error::ControlData(format!("unknown multiline `{}`", name)));
             }
         }
+        // TODO
+        //fields.remove(&FieldName::new_unchecked("Recommends"));
         let control = ControlData {
             package: fields
                 .remove(&FieldName::new_unchecked("Package"))

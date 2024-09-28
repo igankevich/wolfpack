@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 pub trait ArchiveWrite<W: Write> {
@@ -25,7 +26,7 @@ impl<W: Write> ArchiveWrite<W> for ar::Builder<W> {
     ) -> Result<(), std::io::Error> {
         let contents = contents.as_ref();
         let mut header = ar::Header::new(
-            path.as_ref().as_os_str().as_encoded_bytes().to_vec(),
+            path.as_ref().as_os_str().as_bytes().to_vec(),
             contents.len() as u64,
         );
         header.set_uid(0);
@@ -58,6 +59,12 @@ impl<W: Write> ArchiveWrite<W> for tar::Builder<W> {
         header.set_mode(0o644);
         header.set_entry_type(tar::EntryType::Regular);
         header.set_path(path)?;
+        // TODO this have to be done for ipk only
+        let actual_path = &mut header.as_old_mut().name;
+        let n = actual_path.len();
+        actual_path.copy_within(..(n - 2), 2);
+        actual_path[0] = b'.';
+        actual_path[1] = b'/';
         header.set_cksum();
         self.append(&header, contents)?;
         Ok(())

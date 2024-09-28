@@ -1,6 +1,8 @@
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::Read;
 use std::io::Write;
+use std::os::unix::ffi::OsStringExt;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -39,30 +41,33 @@ impl BasicPackage {
         let mut md5sums = Md5Sums::new();
         for entry in WalkDir::new(self.directory.as_path()).into_iter() {
             let entry = entry?;
-            let relative_path = entry
-                .path()
-                .strip_prefix(self.directory.as_path())
-                .map_err(std::io::Error::other)?;
-            if !(entry.file_type().is_file() || entry.file_type().is_symlink()) {
-                continue;
-            }
+            let relative_path = Path::new(".").join(
+                entry
+                    .path()
+                    .strip_prefix(self.directory.as_path())
+                    .map_err(std::io::Error::other)?
+                    .normalize(),
+            );
             let mut header = tar::Header::new_old();
             header.set_metadata(&std::fs::metadata(entry.path())?);
-            header.set_path(relative_path)?;
+            header.set_path(relative_path.as_path())?;
             header.set_uid(0);
             header.set_gid(0);
-            header.set_mtime(0);
             header.set_cksum();
-            let mut reader = Md5Reader::new(File::open(entry.path())?);
-            data.append(&header, &mut reader)?;
-            md5sums.append_file(relative_path, reader.digest());
+            if entry.file_type().is_dir() {
+                data.append::<&[u8]>(&header, &[])?;
+            } else {
+                let mut reader = Md5Reader::new(File::open(entry.path())?);
+                data.append(&header, &mut reader)?;
+                md5sums.append_file(relative_path.as_path(), reader.digest());
+            }
         }
         let data = data.into_inner()?.finish()?;
         control.add_regular_file("control", self.control.to_string())?;
         control.add_regular_file("md5sums", md5sums.as_bytes())?;
         let control = control.into_inner()?.finish()?;
         let mut package = A1::new(writer);
-        package.add_regular_file("debian-binary", "2.0")?;
+        package.add_regular_file("debian-binary", "2.0\n")?;
         package.add_regular_file("control.tar.gz", control)?;
         package.add_regular_file("data.tar.gz", data)?;
         package.into_inner()?;
@@ -75,15 +80,12 @@ impl BasicPackage {
         let mut reader = ar::Archive::new(reader);
         while let Some(entry) = reader.next_entry() {
             let entry = entry?;
-            let file_name = String::from_utf8_lossy(entry.header().identifier());
-            eprintln!(
-                "file {} {:?}",
-                file_name.as_ref(),
-                file_name.as_ref() == "control.tar.xz"
-            );
-            let decoder: Box<dyn Read> = match file_name.as_ref() {
-                "control.tar.gz" => Box::new(GzDecoder::new(entry)),
-                "control.tar.xz" => {
+            let path = PathBuf::from(OsString::from_vec(entry.header().identifier().to_vec()));
+            eprintln!("outer path {}", path.display());
+            let path = path.normalize();
+            let decoder: Box<dyn Read> = match path.to_str() {
+                Some("control.tar.gz") => Box::new(GzDecoder::new(entry)),
+                Some("control.tar.xz") => {
                     eprintln!("xz");
                     Box::new(XzDecoder::new(entry))
                 }

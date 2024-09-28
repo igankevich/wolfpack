@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::fs::File;
+use std::path::Path;
 
+use ksign::IO;
 use pgp::composed::cleartext::CleartextSignedMessage;
 use pgp::types::PublicKeyTrait;
 use pgp::types::SecretKeyTrait;
@@ -16,17 +18,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let control_file = std::env::args().nth(1).unwrap();
     let directory = std::env::args().nth(2).unwrap();
     let control_data: ControlData = std::fs::read_to_string(control_file)?.parse()?;
+    eprintln!("{}", control_data);
     let deb = DebPackage::new(control_data.clone(), directory.clone().into());
     deb.build(File::create("test.deb")?)?;
     IpkPackage::new(control_data, directory.into()).build(File::create("test.ipk")?)?;
     let packages = Packages::new(["."])?;
-    print!("{}", packages);
+    let packages_string = packages.to_string();
     let mut architectures: HashSet<SimpleValue> = HashSet::new();
     for package in packages.into_iter() {
         architectures.insert(package.control.architecture);
     }
     let release = Release::new(".", architectures, SimpleValue::try_from("test".into())?)?;
-    print!("release start `{}` release end", release);
     let secret_key = generate_secret_key()?;
     let public_key = secret_key.public_key();
     println!("Key id: {:x}", public_key.key_id());
@@ -40,6 +42,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             String::new()
         })?;
     signed_release.to_armored_writer(&mut File::create("InRelease")?, Default::default())?;
+    signed_release.signatures()[0]
+        .to_armored_writer(&mut File::create("Release.gpg")?, Default::default())?;
+    // TODO ipk has its own whitelist of fields, see opkg.py
+    // TODO freebsd http://pkg.freebsd.org/FreeBSD:15:amd64/base_latest/
+    let ipk_signing_key = ksign::SigningKey::generate(None);
+    ipk_signing_key
+        .sign(packages_string.as_bytes())
+        .write_to_file(Path::new("Packages.sig"))?;
     Ok(())
 }
 

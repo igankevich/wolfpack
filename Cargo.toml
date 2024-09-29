@@ -13,7 +13,7 @@ md5 = "0.7.0"
 normalize-path = "0.2.1"
 pgp = "0.14.0"
 rand = "0.8.5"
-serde = "1.0.210"
+serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1.0.128"
 sha1 = "0.10.6"
 sha2 = "0.10.8"
@@ -22,3 +22,4 @@ tar = { version = "0.4.42", features = [], default-features = false }
 thiserror = "1.0.64"
 walkdir = "2.5.0"
 xz = "0.1.0"
+zstd = "0.13.2"

@@ -20,6 +20,8 @@ pub struct CompactManifest {
     licenselogic: String,
     licenses: Vec<String>,
     desc: String,
+    #[serde(default)]
+    deps: HashMap<String, Dependency>,
     categories: Vec<String>,
     shlibs_required: Vec<PathBuf>,
     shlibs_provided: Vec<PathBuf>,
@@ -35,6 +37,7 @@ impl ToString for CompactManifest {
 impl FromStr for CompactManifest {
     type Err = serde_json::Error;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
+        eprintln!("parse");
         serde_json::from_str(value)
     }
 }
@@ -68,10 +71,16 @@ pub struct PackageMeta {
     #[serde(flatten)]
     pub(crate) compact: CompactManifest,
     // sha256
-    sum: String,
-    path: PathBuf,
-    repopath: PathBuf,
-    pkgsize: u64,
+    pub(crate) sum: String,
+    pub(crate) path: PathBuf,
+    pub(crate) repopath: PathBuf,
+    pub(crate) pkgsize: u64,
+}
+
+impl PackageMeta {
+    pub fn to_vec(&self) -> Result<Vec<u8>, serde_json::Error> {
+        serde_json::to_vec(self)
+    }
 }
 
 impl ToString for PackageMeta {
@@ -85,4 +94,10 @@ impl FromStr for PackageMeta {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         serde_json::from_str(value)
     }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Dependency {
+    origin: String,
+    version: String,
 }

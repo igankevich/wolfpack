@@ -13,12 +13,11 @@ use normalize_path::NormalizePath;
 use walkdir::WalkDir;
 use xz::read::XzDecoder;
 
-use crate::archive::ArchiveRead;
 use crate::archive::ArchiveWrite;
 use crate::deb::ControlData;
 use crate::deb::Error;
-use crate::deb::Md5Reader;
 use crate::deb::Md5Sums;
+use crate::hash::Md5Reader;
 
 pub(crate) struct BasicPackage {
     pub(crate) control: ControlData,
@@ -59,7 +58,7 @@ impl BasicPackage {
             } else {
                 let mut reader = Md5Reader::new(File::open(entry.path())?);
                 data.append(&header, &mut reader)?;
-                md5sums.append_file(relative_path.as_path(), reader.digest());
+                md5sums.append_file(relative_path.as_path(), reader.digest()?.0);
             }
         }
         let data = data.into_inner()?.finish()?;
@@ -74,9 +73,7 @@ impl BasicPackage {
         Ok(())
     }
 
-    pub(crate) fn read_control<R1: Read, R2: ArchiveRead<R1>>(
-        reader: R1,
-    ) -> Result<ControlData, Error> {
+    pub(crate) fn read_control<R: Read>(reader: R) -> Result<ControlData, Error> {
         let mut reader = ar::Archive::new(reader);
         while let Some(entry) = reader.next_entry() {
             let entry = entry?;
@@ -99,7 +96,7 @@ impl BasicPackage {
                 if path == Path::new("control") {
                     let mut buf = String::with_capacity(4096);
                     entry.read_to_string(&mut buf)?;
-                    return Ok(buf.parse()?);
+                    return buf.parse();
                 }
             }
         }

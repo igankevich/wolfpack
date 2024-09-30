@@ -22,6 +22,6 @@ impl Package {
     }
 
     pub fn read_control<R: Read>(reader: R) -> Result<ControlData, Error> {
-        BasicPackage::read_control::<R, ar::Archive<R>>(reader)
+        BasicPackage::read_control::<R>(reader)
     }
 }

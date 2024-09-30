@@ -9,11 +9,9 @@ use walkdir::WalkDir;
 
 use crate::deb::ControlData;
 use crate::deb::Error;
-use crate::deb::HashingReader;
-use crate::deb::Md5Digest;
 use crate::deb::Package;
-use crate::deb::Sha1Digest;
-use crate::deb::Sha2Digest;
+use crate::hash::MultiHash;
+use crate::hash::MultiHashReader;
 
 pub struct Packages {
     packages: Vec<ExtendedControlData>,
@@ -28,15 +26,13 @@ impl Packages {
         let mut packages = Vec::new();
         let mut push_package = |path: &Path| -> Result<(), Error> {
             eprintln!("reading {}", path.display());
-            let mut reader = HashingReader::new(File::open(path)?);
+            let mut reader = MultiHashReader::new(File::open(path)?);
             let control = Package::read_control(&mut reader)?;
-            let (md5, sha1, sha256, size) = reader.digest()?;
+            let (hash, size) = reader.digest()?;
             let control = ExtendedControlData {
                 control,
                 size,
-                md5,
-                sha1,
-                sha256,
+                hash,
                 filename: path.into(),
             };
             packages.push(control);
@@ -64,8 +60,13 @@ impl Packages {
     pub fn iter(&self) -> impl Iterator<Item = &ExtendedControlData> {
         self.packages.iter()
     }
+}
 
-    pub fn into_iter(self) -> impl IntoIterator<Item = ExtendedControlData> {
+impl IntoIterator for Packages {
+    type Item = <Vec<ExtendedControlData> as IntoIterator>::Item;
+    type IntoIter = <Vec<ExtendedControlData> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
         self.packages.into_iter()
     }
 }
@@ -81,10 +82,7 @@ impl Display for Packages {
 
 pub struct ExtendedControlData {
     pub control: ControlData,
-    // TODO Checksums
-    md5: Md5Digest,
-    sha1: Sha1Digest,
-    sha256: Sha2Digest,
+    hash: MultiHash,
     filename: PathBuf,
     size: usize,
 }
@@ -94,9 +92,9 @@ impl Display for ExtendedControlData {
         write!(f, "{}", self.control)?;
         writeln!(f, "Filename: {}", self.filename.display())?;
         writeln!(f, "Size: {}", self.size)?;
-        writeln!(f, "MD5sum: {:x}", self.md5)?;
-        writeln!(f, "SHA1: {}", self.sha1)?;
-        writeln!(f, "SHA256: {}", self.sha256)?;
+        writeln!(f, "MD5sum: {:x}", self.hash.md5)?;
+        writeln!(f, "SHA1: {}", self.hash.sha1)?;
+        writeln!(f, "SHA256: {}", self.hash.sha2)?;
         Ok(())
     }
 }

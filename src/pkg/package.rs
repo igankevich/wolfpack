@@ -10,12 +10,13 @@ use std::path::PathBuf;
 
 use normalize_path::NormalizePath;
 use walkdir::WalkDir;
+use zstd::stream::read::Decoder as ZstdDecoder;
 use zstd::stream::write::Encoder as ZstdEncoder;
 
 use crate::archive::ArchiveWrite;
+use crate::hash::Sha256Reader;
 use crate::pkg::CompactManifest;
 use crate::pkg::Manifest;
-use crate::pkg::Sha256Reader;
 
 pub struct Package {
     manifest: CompactManifest,
@@ -80,6 +81,22 @@ impl Package {
         }
         package.into_inner()?.finish()?;
         Ok(())
+    }
+
+    pub(crate) fn read_compact_manifest<R: Read>(
+        reader: R,
+    ) -> Result<CompactManifest, std::io::Error> {
+        let mut reader = tar::Archive::new(ZstdDecoder::new(reader)?);
+        for entry in reader.entries()? {
+            let mut entry = entry?;
+            let path = entry.path()?.normalize();
+            if path == Path::new("+COMPACT_MANIFEST") {
+                let mut buf = String::with_capacity(4096);
+                entry.read_to_string(&mut buf)?;
+                return Ok(buf.parse()?);
+            }
+        }
+        Err(std::io::Error::other("missing file: +COMPACT_MANIFEST"))
     }
 }
 

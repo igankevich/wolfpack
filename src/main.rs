@@ -12,11 +12,19 @@ use wolfpack::deb::Packages;
 use wolfpack::deb::Release;
 use wolfpack::deb::SimpleValue;
 use wolfpack::pkg::CompactManifest;
+use wolfpack::pkg;
 use wolfpack::DebPackage;
 use wolfpack::IpkPackage;
 use wolfpack::PkgPackage;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let secret_key = generate_secret_key()?;
+    let public_key = secret_key.public_key();
+    println!("Key id: {:x}", public_key.key_id());
+    println!(
+        "Fingerprint: {}",
+        hex::encode(public_key.fingerprint().as_bytes())
+    );
     let control_file = std::env::args().nth(1).unwrap();
     let directory = std::env::args().nth(2).unwrap();
     let control_data: ControlData = std::fs::read_to_string(control_file)?.parse()?;
@@ -25,9 +33,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     deb.build(File::create("test.deb")?)?;
     IpkPackage::new(control_data, directory.into()).build(File::create("test.ipk")?)?;
     let manifest: CompactManifest = std::fs::read_to_string("freebsd/+COMPACT_MANIFEST")?.parse()?;
-    eprintln!("pkg start");
     PkgPackage::new(manifest, "freebsd/root".into()).build(File::create("test.pkg")?)?;
-    eprintln!("pkg end");
+    {
+        let packages = pkg::Packages::new(["test.pkg"])?;
+        packages.build(File::create("packagesite.pkg")?, &secret_key)?;
+    }
     let packages = Packages::new(["."])?;
     let packages_string = packages.to_string();
     let mut architectures: HashSet<SimpleValue> = HashSet::new();
@@ -35,13 +45,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         architectures.insert(package.control.architecture);
     }
     let release = Release::new(".", architectures, SimpleValue::try_from("test".into())?)?;
-    let secret_key = generate_secret_key()?;
-    let public_key = secret_key.public_key();
-    println!("Key id: {:x}", public_key.key_id());
-    println!(
-        "Fingerprint: {}",
-        hex::encode(public_key.fingerprint().as_bytes())
-    );
     // TODO trim?
     let signed_release =
         CleartextSignedMessage::sign(OsRng, release.to_string().trim(), &secret_key, || {
@@ -66,7 +69,7 @@ fn generate_secret_key() -> Result<pgp::SignedSecretKey, pgp::errors::Error> {
     use smallvec::smallvec;
     let mut key_params = SecretKeyParamsBuilder::default();
     key_params
-        .key_type(KeyType::Rsa(2048))
+        .key_type(KeyType::Ed25519)
         .can_certify(false)
         .can_sign(true)
         .primary_user_id("Me <me@example.com>".into())
@@ -80,7 +83,7 @@ fn generate_secret_key() -> Result<pgp::SignedSecretKey, pgp::errors::Error> {
         .generate(OsRng)
         .expect("Failed to generate a plain key.");
     let signed_secret_key = secret_key
-        .sign(OsRng, || String::new())
+        .sign(OsRng, String::new)
         .expect("Must be able to sign its own metadata");
     Ok(signed_secret_key)
 }

@@ -14,11 +14,9 @@ use chrono::Utc;
 use walkdir::WalkDir;
 
 use crate::deb::Error;
-use crate::deb::HashingReader;
-use crate::deb::Md5Digest;
-use crate::deb::Sha1Digest;
-use crate::deb::Sha2Digest;
 use crate::deb::SimpleValue;
+use crate::hash::MultiHash;
+use crate::hash::MultiHashReader;
 
 // https://wiki.debian.org/DebianRepository/Format#A.22Release.22_files
 pub struct Release {
@@ -52,17 +50,9 @@ impl Release {
             {
                 continue;
             }
-            let reader = HashingReader::new(File::open(path)?);
-            let (md5, sha1, sha256, size) = reader.digest()?;
-            checksums.insert(
-                path.into(),
-                Checksums {
-                    size,
-                    md5,
-                    sha1,
-                    sha256,
-                },
-            );
+            let reader = MultiHashReader::new(File::open(path)?);
+            let (hash, size) = reader.digest()?;
+            checksums.insert(path.into(), Checksums { size, hash });
         }
         Ok(Self {
             date: SystemTime::now(),
@@ -102,21 +92,21 @@ impl Display for Release {
             write!(
                 &mut md5,
                 "\n {:x} {} {}",
-                sums.md5,
+                sums.hash.md5,
                 sums.size,
                 path.display()
             )?;
             write!(
                 &mut sha1,
                 "\n {} {} {}",
-                sums.sha1,
+                sums.hash.sha1,
                 sums.size,
                 path.display()
             )?;
             write!(
                 &mut sha256,
                 "\n {} {} {}",
-                sums.sha256,
+                sums.hash.sha2,
                 sums.size,
                 path.display()
             )?;
@@ -129,8 +119,6 @@ impl Display for Release {
 }
 
 struct Checksums {
-    md5: Md5Digest,
-    sha1: Sha1Digest,
-    sha256: Sha2Digest,
+    hash: MultiHash,
     size: usize,
 }

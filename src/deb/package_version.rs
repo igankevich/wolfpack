@@ -5,6 +5,7 @@ use std::fmt::Formatter;
 use crate::deb::Error;
 use crate::deb::SimpleValue;
 
+/// https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PackageVersion {
     epoch: u64,

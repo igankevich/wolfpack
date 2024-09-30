@@ -11,8 +11,8 @@ use wolfpack::deb::ControlData;
 use wolfpack::deb::Packages;
 use wolfpack::deb::Release;
 use wolfpack::deb::SimpleValue;
-use wolfpack::pkg::CompactManifest;
 use wolfpack::pkg;
+use wolfpack::pkg::CompactManifest;
 use wolfpack::DebPackage;
 use wolfpack::IpkPackage;
 use wolfpack::PkgPackage;
@@ -32,7 +32,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let deb = DebPackage::new(control_data.clone(), directory.clone().into());
     deb.build(File::create("test.deb")?)?;
     IpkPackage::new(control_data, directory.into()).build(File::create("test.ipk")?)?;
-    let manifest: CompactManifest = std::fs::read_to_string("freebsd/+COMPACT_MANIFEST")?.parse()?;
+    let manifest: CompactManifest =
+        std::fs::read_to_string("freebsd/+COMPACT_MANIFEST")?.parse()?;
     PkgPackage::new(manifest, "freebsd/root".into()).build(File::create("test.pkg")?)?;
     {
         let packages = pkg::Packages::new(["test.pkg"])?;

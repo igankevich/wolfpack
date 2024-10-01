@@ -11,7 +11,7 @@ use crate::deb::PackageName;
 use crate::deb::PackageVersion;
 use crate::deb::SimpleValue;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ControlData {
     package: PackageName,
     version: PackageVersion,
@@ -139,16 +139,36 @@ impl FromStr for ControlData {
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
-    use std::collections::hash_map::DefaultHasher;
-
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use arbtest::arbtest;
 
     use super::*;
 
+    #[test]
+    fn display_parse() {
+        arbtest(|u| {
+            let expected: ControlData = u.arbitrary()?;
+            let string = expected.to_string();
+            let actual: ControlData = string.parse().unwrap();
+            assert_eq!(expected, actual, "string = {:?}", string);
+            Ok(())
+        });
+    }
+
+    impl<'a> Arbitrary<'a> for ControlData {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            Ok(Self {
+                package: u.arbitrary()?,
+                version: u.arbitrary()?,
+                architecture: u.arbitrary()?,
+                maintainer: u.arbitrary()?,
+                description: u.arbitrary()?,
+                installed_size: u.arbitrary()?,
+                other: u.arbitrary()?,
+            })
+        }
+    }
 }
-*/

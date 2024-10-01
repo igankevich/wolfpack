@@ -6,7 +6,7 @@ use crate::deb::Error;
 use crate::deb::SimpleValue;
 
 /// https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct PackageVersion {
     epoch: u64,
     upstream_version: Version,
@@ -28,25 +28,16 @@ impl PackageVersion {
         };
         let (debian_revision, version, has_debian_revision) = match version.rfind(|ch| ch == '-') {
             Some(i) => (version[(i + 1)..].to_string(), &version[..i], true),
-            None => ("0".into(), version, false),
+            None => (String::new(), version, false),
         };
-        if !debian_revision.chars().all(is_valid_char) {
-            return Err(version);
-        }
-        let is_valid_char_v2 = if has_debian_revision {
-            is_valid_char_with_hyphen
-        } else {
-            is_valid_char
-        };
-        if !(version.chars().all(is_valid_char_v2)
-            && version.chars().next().iter().all(char::is_ascii_digit))
-        {
-            return Err(version);
-        }
         Ok(Self {
             epoch,
-            upstream_version: Version(version.to_string()),
-            debian_revision: Version(debian_revision),
+            upstream_version: Version::new_upstream_version(
+                version.to_string(),
+                has_debian_revision,
+            )
+            .map_err(|_| version)?,
+            debian_revision: Version::new_debian_revision(debian_revision).map_err(|_| version)?,
         })
     }
 }
@@ -95,8 +86,48 @@ impl TryFrom<SimpleValue> for PackageVersion {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Hash, Debug)]
 struct Version(String);
+
+impl Version {
+    fn new_upstream_version(s: String, has_debian_revision: bool) -> Result<Self, String> {
+        let is_valid_char_v2 = if has_debian_revision {
+            is_valid_char_with_hyphen
+        } else {
+            is_valid_char
+        };
+        if !(s.chars().all(is_valid_char_v2) && s.chars().next().iter().all(char::is_ascii_digit)) {
+            return Err(s);
+        }
+        Ok(Self(s))
+    }
+
+    fn new_debian_revision(s: String) -> Result<Self, String> {
+        if !s.chars().all(is_valid_char) {
+            return Err(s);
+        }
+        Ok(Self(if s.is_empty() { String::new() } else { s }))
+    }
+
+    fn to_str(&self) -> &str {
+        if self.0.is_empty() {
+            "0"
+        } else {
+            self.0.as_str()
+        }
+    }
+}
+
+// TODO Hash
+// TODO separate debian revision and upstream version classes
+// upstream version can not be empty
+impl PartialEq for Version {
+    fn eq(&self, other: &Self) -> bool {
+        self.to_str().eq(other.to_str())
+    }
+}
+
+impl Eq for Version {}
 
 impl PartialOrd for Version {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -210,6 +241,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use arbitrary::Arbitrary;
+    use arbitrary::Unstructured;
+    use arbtest::arbtest;
+
     use super::*;
 
     #[test]
@@ -229,5 +264,108 @@ mod tests {
         assert!(v3 < v4);
         assert!(v3 < v5);
         assert!(v4 < v5);
+    }
+
+    #[test]
+    fn valid_package_version() {
+        arbtest(|u| {
+            let _value: PackageVersion = u.arbitrary()?;
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn invalid_debian_revisions() {
+        assert!(Version::new_debian_revision("#".into()).is_err());
+        assert!(Version::new_debian_revision("0-".into()).is_err());
+        assert!(Version::new_debian_revision("".into()).is_ok());
+    }
+
+    #[test]
+    fn valid_debian_revisions() {
+        arbtest(|u| {
+            let _value: DebianRevision = u.arbitrary()?;
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn invalid_upstream_versions() {
+        assert!(Version::new_upstream_version("#".into(), true).is_err());
+        assert!(Version::new_upstream_version("0-".into(), true).is_ok());
+        assert!(Version::new_upstream_version("0-".into(), false).is_err());
+    }
+
+    #[test]
+    fn valid_upstream_version() {
+        arbtest(|u| {
+            let _value: UpstreamVersion = u.arbitrary()?;
+            Ok(())
+        });
+    }
+
+    impl<'a> Arbitrary<'a> for PackageVersion {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            Ok(Self {
+                epoch: u.arbitrary()?,
+                debian_revision: u.arbitrary::<DebianRevision>()?.0,
+                upstream_version: u.arbitrary::<UpstreamVersion>()?.0,
+            })
+        }
+    }
+
+    #[derive(Debug)]
+    struct UpstreamVersion(Version);
+
+    impl<'a> Arbitrary<'a> for UpstreamVersion {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let valid_chars = get_valid_chars();
+            let len = u.arbitrary_len::<char>()?;
+            let mut string = String::with_capacity(len);
+            for _ in 0..len {
+                string.push(*u.choose(&valid_chars)?);
+            }
+            Ok(Self(Version::new_debian_revision(string).unwrap()))
+        }
+    }
+
+    #[derive(Debug)]
+    struct DebianRevision(Version);
+
+    impl<'a> Arbitrary<'a> for DebianRevision {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let has_debian_revision: bool = u.arbitrary()?;
+            let valid_first_chars: Vec<_> = ('0'..='9').collect();
+            let valid_chars = if has_debian_revision {
+                get_valid_chars_with_hyphen()
+            } else {
+                get_valid_chars()
+            };
+            let len = u.arbitrary_len::<char>()?;
+            let mut string = String::with_capacity(len);
+            string.push(*u.choose(&valid_first_chars)?);
+            for _ in 1..len {
+                string.push(*u.choose(&valid_chars)?);
+            }
+            Ok(Self(
+                Version::new_upstream_version(string, has_debian_revision).unwrap(),
+            ))
+        }
+    }
+
+    fn get_valid_chars() -> Vec<char> {
+        ('a'..='z')
+            .chain('A'..='Z')
+            .chain('0'..='9')
+            .chain(['+', '.', '~'].into_iter())
+            .collect()
+    }
+
+    fn get_valid_chars_with_hyphen() -> Vec<char> {
+        ('a'..='z')
+            .chain('A'..='Z')
+            .chain('0'..='9')
+            .chain(['+', '.', '~', '-'].into_iter())
+            .collect()
     }
 }

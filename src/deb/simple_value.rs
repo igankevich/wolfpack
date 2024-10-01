@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use crate::deb::Error;
 use crate::deb::FoldedValue;
+use crate::deb::PackageName;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct SimpleValue(String);
@@ -50,6 +51,12 @@ impl From<FoldedValue> for SimpleValue {
             buf.push_str(word);
         }
         SimpleValue(buf)
+    }
+}
+
+impl From<PackageName> for SimpleValue {
+    fn from(other: PackageName) -> Self {
+        Self(other.into())
     }
 }
 

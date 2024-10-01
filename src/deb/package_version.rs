@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::hash::Hash;
+use std::hash::Hasher;
 
 use crate::deb::Error;
 use crate::deb::SimpleValue;
@@ -9,8 +11,8 @@ use crate::deb::SimpleValue;
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct PackageVersion {
     epoch: u64,
-    upstream_version: Version,
-    debian_revision: Version,
+    upstream_version: UpstreamVersion,
+    debian_revision: DebianRevision,
 }
 
 impl PackageVersion {
@@ -32,12 +34,9 @@ impl PackageVersion {
         };
         Ok(Self {
             epoch,
-            upstream_version: Version::new_upstream_version(
-                version.to_string(),
-                has_debian_revision,
-            )
-            .map_err(|_| version)?,
-            debian_revision: Version::new_debian_revision(debian_revision).map_err(|_| version)?,
+            upstream_version: UpstreamVersion::new(version.to_string(), has_debian_revision)
+                .map_err(|_| version)?,
+            debian_revision: DebianRevision::new(debian_revision).map_err(|_| version)?,
         })
     }
 }
@@ -86,27 +85,15 @@ impl TryFrom<SimpleValue> for PackageVersion {
     }
 }
 
-#[derive(Clone, Hash, Debug)]
-struct Version(String);
+#[derive(Clone, Debug)]
+struct DebianRevision(String);
 
-impl Version {
-    fn new_upstream_version(s: String, has_debian_revision: bool) -> Result<Self, String> {
-        let is_valid_char_v2 = if has_debian_revision {
-            is_valid_char_with_hyphen
-        } else {
-            is_valid_char
-        };
-        if !(s.chars().all(is_valid_char_v2) && s.chars().next().iter().all(char::is_ascii_digit)) {
-            return Err(s);
-        }
-        Ok(Self(s))
-    }
-
-    fn new_debian_revision(s: String) -> Result<Self, String> {
+impl DebianRevision {
+    fn new(s: String) -> Result<Self, String> {
         if !s.chars().all(is_valid_char) {
             return Err(s);
         }
-        Ok(Self(if s.is_empty() { String::new() } else { s }))
+        Ok(Self(s))
     }
 
     fn to_str(&self) -> &str {
@@ -118,59 +105,96 @@ impl Version {
     }
 }
 
-// TODO Hash
-// TODO separate debian revision and upstream version classes
-// upstream version can not be empty
-impl PartialEq for Version {
+impl PartialEq for DebianRevision {
     fn eq(&self, other: &Self) -> bool {
         self.to_str().eq(other.to_str())
     }
 }
 
-impl Eq for Version {}
+impl Eq for DebianRevision {}
 
-impl PartialOrd for Version {
+impl Hash for DebianRevision {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
+        self.to_str().hash(state);
+    }
+}
+
+impl PartialOrd for DebianRevision {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for Version {
+impl Ord for DebianRevision {
     fn cmp(&self, other: &Self) -> Ordering {
-        let mut s1 = self.0.as_str();
-        let mut s2 = other.0.as_str();
-        while !s1.is_empty() || !s2.is_empty() {
-            let n1 = s1
-                .chars()
-                .position(|ch| ch.is_ascii_digit())
-                .unwrap_or(s1.len());
-            let n2 = s2
-                .chars()
-                .position(|ch| ch.is_ascii_digit())
-                .unwrap_or(s2.len());
-            let ret = lexical_cmp(s1.chars().take(n1), s2.chars().take(n2));
-            if ret != Ordering::Equal {
-                return ret;
-            }
-            s1 = &s1[n1..];
-            s2 = &s2[n2..];
-            let n1 = s1
-                .chars()
-                .position(|ch| !ch.is_ascii_digit())
-                .unwrap_or(s1.len());
-            let n2 = s2
-                .chars()
-                .position(|ch| !ch.is_ascii_digit())
-                .unwrap_or(s2.len());
-            let ret = numerical_cmp(s1.chars().take(n1), s2.chars().take(n2));
-            if ret != Ordering::Equal {
-                return ret;
-            }
-            s1 = &s1[n1..];
-            s2 = &s2[n2..];
-        }
-        Ordering::Equal
+        version_cmp(self.to_str(), other.to_str())
     }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+struct UpstreamVersion(String);
+
+impl UpstreamVersion {
+    fn new(s: String, has_debian_revision: bool) -> Result<Self, String> {
+        let is_valid_char_v2 = if has_debian_revision {
+            is_valid_char_with_hyphen
+        } else {
+            is_valid_char
+        };
+        if !(s.chars().all(is_valid_char_v2) && s.chars().next().iter().all(char::is_ascii_digit)) {
+            return Err(s);
+        }
+        Ok(Self(s))
+    }
+}
+
+impl PartialOrd for UpstreamVersion {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for UpstreamVersion {
+    fn cmp(&self, other: &Self) -> Ordering {
+        version_cmp(self.0.as_str(), other.0.as_str())
+    }
+}
+
+fn version_cmp(mut s1: &str, mut s2: &str) -> Ordering {
+    while !s1.is_empty() || !s2.is_empty() {
+        let n1 = s1
+            .chars()
+            .position(|ch| ch.is_ascii_digit())
+            .unwrap_or(s1.len());
+        let n2 = s2
+            .chars()
+            .position(|ch| ch.is_ascii_digit())
+            .unwrap_or(s2.len());
+        let ret = lexical_cmp(s1.chars().take(n1), s2.chars().take(n2));
+        if ret != Ordering::Equal {
+            return ret;
+        }
+        s1 = &s1[n1..];
+        s2 = &s2[n2..];
+        let n1 = s1
+            .chars()
+            .position(|ch| !ch.is_ascii_digit())
+            .unwrap_or(s1.len());
+        let n2 = s2
+            .chars()
+            .position(|ch| !ch.is_ascii_digit())
+            .unwrap_or(s2.len());
+        let ret = numerical_cmp(s1.chars().take(n1), s2.chars().take(n2));
+        if ret != Ordering::Equal {
+            return ret;
+        }
+        s1 = &s1[n1..];
+        s2 = &s2[n2..];
+    }
+    Ordering::Equal
 }
 
 fn is_valid_char(ch: char) -> bool {
@@ -249,11 +273,11 @@ mod tests {
 
     #[test]
     fn test_version_cmp() {
-        let v1 = Version("~~".into());
-        let v2 = Version("~~a".into());
-        let v3 = Version("~".into());
-        let v4 = Version("".into());
-        let v5 = Version("a".into());
+        let v1 = UpstreamVersion("~~".into());
+        let v2 = UpstreamVersion("~~a".into());
+        let v3 = UpstreamVersion("~".into());
+        let v4 = UpstreamVersion("".into());
+        let v5 = UpstreamVersion("a".into());
         assert!(v1 < v2);
         assert!(v1 < v3);
         assert!(v1 < v4);
@@ -275,10 +299,20 @@ mod tests {
     }
 
     #[test]
-    fn invalid_debian_revisions() {
-        assert!(Version::new_debian_revision("#".into()).is_err());
-        assert!(Version::new_debian_revision("0-".into()).is_err());
-        assert!(Version::new_debian_revision("".into()).is_ok());
+    fn debian_revisions() {
+        assert!(DebianRevision::new("#".into()).is_err());
+        assert!(DebianRevision::new("0-".into()).is_err());
+        assert!(DebianRevision::new("".into()).is_ok());
+        assert_eq!(
+            DebianRevision::new("".into()).unwrap(),
+            DebianRevision::new("0".into()).unwrap()
+        );
+        assert_eq!(
+            Ordering::Equal,
+            DebianRevision::new("".into())
+                .unwrap()
+                .cmp(&DebianRevision::new("0".into()).unwrap())
+        );
     }
 
     #[test]
@@ -290,10 +324,10 @@ mod tests {
     }
 
     #[test]
-    fn invalid_upstream_versions() {
-        assert!(Version::new_upstream_version("#".into(), true).is_err());
-        assert!(Version::new_upstream_version("0-".into(), true).is_ok());
-        assert!(Version::new_upstream_version("0-".into(), false).is_err());
+    fn upstream_versions() {
+        assert!(UpstreamVersion::new("#".into(), true).is_err());
+        assert!(UpstreamVersion::new("0-".into(), true).is_ok());
+        assert!(UpstreamVersion::new("0-".into(), false).is_err());
     }
 
     #[test]
@@ -308,16 +342,13 @@ mod tests {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             Ok(Self {
                 epoch: u.arbitrary()?,
-                debian_revision: u.arbitrary::<DebianRevision>()?.0,
-                upstream_version: u.arbitrary::<UpstreamVersion>()?.0,
+                upstream_version: u.arbitrary::<UpstreamVersion>()?,
+                debian_revision: u.arbitrary::<DebianRevision>()?,
             })
         }
     }
 
-    #[derive(Debug)]
-    struct UpstreamVersion(Version);
-
-    impl<'a> Arbitrary<'a> for UpstreamVersion {
+    impl<'a> Arbitrary<'a> for DebianRevision {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             let valid_chars = get_valid_chars();
             let len = u.arbitrary_len::<char>()?;
@@ -325,14 +356,11 @@ mod tests {
             for _ in 0..len {
                 string.push(*u.choose(&valid_chars)?);
             }
-            Ok(Self(Version::new_debian_revision(string).unwrap()))
+            Ok(Self::new(string).unwrap())
         }
     }
 
-    #[derive(Debug)]
-    struct DebianRevision(Version);
-
-    impl<'a> Arbitrary<'a> for DebianRevision {
+    impl<'a> Arbitrary<'a> for UpstreamVersion {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             let has_debian_revision: bool = u.arbitrary()?;
             let valid_first_chars: Vec<_> = ('0'..='9').collect();
@@ -347,9 +375,7 @@ mod tests {
             for _ in 1..len {
                 string.push(*u.choose(&valid_chars)?);
             }
-            Ok(Self(
-                Version::new_upstream_version(string, has_debian_revision).unwrap(),
-            ))
+            Ok(Self::new(string, has_debian_revision).unwrap())
         }
     }
 

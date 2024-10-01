@@ -70,6 +70,12 @@ fn validate_simple_value(value: &str) -> Result<(), Error> {
     if !value.as_bytes().iter().all(is_valid_char) {
         return Err(Error::FieldValue(value.to_string()));
     }
+    if value.is_empty() || value.chars().all(char::is_whitespace) {
+        return Err(Error::FieldValue(value.to_string()));
+    }
+    if value.chars().next().iter().all(|ch| ch.is_whitespace()) {
+        return Err(Error::FieldValue(value.to_string()));
+    }
     Ok(())
 }
 
@@ -91,6 +97,8 @@ mod tests {
         assert!("hello\rworld".parse::<SimpleValue>().is_err());
         assert!("\n".parse::<SimpleValue>().is_err());
         assert!("\r".parse::<SimpleValue>().is_err());
+        assert!(" ".parse::<SimpleValue>().is_err());
+        assert!("".parse::<SimpleValue>().is_err());
     }
 
     #[test]
@@ -104,7 +112,10 @@ mod tests {
     impl<'a> Arbitrary<'a> for SimpleValue {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             let s: String = u.arbitrary()?;
-            let s = s.replace(['\n', '\r'], " ");
+            let mut s = s.replace(['\n', '\r'], " ");
+            if s.chars().next().iter().all(|ch| ch.is_whitespace()) {
+                s = "x".to_string() + &s;
+            }
             Ok(Self::try_from(s).unwrap())
         }
     }

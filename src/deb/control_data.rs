@@ -73,9 +73,9 @@ impl FromStr for ControlData {
             } else if name == "description" {
                 multiline = Some((name, value.to_string()));
             } else if let Some((name, value)) = folded.take() {
-                fields.insert(name, FoldedValue::new(value).into());
+                fields.insert(name, FoldedValue(value).into());
             } else if let Some((name, value)) = multiline.take() {
-                let value: MultilineValue = value.parse()?;
+                let value: MultilineValue = value.into();
                 if name == "description" {
                     if description.is_some() {
                         return Err(Error::DuplicateField(name.to_string()));
@@ -92,10 +92,10 @@ impl FromStr for ControlData {
             }
         }
         if let Some((name, value)) = folded.take() {
-            fields.insert(name, FoldedValue::new(value).into());
+            fields.insert(name, FoldedValue(value).into());
         }
         if let Some((name, value)) = multiline.take() {
-            let value: MultilineValue = value.parse()?;
+            let value: MultilineValue = value.into();
             if name == "description" {
                 if description.is_some() {
                     return Err(Error::DuplicateField(name.to_string()));
@@ -138,3 +138,17 @@ impl FromStr for ControlData {
         Ok(control)
     }
 }
+
+/*
+#[cfg(test)]
+mod tests {
+    use std::collections::hash_map::DefaultHasher;
+
+    use arbitrary::Arbitrary;
+    use arbitrary::Unstructured;
+    use arbtest::arbtest;
+
+    use super::*;
+
+}
+*/

@@ -75,7 +75,7 @@ impl FromStr for FieldName {
 }
 
 fn is_valid_char(ch: &u8) -> bool {
-    (b'!'..=b'9').contains(&ch) || (b';'..=b'~').contains(&ch)
+    (b'!'..=b'9').contains(ch) || (b';'..=b'~').contains(ch)
 }
 
 fn is_valid_first_char(ch: u8) -> bool {

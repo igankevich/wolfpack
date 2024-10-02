@@ -1,9 +1,24 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
 
-// TODO can't start with whitespoace
+use crate::deb::Error;
+use crate::deb::SimpleValue;
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct MultilineValue(pub String);
+pub struct MultilineValue(String);
+
+impl MultilineValue {
+    pub fn try_from(value: String) -> Result<Self, Error> {
+        if value.is_empty() || value.starts_with(char::is_whitespace) {
+            return Err(Error::FieldValue(value));
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
 
 impl Display for MultilineValue {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
@@ -19,6 +34,12 @@ impl Display for MultilineValue {
             }
         }
         Ok(())
+    }
+}
+
+impl From<SimpleValue> for MultilineValue {
+    fn from(value: SimpleValue) -> Self {
+        Self(value.into())
     }
 }
 
@@ -61,6 +82,12 @@ impl From<MultilineValue> for String {
     }
 }
 
+impl PartialEq<SimpleValue> for MultilineValue {
+    fn eq(&self, other: &SimpleValue) -> bool {
+        self.0.eq(other.as_str())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use arbitrary::Arbitrary;
@@ -82,7 +109,15 @@ mod tests {
 
     impl<'a> Arbitrary<'a> for MultilineValue {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            Ok(Self(u.arbitrary()?))
+            let mut string: String = u.arbitrary()?;
+            string = string.replace('\r', "");
+            if string.starts_with(char::is_whitespace) {
+                string = "x".to_string() + &string;
+            }
+            if string.is_empty() {
+                string.push('x');
+            }
+            Ok(Self::try_from(string).unwrap())
         }
     }
 }

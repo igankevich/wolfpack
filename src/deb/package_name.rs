@@ -92,7 +92,7 @@ mod tests {
             let valid_first_chars: Vec<_> = ('a'..='z').chain('0'..='9').collect();
             let valid_chars: Vec<_> = ('a'..='z')
                 .chain('0'..='9')
-                .chain(['+', '-', '.'].into_iter())
+                .chain(['+', '-', '.'])
                 .collect();
             let len = u.arbitrary_len::<u8>()?.max(2);
             let mut string = String::with_capacity(len);

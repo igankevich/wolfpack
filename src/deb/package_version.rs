@@ -9,6 +9,7 @@ use crate::deb::SimpleValue;
 
 /// https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
 pub struct PackageVersion {
     epoch: u64,
     upstream_version: UpstreamVersion,
@@ -338,16 +339,6 @@ mod tests {
         });
     }
 
-    impl<'a> Arbitrary<'a> for PackageVersion {
-        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            Ok(Self {
-                epoch: u.arbitrary()?,
-                upstream_version: u.arbitrary::<UpstreamVersion>()?,
-                debian_revision: u.arbitrary::<DebianRevision>()?,
-            })
-        }
-    }
-
     impl<'a> Arbitrary<'a> for DebianRevision {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             let valid_chars = get_valid_chars();
@@ -383,7 +374,7 @@ mod tests {
         ('a'..='z')
             .chain('A'..='Z')
             .chain('0'..='9')
-            .chain(['+', '.', '~'].into_iter())
+            .chain(['+', '.', '~'])
             .collect()
     }
 
@@ -391,7 +382,7 @@ mod tests {
         ('a'..='z')
             .chain('A'..='Z')
             .chain('0'..='9')
-            .chain(['+', '.', '~', '-'].into_iter())
+            .chain(['+', '.', '~', '-'])
             .collect()
     }
 }

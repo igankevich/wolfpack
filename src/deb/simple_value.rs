@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use crate::deb::Error;
 use crate::deb::FoldedValue;
+use crate::deb::MultilineValue;
 use crate::deb::PackageName;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -41,7 +42,7 @@ impl From<SimpleValue> for String {
 
 impl From<FoldedValue> for SimpleValue {
     fn from(other: FoldedValue) -> Self {
-        let mut buf = String::with_capacity(other.0.len());
+        let mut buf = String::with_capacity(other.as_str().len());
         let mut words = other.words();
         if let Some(word) = words.next() {
             buf.push_str(word);
@@ -60,9 +61,15 @@ impl From<PackageName> for SimpleValue {
     }
 }
 
-impl From<SimpleValue> for FoldedValue {
-    fn from(other: SimpleValue) -> Self {
-        Self(other.0)
+impl PartialEq<MultilineValue> for SimpleValue {
+    fn eq(&self, other: &MultilineValue) -> bool {
+        self.0.eq(other.as_str())
+    }
+}
+
+impl PartialEq<FoldedValue> for SimpleValue {
+    fn eq(&self, other: &FoldedValue) -> bool {
+        other.eq(self)
     }
 }
 

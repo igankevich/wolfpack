@@ -4,12 +4,36 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::hash::Hasher;
 
+use crate::deb::Error;
+use crate::deb::SimpleValue;
+
 #[derive(Clone, Debug)]
-pub struct FoldedValue(pub String);
+pub struct FoldedValue(String);
 
 impl FoldedValue {
+    pub fn try_from(value: String) -> Result<Self, Error> {
+        if value.is_empty() {
+            return Err(Error::FieldValue(format!("empty {value}")));
+        }
+        if value.starts_with(char::is_whitespace) {
+            return Err(Error::FieldValue(format!("whitespace {value}")));
+        }
+        if value
+            .split('\n')
+            .skip(1)
+            .any(|line| line.is_empty() || line == ".")
+        {
+            return Err(Error::FieldValue(format!("empty line {value}")));
+        }
+        Ok(Self(value))
+    }
+
     pub(crate) fn words(&self) -> impl Iterator<Item = &str> {
         self.0.split_whitespace()
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
     }
 }
 
@@ -18,6 +42,7 @@ impl PartialEq for FoldedValue {
         self.0.split_whitespace().eq(other.0.split_whitespace())
     }
 }
+
 impl Eq for FoldedValue {}
 
 impl PartialOrd for FoldedValue {
@@ -64,15 +89,54 @@ impl Display for FoldedValue {
     }
 }
 
-impl From<String> for FoldedValue {
-    fn from(s: String) -> Self {
-        Self(s)
+impl TryFrom<String> for FoldedValue {
+    type Error = Error;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.as_str().try_into()
+    }
+}
+
+impl TryFrom<&str> for FoldedValue {
+    type Error = Error;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let mut folded = String::with_capacity(value.len());
+        let mut lines = value.split('\n');
+        // parse the first line verbatim
+        if let Some(line) = lines.next() {
+            folded.push_str(line);
+            folded.push('\n');
+        }
+        for line in lines {
+            if line.starts_with([' ', '\t']) {
+                folded.push_str(&line[1..]);
+                folded.push('\n');
+            } else {
+                folded.push_str(line);
+                folded.push('\n');
+            }
+        }
+        if !folded.is_empty() {
+            folded.pop();
+        }
+        Self::try_from(folded)
     }
 }
 
 impl From<FoldedValue> for String {
     fn from(v: FoldedValue) -> Self {
         v.0
+    }
+}
+
+impl From<SimpleValue> for FoldedValue {
+    fn from(other: SimpleValue) -> Self {
+        Self(other.into())
+    }
+}
+
+impl PartialEq<SimpleValue> for FoldedValue {
+    fn eq(&self, other: &SimpleValue) -> bool {
+        self.as_str().eq(other.as_str())
     }
 }
 
@@ -116,7 +180,7 @@ mod tests {
         arbtest(|u| {
             let expected: FoldedValue = u.arbitrary()?;
             let string = expected.to_string();
-            let actual: FoldedValue = string.clone().into();
+            let actual = FoldedValue::try_from(string.clone()).unwrap();
             assert_eq!(expected, actual, "string = {:?}", string);
             assert_eq!(
                 expected.cmp(&actual),
@@ -147,7 +211,27 @@ mod tests {
 
     impl<'a> Arbitrary<'a> for FoldedValue {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            Ok(Self(u.arbitrary()?))
+            let len = u.arbitrary_len::<String>()?;
+            let mut lines = Vec::with_capacity(len);
+            // first line
+            {
+                let line: String = u.arbitrary()?;
+                let mut line = line.trim_start().to_string();
+                line = line.replace(['\r', '\n'], "");
+                if line.is_empty() {
+                    line.push(u.arbitrary()?);
+                }
+                lines.push(line);
+            }
+            for _ in 1..len {
+                let mut line: String = u.arbitrary()?;
+                line = line.replace(['\r', '\n'], "");
+                while line.is_empty() || line.chars().all(char::is_whitespace) || line == "." {
+                    line.push(u.arbitrary()?);
+                }
+                lines.push(line);
+            }
+            Ok(Self::try_from(lines.join("\n")).unwrap())
         }
     }
 }

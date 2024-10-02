@@ -32,8 +32,8 @@ impl PartialEq for FieldName {
     }
 }
 
-impl PartialEq<&str> for FieldName {
-    fn eq(&self, other: &&str) -> bool {
+impl PartialEq<str> for FieldName {
+    fn eq(&self, other: &str) -> bool {
         self.0.eq_ignore_ascii_case(other)
     }
 }

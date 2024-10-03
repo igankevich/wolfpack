@@ -1,4 +1,5 @@
 pub mod archive;
+pub mod compress;
 pub mod deb;
 pub mod hash;
 pub mod ipk;

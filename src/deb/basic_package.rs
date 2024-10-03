@@ -3,15 +3,14 @@ use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 
-use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use normalize_path::NormalizePath;
 use walkdir::WalkDir;
-use xz::read::XzDecoder;
 
 use crate::archive::ArchiveRead;
 use crate::archive::ArchiveWrite;
+use crate::compress::AnyDecoder;
 use crate::deb::ControlData;
 use crate::deb::Error;
 use crate::deb::Md5Sums;
@@ -77,9 +76,8 @@ impl BasicPackage {
         reader
             .find(|entry| {
                 let path = entry.normalized_path()?;
-                let decoder: Box<dyn Read> = match path.to_str() {
-                    Some("control.tar.gz") => Box::new(GzDecoder::new(entry)),
-                    Some("control.tar.xz") => Box::new(XzDecoder::new(entry)),
+                let decoder = match path.to_str() {
+                    Some(path) if path.starts_with("control.tar.") => AnyDecoder::new(entry),
                     _ => return Ok(None),
                 };
                 let mut tar_archive = tar::Archive::new(decoder);

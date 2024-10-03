@@ -6,6 +6,7 @@ use std::hash::Hasher;
 
 use crate::deb::Error;
 use crate::deb::SimpleValue;
+use crate::deb::Value;
 
 /// https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -83,6 +84,19 @@ impl TryFrom<SimpleValue> for PackageVersion {
     type Error = Error;
     fn try_from(other: SimpleValue) -> Result<Self, Self::Error> {
         Self::try_from(other.as_str())
+    }
+}
+
+impl TryFrom<Value> for PackageVersion {
+    type Error = Error;
+
+    fn try_from(other: Value) -> Result<Self, Self::Error> {
+        match other {
+            Value::Simple(value) => value.try_into(),
+            _ => Err(Error::ControlData(
+                "expected simple value, received multiline/folded".into(),
+            )),
+        }
     }
 }
 

@@ -6,6 +6,7 @@ use crate::deb::Error;
 use crate::deb::FoldedValue;
 use crate::deb::MultilineValue;
 use crate::deb::PackageName;
+use crate::deb::Value;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct SimpleValue(String);
@@ -70,6 +71,20 @@ impl PartialEq<MultilineValue> for SimpleValue {
 impl PartialEq<FoldedValue> for SimpleValue {
     fn eq(&self, other: &FoldedValue) -> bool {
         other.eq(self)
+    }
+}
+
+impl TryFrom<Value> for SimpleValue {
+    type Error = Error;
+
+    fn try_from(other: Value) -> Result<Self, Self::Error> {
+        match other {
+            Value::Simple(value) => Ok(value),
+            Value::Folded(value) => Ok(value.into()),
+            Value::Multiline(..) => Err(Error::ControlData(
+                "expected simple value, received multiline".into(),
+            )),
+        }
     }
 }
 

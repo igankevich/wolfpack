@@ -3,6 +3,7 @@ use std::fmt::Formatter;
 
 use crate::deb::Error;
 use crate::deb::SimpleValue;
+use crate::deb::Value;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct MultilineValue(String);
@@ -85,6 +86,20 @@ impl From<MultilineValue> for String {
 impl PartialEq<SimpleValue> for MultilineValue {
     fn eq(&self, other: &SimpleValue) -> bool {
         self.0.eq(other.as_str())
+    }
+}
+
+impl TryFrom<Value> for MultilineValue {
+    type Error = Error;
+
+    fn try_from(other: Value) -> Result<Self, Self::Error> {
+        match other {
+            Value::Simple(value) => Ok(value.into()),
+            Value::Multiline(value) => Ok(value),
+            _ => Err(Error::ControlData(
+                "expected multiline value, received folded".into(),
+            )),
+        }
     }
 }
 

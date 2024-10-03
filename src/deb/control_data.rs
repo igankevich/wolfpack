@@ -5,11 +5,11 @@ use std::str::FromStr;
 
 use crate::deb::Error;
 use crate::deb::FieldName;
-use crate::deb::FoldedValue;
 use crate::deb::MultilineValue;
 use crate::deb::PackageName;
 use crate::deb::PackageVersion;
 use crate::deb::SimpleValue;
+use crate::deb::Value;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
@@ -77,10 +77,6 @@ impl FromStr for ControlData {
     }
 }
 
-fn is_multiline(name: &FieldName) -> bool {
-    name == "description"
-}
-
 enum ParserStatus {
     Initial,
     Reading(FieldName, String, usize, bool),
@@ -104,9 +100,7 @@ impl ParserStatus {
             (ParserStatus::Reading(name, mut value, num_lines, has_empty_lines), Some(line))
                 if line.starts_with([' ', '\t']) =>
             {
-                //let line = &line[1..];
                 let has_empty_lines = has_empty_lines || line == " ." || line == "\t.";
-                eprintln!("line {:?} empty {:?}", line, has_empty_lines);
                 value.push('\n');
                 value.push_str(line);
                 ParserStatus::Reading(name, value, num_lines + 1, has_empty_lines)
@@ -138,94 +132,8 @@ impl ParserStatus {
     }
 }
 
-#[derive(Clone, Debug)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
-enum Value {
-    Simple(SimpleValue),
-    Folded(FoldedValue),
-    Multiline(MultilineValue),
-}
-
-impl Value {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Value::Simple(v) => v.as_str(),
-            Value::Folded(v) => v.as_str(),
-            Value::Multiline(v) => v.as_str(),
-        }
-    }
-}
-
-impl PartialEq for Value {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_str().eq(other.as_str())
-    }
-}
-
-impl Eq for Value {}
-
-impl TryFrom<Value> for SimpleValue {
-    type Error = Error;
-
-    fn try_from(other: Value) -> Result<Self, Self::Error> {
-        match other {
-            Value::Simple(value) => Ok(value),
-            Value::Folded(value) => Ok(value.into()),
-            Value::Multiline(..) => Err(Error::ControlData(
-                "expected simple value, received multiline".into(),
-            )),
-        }
-    }
-}
-
-impl TryFrom<Value> for MultilineValue {
-    type Error = Error;
-
-    fn try_from(other: Value) -> Result<Self, Self::Error> {
-        match other {
-            Value::Simple(value) => Ok(value.into()),
-            Value::Multiline(value) => Ok(value),
-            _ => Err(Error::ControlData(
-                "expected multiline value, received folded".into(),
-            )),
-        }
-    }
-}
-
-impl TryFrom<Value> for PackageName {
-    type Error = Error;
-
-    fn try_from(other: Value) -> Result<Self, Self::Error> {
-        match other {
-            Value::Simple(value) => value.try_into(),
-            _ => Err(Error::ControlData(
-                "expected simple value, received multiline/folded".into(),
-            )),
-        }
-    }
-}
-
-impl TryFrom<Value> for PackageVersion {
-    type Error = Error;
-
-    fn try_from(other: Value) -> Result<Self, Self::Error> {
-        match other {
-            Value::Simple(value) => value.try_into(),
-            _ => Err(Error::ControlData(
-                "expected simple value, received multiline/folded".into(),
-            )),
-        }
-    }
-}
-
-impl Display for Value {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match self {
-            Value::Simple(value) => write!(f, "{}", value),
-            Value::Folded(value) => write!(f, "{}", value),
-            Value::Multiline(value) => write!(f, "{}", value),
-        }
-    }
+fn is_multiline(name: &FieldName) -> bool {
+    name == "description"
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -275,7 +183,7 @@ mod tests {
                 .unwrap_or_else(|_| panic!("string = {:?}", string));
             assert_eq!(expected, actual, "string = {:?}", string);
             Ok(())
-        }); //.seed(0x6c1a446e0000044f);
+        });
     }
 
     // TODO display object difference, i.e. assert_eq_diff, DebugDiff trait

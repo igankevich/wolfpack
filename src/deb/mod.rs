@@ -11,6 +11,7 @@ mod package_version;
 mod packages;
 mod release;
 mod simple_value;
+mod value;
 
 pub(crate) use self::basic_package::*;
 pub use self::control_data::*;
@@ -25,3 +26,4 @@ pub use self::package_version::*;
 pub use self::packages::*;
 pub use self::release::*;
 pub use self::simple_value::*;
+pub use self::value::*;

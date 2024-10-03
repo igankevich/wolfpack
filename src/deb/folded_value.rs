@@ -11,6 +11,19 @@ use crate::deb::SimpleValue;
 pub struct FoldedValue(String);
 
 impl FoldedValue {
+    pub fn new(value: &str) -> Self {
+        let mut buf = String::with_capacity(value.len());
+        let mut words = value.split_whitespace();
+        if let Some(word) = words.next() {
+            buf.push_str(word);
+        }
+        for word in words {
+            buf.push(' ');
+            buf.push_str(word);
+        }
+        Self(buf)
+    }
+
     pub fn try_from(value: String) -> Result<Self, Error> {
         if value.is_empty() {
             return Err(Error::FieldValue(format!("empty {value}")));

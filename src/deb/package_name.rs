@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use crate::deb::Error;
 use crate::deb::SimpleValue;
+use crate::deb::Value;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct PackageName(String);
@@ -43,6 +44,19 @@ impl TryFrom<SimpleValue> for PackageName {
 impl From<PackageName> for String {
     fn from(other: PackageName) -> Self {
         other.0
+    }
+}
+
+impl TryFrom<Value> for PackageName {
+    type Error = Error;
+
+    fn try_from(other: Value) -> Result<Self, Self::Error> {
+        match other {
+            Value::Simple(value) => value.try_into(),
+            _ => Err(Error::ControlData(
+                "expected simple value, received multiline/folded".into(),
+            )),
+        }
     }
 }
 

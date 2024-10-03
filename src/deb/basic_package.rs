@@ -19,16 +19,15 @@ use crate::deb::Error;
 use crate::deb::Md5Sums;
 use crate::hash::Md5Reader;
 
-pub(crate) struct BasicPackage {
-    pub(crate) control: ControlData,
-    pub(crate) directory: PathBuf,
-}
+pub(crate) struct BasicPackage;
 
 impl BasicPackage {
-    pub(crate) fn build<W1: Write, A1: ArchiveWrite<W1>>(
-        &self,
-        writer: W1,
+    pub(crate) fn write<W: Write, A: ArchiveWrite<W>, P: AsRef<Path>>(
+        control_data: &ControlData,
+        directory: P,
+        writer: W,
     ) -> Result<(), std::io::Error> {
+        let directory = directory.as_ref();
         let mut data = tar::Builder::new(GzEncoder::new(
             Vec::with_capacity(4096),
             Compression::best(),
@@ -38,12 +37,12 @@ impl BasicPackage {
             Compression::best(),
         ));
         let mut md5sums = Md5Sums::new();
-        for entry in WalkDir::new(self.directory.as_path()).into_iter() {
+        for entry in WalkDir::new(directory).into_iter() {
             let entry = entry?;
             let relative_path = Path::new(".").join(
                 entry
                     .path()
-                    .strip_prefix(self.directory.as_path())
+                    .strip_prefix(directory)
                     .map_err(std::io::Error::other)?
                     .normalize(),
             );
@@ -58,14 +57,14 @@ impl BasicPackage {
             } else {
                 let mut reader = Md5Reader::new(File::open(entry.path())?);
                 data.append(&header, &mut reader)?;
-                md5sums.append_file(relative_path.as_path(), reader.digest()?.0);
+                md5sums.insert(relative_path, reader.digest()?.0);
             }
         }
         let data = data.into_inner()?.finish()?;
-        control.add_regular_file("control", self.control.to_string())?;
-        control.add_regular_file("md5sums", md5sums.as_bytes())?;
+        control.add_regular_file("control", control_data.to_string())?;
+        control.add_regular_file("md5sums", md5sums.to_string())?;
         let control = control.into_inner()?.finish()?;
-        let mut package = A1::new(writer);
+        let mut package = A::new(writer);
         package.add_regular_file("debian-binary", "2.0\n")?;
         package.add_regular_file("control.tar.gz", control)?;
         package.add_regular_file("data.tar.gz", data)?;
@@ -78,21 +77,16 @@ impl BasicPackage {
         while let Some(entry) = reader.next_entry() {
             let entry = entry?;
             let path = PathBuf::from(OsString::from_vec(entry.header().identifier().to_vec()));
-            eprintln!("outer path {}", path.display());
             let path = path.normalize();
             let decoder: Box<dyn Read> = match path.to_str() {
                 Some("control.tar.gz") => Box::new(GzDecoder::new(entry)),
-                Some("control.tar.xz") => {
-                    eprintln!("xz");
-                    Box::new(XzDecoder::new(entry))
-                }
+                Some("control.tar.xz") => Box::new(XzDecoder::new(entry)),
                 _ => continue,
             };
             let mut tar_archive = tar::Archive::new(decoder);
             for entry in tar_archive.entries()? {
                 let mut entry = entry?;
                 let path = entry.path()?.normalize();
-                eprintln!("tar path {}", path.display());
                 if path == Path::new("control") {
                     let mut buf = String::with_capacity(4096);
                     entry.read_to_string(&mut buf)?;

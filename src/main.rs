@@ -29,9 +29,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let directory = std::env::args().nth(2).unwrap();
     let control_data: ControlData = std::fs::read_to_string(control_file)?.parse()?;
     eprintln!("{}", control_data);
-    let deb = DebPackage::new(control_data.clone(), directory.clone().into());
-    deb.build(File::create("test.deb")?)?;
-    IpkPackage::new(control_data, directory.into()).build(File::create("test.ipk")?)?;
+    DebPackage::write(&control_data, &directory, File::create("test.deb")?)?;
+    IpkPackage::write(&control_data, &directory, File::create("test.ipk")?)?;
     let manifest: CompactManifest =
         std::fs::read_to_string("freebsd/+COMPACT_MANIFEST")?.parse()?;
     PkgPackage::new(manifest, "freebsd/root".into()).build(File::create("test.pkg")?)?;

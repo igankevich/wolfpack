@@ -1,3 +1,4 @@
+use crate::hash::HashArray;
 use crate::hash::Hasher;
 use crate::hash::HashingReader;
 
@@ -13,19 +14,21 @@ impl Hasher for md5::Context {
     }
 
     fn finalize(self) -> Self::Output {
-        self.compute()
+        Md5Hash::new(self.compute().into())
     }
 }
 
-pub type Md5Hash = md5::Digest;
+pub type Md5Hash = HashArray<16>;
 pub type Md5Reader<R> = HashingReader<R, md5::Context>;
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::hash::tests::*;
 
     #[test]
     fn md5() {
         same_as_computing_hash_of_the_whole_file::<md5::Context>();
+        display_parse::<Md5Hash>();
     }
 }

@@ -22,4 +22,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("directory traversing error: {0}")]
     WalkDir(#[from] walkdir::Error),
+    #[error("md5sums parsing error")]
+    Md5Sums,
+    #[error("invalid md5 hash")]
+    InvalidMd5,
 }

@@ -56,5 +56,6 @@ mod tests {
     #[test]
     fn multi_hash() {
         same_as_computing_hash_of_the_whole_file::<MultiHasher>();
+        display_parse::<Sha1Hash>();
     }
 }

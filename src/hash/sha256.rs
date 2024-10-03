@@ -31,5 +31,6 @@ mod tests {
     #[test]
     fn sha256() {
         same_as_computing_hash_of_the_whole_file::<Sha256>();
+        display_parse::<Sha256Hash>();
     }
 }

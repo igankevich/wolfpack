@@ -1,8 +1,10 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::ops::Deref;
+use std::str::FromStr;
 
 #[derive(PartialEq, Eq, Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
 pub struct HashArray<const N: usize>([u8; N]);
 
 impl<const N: usize> HashArray<N> {
@@ -39,3 +41,22 @@ impl<const N: usize> Display for HashArray<N> {
         Ok(())
     }
 }
+
+impl<const N: usize> FromStr for HashArray<N> {
+    type Err = HashParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut array = [0_u8; N];
+        let n = s.len();
+        if n != 2 * N {
+            return Err(HashParseError);
+        }
+        for (i, byte) in array.iter_mut().enumerate() {
+            let j = 2 * i;
+            *byte = u8::from_str_radix(&s[j..=(j + 1)], 16).map_err(|_| HashParseError)?;
+        }
+        Ok(Self(array))
+    }
+}
+
+#[derive(Debug)]
+pub struct HashParseError;

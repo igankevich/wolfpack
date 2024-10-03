@@ -1,5 +1,7 @@
+mod ar;
 mod read;
-mod tar_archive;
+mod tar;
+mod write;
 
 pub use self::read::*;
-pub use self::tar_archive::*;
+pub use self::write::*;

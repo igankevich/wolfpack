@@ -1,10 +1,7 @@
-use std::ffi::OsString;
 use std::fs::File;
 use std::io::Read;
 use std::io::Write;
-use std::os::unix::ffi::OsStringExt;
 use std::path::Path;
-use std::path::PathBuf;
 
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
@@ -13,6 +10,7 @@ use normalize_path::NormalizePath;
 use walkdir::WalkDir;
 use xz::read::XzDecoder;
 
+use crate::archive::ArchiveRead;
 use crate::archive::ArchiveWrite;
 use crate::deb::ControlData;
 use crate::deb::Error;
@@ -72,28 +70,30 @@ impl BasicPackage {
         Ok(())
     }
 
-    pub(crate) fn read_control<R: Read>(reader: R) -> Result<ControlData, Error> {
-        let mut reader = ar::Archive::new(reader);
-        while let Some(entry) = reader.next_entry() {
-            let entry = entry?;
-            let path = PathBuf::from(OsString::from_vec(entry.header().identifier().to_vec()));
-            let path = path.normalize();
-            let decoder: Box<dyn Read> = match path.to_str() {
-                Some("control.tar.gz") => Box::new(GzDecoder::new(entry)),
-                Some("control.tar.xz") => Box::new(XzDecoder::new(entry)),
-                _ => continue,
-            };
-            let mut tar_archive = tar::Archive::new(decoder);
-            for entry in tar_archive.entries()? {
-                let mut entry = entry?;
-                let path = entry.path()?.normalize();
-                if path == Path::new("control") {
-                    let mut buf = String::with_capacity(4096);
-                    entry.read_to_string(&mut buf)?;
-                    return buf.parse();
+    pub(crate) fn read_control<'a, R: 'a + Read, A: 'a + ArchiveRead<'a, R>>(
+        reader: R,
+    ) -> Result<ControlData, Error> {
+        let mut reader = A::new(reader);
+        reader
+            .find(|entry| {
+                let path = entry.normalized_path()?;
+                let decoder: Box<dyn Read> = match path.to_str() {
+                    Some("control.tar.gz") => Box::new(GzDecoder::new(entry)),
+                    Some("control.tar.xz") => Box::new(XzDecoder::new(entry)),
+                    _ => return Ok(None),
+                };
+                let mut tar_archive = tar::Archive::new(decoder);
+                for entry in tar_archive.entries()? {
+                    let mut entry = entry?;
+                    let path = entry.path()?.normalize();
+                    if path == Path::new("control") {
+                        let mut buf = String::with_capacity(4096);
+                        entry.read_to_string(&mut buf)?;
+                        return Ok(Some(buf.parse::<ControlData>()));
+                    }
                 }
-            }
-        }
-        Err(Error::MissingFile("control.tar.(gz|xz)".into()))
+                Ok(None)
+            })?
+            .ok_or_else(|| Error::MissingFile("control.tar.(gz|xz)".into()))?
     }
 }

@@ -1,62 +1,15 @@
 use std::fs::Metadata;
+use std::io::Error;
+use std::io::Read;
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
+use std::path::PathBuf;
 
-pub trait ArchiveWrite<W: Write> {
-    fn new(writer: W) -> Self;
+use normalize_path::NormalizePath;
 
-    fn add_regular_file<P: AsRef<Path>, C: AsRef<[u8]>>(
-        &mut self,
-        path: P,
-        contents: C,
-    ) -> Result<(), std::io::Error>;
-
-    fn add_regular_file_with_metadata<P: AsRef<Path>, C: AsRef<[u8]>>(
-        &mut self,
-        path: P,
-        metadata: &Metadata,
-        contents: C,
-    ) -> Result<(), std::io::Error>;
-
-    fn into_inner(self) -> Result<W, std::io::Error>;
-}
-
-impl<W: Write> ArchiveWrite<W> for ar::Builder<W> {
-    fn new(writer: W) -> Self {
-        Self::new(writer)
-    }
-
-    fn add_regular_file<P: AsRef<Path>, C: AsRef<[u8]>>(
-        &mut self,
-        path: P,
-        contents: C,
-    ) -> Result<(), std::io::Error> {
-        let contents = contents.as_ref();
-        let mut header = ar::Header::new(
-            path.as_ref().as_os_str().as_bytes().to_vec(),
-            contents.len() as u64,
-        );
-        header.set_uid(0);
-        header.set_gid(0);
-        header.set_mode(0o644);
-        self.append(&header, contents)?;
-        Ok(())
-    }
-
-    fn add_regular_file_with_metadata<P: AsRef<Path>, C: AsRef<[u8]>>(
-        &mut self,
-        path: P,
-        _metadata: &Metadata,
-        contents: C,
-    ) -> Result<(), std::io::Error> {
-        self.add_regular_file(path, contents)
-    }
-
-    fn into_inner(self) -> Result<W, std::io::Error> {
-        ar::Builder::into_inner(self)
-    }
-}
+use crate::archive::ArchiveEntry;
+use crate::archive::ArchiveRead;
+use crate::archive::ArchiveWrite;
 
 impl<W: Write> ArchiveWrite<W> for tar::Builder<W> {
     fn new(writer: W) -> Self {
@@ -67,7 +20,7 @@ impl<W: Write> ArchiveWrite<W> for tar::Builder<W> {
         &mut self,
         path: P,
         contents: C,
-    ) -> Result<(), std::io::Error> {
+    ) -> Result<(), Error> {
         let contents = contents.as_ref();
         let mut header = tar::Header::new_old();
         header.set_size(contents.len() as u64);
@@ -92,7 +45,7 @@ impl<W: Write> ArchiveWrite<W> for tar::Builder<W> {
         path: P,
         metadata: &Metadata,
         contents: C,
-    ) -> Result<(), std::io::Error> {
+    ) -> Result<(), Error> {
         let contents = contents.as_ref();
         let mut header = tar::Header::new_old();
         header.set_metadata(metadata);
@@ -110,7 +63,31 @@ impl<W: Write> ArchiveWrite<W> for tar::Builder<W> {
         Ok(())
     }
 
-    fn into_inner(self) -> Result<W, std::io::Error> {
+    fn into_inner(self) -> Result<W, Error> {
         tar::Builder::into_inner(self)
+    }
+}
+
+impl<'a, R: 'a + Read> ArchiveRead<'a, R> for tar::Archive<R> {
+    fn new(reader: R) -> Self {
+        tar::Archive::<R>::new(reader)
+    }
+
+    fn find<F, E>(&mut self, mut f: F) -> Result<Option<E>, Error>
+    where
+        F: FnMut(&mut dyn ArchiveEntry) -> Result<Option<E>, Error>,
+    {
+        for entry in self.entries()? {
+            if let Some(ret) = f(&mut entry?)? {
+                return Ok(Some(ret));
+            }
+        }
+        Ok(None)
+    }
+}
+
+impl<'a, R: Read> ArchiveEntry for tar::Entry<'a, R> {
+    fn normalized_path(&self) -> Result<PathBuf, Error> {
+        Ok(self.path()?.normalize())
     }
 }

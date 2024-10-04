@@ -34,7 +34,7 @@ impl FoldedValue {
         if value
             .split('\n')
             .skip(1)
-            .any(|line| line.is_empty() || line == ".")
+            .any(|line| line.is_empty() || line == "." || line.chars().all(char::is_whitespace))
         {
             return Err(Error::FieldValue(format!("empty line {value}")));
         }
@@ -52,7 +52,7 @@ impl FoldedValue {
 
 impl PartialEq for FoldedValue {
     fn eq(&self, other: &Self) -> bool {
-        self.0.split_whitespace().eq(other.0.split_whitespace())
+        self.words().eq(other.words())
     }
 }
 
@@ -160,9 +160,12 @@ mod tests {
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use arbtest::arbtest;
+    use rand_mt::Mt64;
+    use rand::Rng;
 
     use super::*;
     use crate::deb::SimpleValue;
+    use crate::test::disjoint_intervals;
 
     #[test]
     fn folded_value_whitespace_is_insignificant() {
@@ -224,27 +227,40 @@ mod tests {
 
     impl<'a> Arbitrary<'a> for FoldedValue {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            let len = u.arbitrary_len::<String>()?;
-            let mut lines = Vec::with_capacity(len);
+            let seed: u64 = u.arbitrary()?;
+            let mut rng = Mt64::new(seed);
+            let num_lines = rng.gen_range(1..10);
+            let mut lines = Vec::with_capacity(num_lines);
+            let chars = valid_chars();
             // first line
             {
-                let line: String = u.arbitrary()?;
-                let mut line = line.trim_start().to_string();
-                line = line.replace(['\r', '\n'], "");
-                if line.is_empty() {
-                    line.push(u.arbitrary()?);
+                let num_chars = rng.gen_range(1..128);
+                let mut line = String::with_capacity(num_chars);
+                for _ in 0..num_chars {
+                    line.push(chars[rng.gen_range(0..chars.len())] as char);
                 }
                 lines.push(line);
             }
-            for _ in 1..len {
-                let mut line: String = u.arbitrary()?;
-                line = line.replace(['\r', '\n'], "");
-                while line.is_empty() || line.chars().all(char::is_whitespace) || line == "." {
-                    line.push(u.arbitrary()?);
+            for _ in 1..num_lines {
+                let num_chars = rng.gen_range(1..128);
+                let mut line = String::with_capacity(num_chars);
+                for _ in 0..num_chars {
+                    line.push(chars[rng.gen_range(0..chars.len())] as char);
+                }
+                while line.is_empty() || line.chars().all(dpkg_is_whitespace) || line == "." {
+                    line.push(chars[rng.gen_range(0..chars.len())] as char);
                 }
                 lines.push(line);
             }
             Ok(Self::try_from(lines.join("\n")).unwrap())
         }
+    }
+
+    fn valid_chars() -> Vec<u8> {
+        disjoint_intervals([b' ', b'/', u8::MAX])
+    }
+
+    fn dpkg_is_whitespace(ch: char) -> bool {
+        ch.is_whitespace() || ch.is_control()
     }
 }

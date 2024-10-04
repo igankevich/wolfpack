@@ -54,7 +54,7 @@ impl BasicPackage {
             } else {
                 let mut reader = Md5Reader::new(File::open(entry.path())?);
                 data.append(&header, &mut reader)?;
-                md5sums.insert(relative_path, reader.digest()?.0);
+                md5sums.insert(relative_path, reader.digest()?.0)?;
             }
         }
         let data = data.into_inner()?.finish()?;
@@ -92,6 +92,6 @@ impl BasicPackage {
                 }
                 Ok(None)
             })?
-            .ok_or_else(|| Error::MissingFile("control.tar.(gz|xz)".into()))?
+            .ok_or_else(|| Error::MissingFile("control.tar.*".into()))?
     }
 }

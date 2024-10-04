@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::str::FromStr;
+use std::ops::Deref;
 
 use crate::deb::Error;
 use crate::deb::SimpleValue;
@@ -18,6 +19,14 @@ impl PackageName {
             return Err(Error::PackageName(name));
         }
         Ok(Self(name))
+    }
+}
+
+impl Deref for PackageName {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -108,7 +117,7 @@ mod tests {
                 .chain('0'..='9')
                 .chain(['+', '-', '.'])
                 .collect();
-            let len = u.arbitrary_len::<u8>()?.max(2);
+            let len = u.int_in_range(2..=100)?;
             let mut string = String::with_capacity(len);
             string.push(*u.choose(&valid_first_chars)?);
             for _ in 1..len {

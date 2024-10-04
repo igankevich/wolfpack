@@ -12,7 +12,7 @@ pub struct FieldName(String);
 
 impl FieldName {
     pub fn try_from(name: String) -> Result<Self, Error> {
-        if !(!name.is_empty()
+        if !(name.len() >= 2
             && is_valid_first_char(name.as_bytes()[0])
             && name.as_bytes().iter().all(is_valid_char))
         {
@@ -129,7 +129,7 @@ mod tests {
                 .chain((b'-' + 1)..=b'9')
                 .chain(b';'..=b'~')
                 .collect();
-            let len = u.arbitrary_len::<u8>()?.max(1);
+            let len = u.arbitrary_len::<u8>()?.max(2);
             let mut string = Vec::with_capacity(len);
             for _ in 0..len {
                 string.push(*u.choose(&valid_chars)?);

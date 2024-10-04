@@ -110,6 +110,7 @@ mod tests {
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use arbtest::arbtest;
+    use crate::test::MS_DOS_NEWLINE;
 
     use super::*;
 
@@ -134,7 +135,7 @@ mod tests {
     impl<'a> Arbitrary<'a> for SimpleValue {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             let s: String = u.arbitrary()?;
-            let mut s = s.replace(['\n', '\r'], " ");
+            let mut s = s.replace(['\n', '\r', MS_DOS_NEWLINE], " ");
             if s.chars().next().iter().all(|ch| ch.is_whitespace()) {
                 s = "x".to_string() + &s;
             }

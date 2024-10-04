@@ -24,7 +24,14 @@ impl Package {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
+    use std::fs::remove_dir_all;
+    use std::process::Command;
+    use std::process::Stdio;
+    use std::time::Duration;
+
     use arbtest::arbtest;
+    use tempfile::TempDir;
 
     use super::*;
     use crate::test::DirectoryOfFiles;
@@ -40,5 +47,45 @@ mod tests {
             assert_eq!(control, actual);
             Ok(())
         });
+    }
+
+    #[ignore]
+    #[test]
+    fn dpkg_installs_random_packages() {
+        let workdir = TempDir::new().unwrap();
+        arbtest(|u| {
+            let mut control: ControlData = u.arbitrary()?;
+            control.architecture = "all".parse().unwrap();
+            let directory: DirectoryOfFiles = u.arbitrary()?;
+            let path = workdir.path().join("test.deb");
+            let root = workdir.path().join("root");
+            let _ = remove_dir_all(root.as_path());
+            eprint!("{}", control);
+            Package::write(
+                &control,
+                directory.path(),
+                File::create(path.as_path()).unwrap(),
+            )
+            .unwrap();
+            assert!(Command::new("dpkg")
+                .arg("--root")
+                .arg(root.as_path())
+                .arg("--install")
+                .arg(path.as_path())
+                .status()
+                .unwrap()
+                .success(), "control = {:?}", control);
+            assert!(Command::new("dpkg-query")
+                .arg("--root")
+                .arg(root.as_path())
+                .arg("-L")
+                .arg(control.name().as_str())
+                .stdout(Stdio::null())
+                .status()
+                .unwrap()
+                .success());
+            Ok(())
+        })
+        .budget(Duration::from_secs(10));
     }
 }

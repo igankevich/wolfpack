@@ -46,7 +46,6 @@ impl<'a> Arbitrary<'a> for DirectoryOfFiles {
                     path.pop();
                 }
             }
-            eprintln!("path {:?}", path);
             create_dir_all(path.parent().unwrap()).unwrap();
             let mut contents: ByteArray = [0; 4096];
             rng.fill_bytes(&mut contents);
@@ -57,9 +56,11 @@ impl<'a> Arbitrary<'a> for DirectoryOfFiles {
 }
 
 fn valid_path_chars() -> Vec<u8> {
-    disjoint_intervals([1, b'/', u8::MAX])
+    // dpkg doesn't like newlines in paths
+    disjoint_intervals([1, b'\n', b'/', u8::MAX])
 }
 
+// TODO need char version of that without generating a Vec
 pub fn disjoint_intervals<I: IntoIterator<Item = u8>>(breakpoints: I) -> Vec<u8> {
     let mut values = Vec::new();
     let mut iter = breakpoints.into_iter();
@@ -73,3 +74,5 @@ pub fn disjoint_intervals<I: IntoIterator<Item = u8>>(breakpoints: I) -> Vec<u8>
     }
     values
 }
+
+pub const MS_DOS_NEWLINE: char = '\x1a';

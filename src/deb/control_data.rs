@@ -23,6 +23,12 @@ pub struct ControlData {
     other: Fields,
 }
 
+impl ControlData {
+    pub fn name(&self) -> &PackageName {
+        &self.package
+    }
+}
+
 impl Display for ControlData {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         writeln!(f, "Package: {}", self.package)?;
@@ -35,7 +41,7 @@ impl Display for ControlData {
         for (name, value) in self.other.fields.iter() {
             writeln!(f, "{}: {}", name, value)?;
         }
-        write!(f, "Description: {}", self.description)?;
+        writeln!(f, "Description: {}", self.description)?;
         Ok(())
     }
 }

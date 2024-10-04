@@ -110,6 +110,7 @@ mod tests {
     use arbtest::arbtest;
 
     use super::*;
+    use crate::test::MS_DOS_NEWLINE;
 
     #[test]
     fn multiline_display_parse() {
@@ -125,8 +126,8 @@ mod tests {
     impl<'a> Arbitrary<'a> for MultilineValue {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             let mut string: String = u.arbitrary()?;
-            string = string.replace('\r', "");
-            if string.starts_with(char::is_whitespace) {
+            string = string.replace(['\r', MS_DOS_NEWLINE], "");
+            if string.starts_with(dpkg_is_whitespace) {
                 string = "x".to_string() + &string;
             }
             if string.is_empty() {
@@ -134,5 +135,9 @@ mod tests {
             }
             Ok(Self::try_from(string).unwrap())
         }
+    }
+
+    fn dpkg_is_whitespace(ch: char) -> bool {
+        ch.is_whitespace() || ch.is_control()
     }
 }

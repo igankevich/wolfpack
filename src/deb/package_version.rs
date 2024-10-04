@@ -8,11 +8,12 @@ use crate::deb::Error;
 use crate::deb::SimpleValue;
 use crate::deb::Value;
 
+pub type Epoch = u16;
+
 /// https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
 pub struct PackageVersion {
-    epoch: u64,
+    epoch: Epoch,
     upstream_version: UpstreamVersion,
     debian_revision: DebianRevision,
 }
@@ -73,7 +74,7 @@ impl Display for PackageVersion {
             write!(f, "{}:", self.epoch)?;
         }
         f.write_str(&self.upstream_version.0)?;
-        if self.debian_revision.0 != "0" {
+        if !self.debian_revision.0.is_empty() {
             write!(f, "-{}", self.debian_revision.0)?;
         }
         Ok(())
@@ -309,6 +310,7 @@ mod tests {
     fn valid_package_version() {
         arbtest(|u| {
             let _value: PackageVersion = u.arbitrary()?;
+            eprintln!("{}", _value);
             Ok(())
         });
     }
@@ -348,15 +350,32 @@ mod tests {
     #[test]
     fn valid_upstream_version() {
         arbtest(|u| {
-            let _value: UpstreamVersion = u.arbitrary()?;
+            let _value: ArbitraryUpstreamVersion = u.arbitrary()?;
             Ok(())
         });
+    }
+
+    impl<'a> Arbitrary<'a> for PackageVersion {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let ArbitraryUpstreamVersion(upstream_version, has_debian_revision) = u.arbitrary()?;
+            let version = Self {
+                epoch: u.arbitrary()?,
+                upstream_version,
+                debian_revision: if has_debian_revision {
+                    u.arbitrary()?
+                } else {
+                    DebianRevision::new(String::new()).unwrap()
+                },
+            };
+            eprintln!("version {:?}", version);
+            Ok(version)
+        }
     }
 
     impl<'a> Arbitrary<'a> for DebianRevision {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             let valid_chars = get_valid_chars();
-            let len = u.arbitrary_len::<char>()?;
+            let len = u.arbitrary_len::<char>()?.min(1);
             let mut string = String::with_capacity(len);
             for _ in 0..len {
                 string.push(*u.choose(&valid_chars)?);
@@ -365,7 +384,10 @@ mod tests {
         }
     }
 
-    impl<'a> Arbitrary<'a> for UpstreamVersion {
+    #[derive(Debug)]
+    struct ArbitraryUpstreamVersion(UpstreamVersion, bool);
+
+    impl<'a> Arbitrary<'a> for ArbitraryUpstreamVersion {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             let has_debian_revision: bool = u.arbitrary()?;
             let valid_first_chars: Vec<_> = ('0'..='9').collect();
@@ -380,7 +402,10 @@ mod tests {
             for _ in 1..len {
                 string.push(*u.choose(&valid_chars)?);
             }
-            Ok(Self::new(string, has_debian_revision).unwrap())
+            Ok(Self(
+                UpstreamVersion::new(string, has_debian_revision).unwrap(),
+                has_debian_revision,
+            ))
         }
     }
 

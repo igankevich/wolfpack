@@ -26,4 +26,12 @@ pub enum Error {
     Md5Sums,
     #[error("invalid md5 hash")]
     InvalidMd5,
+    #[error("{0}")]
+    Other(String),
+}
+
+impl Error {
+    pub fn other(e: impl ToString) -> Self {
+        Self::Other(e.to_string())
+    }
 }

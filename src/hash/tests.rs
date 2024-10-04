@@ -36,7 +36,7 @@ pub fn display_parse<T: Display + FromStr + Debug + PartialEq + for<'a> Arbitrar
             .parse()
             .map_err(|_| panic!("string {:?}", string))
             .unwrap();
-        assert_eq!(expected, actual);
+        assert_eq!(expected, actual, "expected {:?} string {:?}", expected, string);
         Ok(())
     });
 }

@@ -60,7 +60,7 @@ fn valid_path_chars() -> Vec<u8> {
     disjoint_intervals([1, b'/', u8::MAX])
 }
 
-fn disjoint_intervals<I: IntoIterator<Item = u8>>(breakpoints: I) -> Vec<u8> {
+pub fn disjoint_intervals<I: IntoIterator<Item = u8>>(breakpoints: I) -> Vec<u8> {
     let mut values = Vec::new();
     let mut iter = breakpoints.into_iter();
     let mut start = match iter.next() {

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -31,7 +33,11 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn other(e: impl ToString) -> Self {
-        Self::Other(e.to_string())
+    pub fn other<'a, S>(s: S) -> Self
+    where
+        S: Into<Cow<'a, str>>,
+    {
+        let s: Cow<'a, str> = s.into();
+        Self::Other(s.into_owned())
     }
 }

@@ -310,7 +310,6 @@ mod tests {
     fn valid_package_version() {
         arbtest(|u| {
             let _value: PackageVersion = u.arbitrary()?;
-            eprintln!("{}", _value);
             Ok(())
         });
     }
@@ -367,7 +366,6 @@ mod tests {
                     DebianRevision::new(String::new()).unwrap()
                 },
             };
-            eprintln!("version {:?}", version);
             Ok(version)
         }
     }

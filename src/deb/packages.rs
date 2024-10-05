@@ -12,6 +12,7 @@ use crate::deb::Error;
 use crate::deb::Package;
 use crate::hash::MultiHash;
 use crate::hash::MultiHashReader;
+use crate::sign::NoVerifier;
 
 pub struct Packages {
     packages: Vec<ExtendedControlData>,
@@ -27,7 +28,7 @@ impl Packages {
         let mut push_package = |path: &Path| -> Result<(), Error> {
             eprintln!("reading {}", path.display());
             let mut reader = MultiHashReader::new(File::open(path)?);
-            let control = Package::read_control(&mut reader)?;
+            let control = Package::read_control(&mut reader, &NoVerifier)?;
             let (hash, size) = reader.digest()?;
             let control = ExtendedControlData {
                 control,

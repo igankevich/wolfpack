@@ -5,45 +5,63 @@ use std::path::Path;
 use crate::deb::BasicPackage;
 use crate::deb::ControlData;
 use crate::deb::Error;
+use crate::sign::Signer;
+use crate::sign::Verifier;
 
 pub struct Package;
 
 impl Package {
-    pub fn write<W: Write, P: AsRef<Path>>(
+    pub fn write<W: Write, S: Signer, P: AsRef<Path>>(
         control_data: &ControlData,
         directory: P,
         writer: W,
+        signer: &S,
     ) -> Result<(), std::io::Error> {
-        BasicPackage::write::<W, ar::Builder<W>, P>(control_data, directory, writer)
+        BasicPackage::write::<W, ar::Builder<W>, S, P>(control_data, directory, writer, signer)
     }
 
-    pub fn read_control<R: Read>(reader: R) -> Result<ControlData, Error> {
-        BasicPackage::read_control::<R, ar::Archive<R>>(reader)
+    pub fn read_control<R: Read, V: Verifier>(
+        reader: R,
+        verifier: &V,
+    ) -> Result<ControlData, Error> {
+        BasicPackage::read_control::<R, ar::Archive<R>, V>(reader, verifier)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
+    use std::fs::create_dir_all;
     use std::fs::remove_dir_all;
+    use std::fs::File;
     use std::process::Command;
     use std::process::Stdio;
     use std::time::Duration;
 
     use arbtest::arbtest;
+    use pgp::crypto::hash::HashAlgorithm;
+    use pgp::packet::SignatureType;
+    use pgp::types::PublicKeyTrait;
+    use pgp::KeyType;
     use tempfile::TempDir;
 
     use super::*;
+    use crate::sign::PgpSigner;
+    use crate::sign::PgpVerifier;
+    use crate::test::pgp_keys;
     use crate::test::DirectoryOfFiles;
+    use crate::test::UpperHex;
 
     #[test]
     fn write_read() {
+        let (signing_key, verifying_key) = pgp_keys(KeyType::Ed25519);
+        let signer = PgpSigner::new(signing_key, SignatureType::Binary, HashAlgorithm::SHA2_256);
+        let verifier = PgpVerifier::new(verifying_key);
         arbtest(|u| {
             let control: ControlData = u.arbitrary()?;
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let mut buf: Vec<u8> = Vec::new();
-            Package::write(&control, directory.path(), &mut buf).unwrap();
-            let actual = Package::read_control(&buf[..]).unwrap();
+            Package::write(&control, directory.path(), &mut buf, &signer).unwrap();
+            let actual = Package::read_control(&buf[..], &verifier).unwrap();
             assert_eq!(control, actual);
             Ok(())
         });
@@ -52,29 +70,91 @@ mod tests {
     #[ignore]
     #[test]
     fn dpkg_installs_random_packages() {
+        let (signing_key, verifying_key) = pgp_keys(KeyType::EdDSALegacy);
+        let signer = PgpSigner::new(signing_key, SignatureType::Binary, HashAlgorithm::SHA2_256);
         let workdir = TempDir::new().unwrap();
+        let root = workdir.path().join("root");
+        let debsig_keyrings = root.join("usr/share/debsig/keyrings");
+        let debsig_policies = root.join("etc/debsig/policies");
+        let verifying_key_file = workdir.path().join("verifying-key");
+        let fingerprint = verifying_key.fingerprint();
+        let verifying_key_hex = UpperHex(fingerprint.as_bytes());
+        let keyring_file = debsig_keyrings.join(format!("{}/debsig.gpg", verifying_key_hex));
+        let policy_file = debsig_policies.join(format!("{}/debsig.pol", verifying_key_hex));
         arbtest(|u| {
             let mut control: ControlData = u.arbitrary()?;
             control.architecture = "all".parse().unwrap();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let path = workdir.path().join("test.deb");
-            let root = workdir.path().join("root");
             let _ = remove_dir_all(root.as_path());
-            eprint!("{}", control);
+            create_dir_all(debsig_keyrings.as_path()).unwrap();
+            create_dir_all(debsig_policies.as_path()).unwrap();
+            create_dir_all(keyring_file.parent().unwrap()).unwrap();
+            create_dir_all(policy_file.parent().unwrap()).unwrap();
+            std::fs::write(
+                policy_file.as_path(),
+                format!(
+                    r#"<?xml version="1.0"?>
+<!DOCTYPE Policy SYSTEM "http://www.debian.org/debsig/1.0/policy.dtd">
+<Policy xmlns="https://www.debian.org/debsig/1.0/">
+
+  <Origin Name="test" id="{0}" Description="Test package"/>
+
+  <Selection>
+    <Required Type="origin" File="debsig.gpg" id="{0}"/>
+  </Selection>
+
+   <Verification MinOptional="0">
+    <Required Type="origin" File="debsig.gpg" id="{0}"/>
+   </Verification>
+</Policy>
+"#,
+                    verifying_key_hex
+                ),
+            )
+            .unwrap();
+            verifying_key
+                .to_armored_writer(
+                    &mut File::create(verifying_key_file.as_path()).unwrap(),
+                    Default::default(),
+                )
+                .unwrap();
             Package::write(
                 &control,
                 directory.path(),
                 File::create(path.as_path()).unwrap(),
+                &signer,
             )
             .unwrap();
-            assert!(Command::new("dpkg")
+            assert!(Command::new("gpg")
+                .arg("--dearmor")
+                .arg("--output")
+                .arg(keyring_file.as_path())
+                .arg(verifying_key_file.as_path())
+                .status()
+                .unwrap()
+                .success());
+            assert!(Command::new("debsig-verify")
+                .arg("--debug")
                 .arg("--root")
                 .arg(root.as_path())
-                .arg("--install")
                 .arg(path.as_path())
                 .status()
                 .unwrap()
-                .success(), "control = {:?}", control);
+                .success());
+            eprint!("{}", control);
+            assert!(
+                Command::new("dpkg")
+                    .arg("--root")
+                    .arg(root.as_path())
+                    .arg("--install")
+                    .arg(path.as_path())
+                    .status()
+                    .unwrap()
+                    .success(),
+                "control = {:?}",
+                control
+            );
             assert!(Command::new("dpkg-query")
                 .arg("--root")
                 .arg(root.as_path())

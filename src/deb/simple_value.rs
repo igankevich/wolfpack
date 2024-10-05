@@ -107,10 +107,10 @@ fn is_valid_char(ch: &u8) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::test::MS_DOS_NEWLINE;
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use arbtest::arbtest;
-    use crate::test::MS_DOS_NEWLINE;
 
     use super::*;
 

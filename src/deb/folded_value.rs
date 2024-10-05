@@ -160,8 +160,8 @@ mod tests {
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use arbtest::arbtest;
-    use rand_mt::Mt64;
     use rand::Rng;
+    use rand_mt::Mt64;
 
     use super::*;
     use crate::deb::SimpleValue;

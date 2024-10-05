@@ -1939,6 +1939,7 @@ dependencies = [
  "flate2",
  "hex",
  "ksign",
+ "log",
  "md5",
  "normalize-path",
  "pgp",

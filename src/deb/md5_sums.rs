@@ -21,7 +21,10 @@ impl Md5Sums {
 
     pub fn insert(&mut self, path: PathBuf, hash: Md5Hash) -> Result<(), std::io::Error> {
         if path.as_os_str().as_encoded_bytes().contains(&b'\n') {
-            return Err(std::io::Error::other(format!("path contains a newline: {:?}", path)));
+            return Err(std::io::Error::other(format!(
+                "path contains a newline: {:?}",
+                path
+            )));
         }
         self.sums.insert(path, hash);
         Ok(())

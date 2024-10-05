@@ -1,7 +1,7 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::str::FromStr;
 use std::ops::Deref;
+use std::str::FromStr;
 
 use crate::deb::Error;
 use crate::deb::SimpleValue;

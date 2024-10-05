@@ -4,6 +4,8 @@ use std::path::Path;
 
 use ksign::IO;
 use pgp::composed::cleartext::CleartextSignedMessage;
+use pgp::crypto::hash::HashAlgorithm;
+use pgp::packet::SignatureType;
 use pgp::types::PublicKeyTrait;
 use pgp::types::SecretKeyTrait;
 use rand::rngs::OsRng;
@@ -13,6 +15,7 @@ use wolfpack::deb::Release;
 use wolfpack::deb::SimpleValue;
 use wolfpack::pkg;
 use wolfpack::pkg::CompactManifest;
+use wolfpack::sign::PgpSigner;
 use wolfpack::DebPackage;
 use wolfpack::IpkPackage;
 use wolfpack::PkgPackage;
@@ -29,8 +32,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let directory = std::env::args().nth(2).unwrap();
     let control_data: ControlData = std::fs::read_to_string(control_file)?.parse()?;
     eprintln!("{}", control_data);
-    DebPackage::write(&control_data, &directory, File::create("test.deb")?)?;
-    IpkPackage::write(&control_data, &directory, File::create("test.ipk")?)?;
+    let deb_signer = PgpSigner::new(
+        secret_key.clone(),
+        SignatureType::Binary,
+        HashAlgorithm::SHA2_256,
+    );
+    DebPackage::write(
+        &control_data,
+        &directory,
+        File::create("test.deb")?,
+        &deb_signer,
+    )?;
+    // TODO ipk signer
+    IpkPackage::write(
+        &control_data,
+        &directory,
+        File::create("test.ipk")?,
+        &deb_signer,
+    )?;
     let manifest: CompactManifest =
         std::fs::read_to_string("freebsd/+COMPACT_MANIFEST")?.parse()?;
     PkgPackage::new(manifest, "freebsd/root".into()).build(File::create("test.pkg")?)?;
@@ -64,12 +83,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn generate_secret_key() -> Result<pgp::SignedSecretKey, pgp::errors::Error> {
     use pgp::composed::*;
-    use pgp::crypto::{hash::HashAlgorithm, sym::SymmetricKeyAlgorithm};
+    use pgp::crypto::sym::SymmetricKeyAlgorithm;
     use pgp::types::CompressionAlgorithm;
     use smallvec::smallvec;
     let mut key_params = SecretKeyParamsBuilder::default();
     key_params
-        .key_type(KeyType::Ed25519)
+        .key_type(KeyType::Rsa(2048))
         .can_certify(false)
         .can_sign(true)
         .primary_user_id("Me <me@example.com>".into())

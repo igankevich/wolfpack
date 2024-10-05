@@ -39,10 +39,14 @@ fn new_decoder<'a, R: 'a + Read + BufRead>(mut reader: R) -> Result<Box<dyn Read
         [0x28, 0xb5, 0x2f, 0xfd, ..] => Ok(Box::new(ZstdDecoder::new(reader)?)),
         // RFC1952
         [0x1f, 0x8b, 0x08, ..] => Ok(Box::new(GzDecoder::new(reader))),
-        magic => Err(Error::other(format!(
-            "unknown compression format: starting bytes {:02x?}",
-            &magic[..MAX_BYTES.min(magic.len())],
-        ))),
+        // no compression
+        magic => {
+            log::warn!(
+                "unknown compression format (starting bytes {:02x?}), proceeding without decompression",
+                &magic[..MAX_BYTES.min(magic.len())],
+            );
+            Ok(Box::new(reader))
+        }
     }
 }
 

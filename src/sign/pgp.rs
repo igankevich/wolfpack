@@ -1,11 +1,13 @@
 use std::time::SystemTime;
 
+use pgp::cleartext::CleartextSignedMessage;
 use pgp::crypto::{hash::HashAlgorithm, public_key::PublicKeyAlgorithm};
 use pgp::packet::*;
 use pgp::types::public::PublicParams;
 use pgp::types::PublicKeyTrait;
 use pgp::SignedPublicKey;
 use pgp::SignedSecretKey;
+use rand::rngs::OsRng;
 
 use crate::sign::Error;
 use crate::sign::Signer;
@@ -111,6 +113,40 @@ impl Verifier for PgpVerifier {
     }
 }
 
+pub struct PgpCleartextSigner {
+    signing_key: SignedSecretKey,
+}
+
+impl PgpCleartextSigner {
+    pub fn new(signing_key: SignedSecretKey) -> Self {
+        Self { signing_key }
+    }
+
+    pub fn sign(&self, message: &str) -> Result<CleartextSignedMessage, Error> {
+        let signed_message =
+            CleartextSignedMessage::sign(OsRng, message, &self.signing_key, String::new)
+                .map_err(|_| Error)?;
+        Ok(signed_message)
+    }
+}
+
+pub struct PgpCleartextVerifier {
+    verifying_key: SignedPublicKey,
+}
+
+impl PgpCleartextVerifier {
+    pub fn new(verifying_key: SignedPublicKey) -> Self {
+        Self { verifying_key }
+    }
+
+    pub fn verify(&self, signed_message: &CleartextSignedMessage) -> Result<(), Error> {
+        signed_message
+            .verify(&self.verifying_key)
+            .map_err(|_| Error)?;
+        Ok(())
+    }
+}
+
 fn get_public_key_algorithm<P: PublicKeyTrait>(
     public_key: &P,
 ) -> Result<PublicKeyAlgorithm, Error> {
@@ -146,5 +182,22 @@ mod tests {
         verifier
             .verify(message.as_bytes(), signature.as_slice())
             .unwrap();
+    }
+
+    #[test]
+    fn cleartext_sign_verify() {
+        //let body = std::fs::read("InRelease.tmp").unwrap();
+        //CleartextSignedMessage::from_armor(&body[..]).unwrap();
+        let message = "hello world";
+        let (signing_key, verifying_key) = pgp_keys(KeyType::Ed25519);
+        let signer = PgpCleartextSigner::new(signing_key);
+        let signed_message = signer.sign(message).unwrap();
+        let mut buf = Vec::new();
+        signed_message
+            .to_armored_writer(&mut buf, Default::default())
+            .unwrap();
+        let (signed_message, _headers) = CleartextSignedMessage::from_armor(&buf[..]).unwrap();
+        let verifier = PgpCleartextVerifier::new(verifying_key);
+        verifier.verify(&signed_message).unwrap();
     }
 }

@@ -12,7 +12,7 @@ use crate::deb::Value;
 pub struct SimpleValue(String);
 
 impl SimpleValue {
-    pub fn try_from(value: String) -> Result<Self, Error> {
+    pub fn new(value: String) -> Result<Self, Error> {
         validate_simple_value(&value)?;
         Ok(Self(value))
     }
@@ -31,7 +31,7 @@ impl Display for SimpleValue {
 impl FromStr for SimpleValue {
     type Err = Error;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::try_from(value.to_string())
+        Self::new(value.to_string())
     }
 }
 
@@ -88,6 +88,14 @@ impl TryFrom<Value> for SimpleValue {
     }
 }
 
+impl TryFrom<&str> for SimpleValue {
+    type Error = Error;
+
+    fn try_from(other: &str) -> Result<Self, Self::Error> {
+        other.parse()
+    }
+}
+
 fn validate_simple_value(value: &str) -> Result<(), Error> {
     if !value.as_bytes().iter().all(is_valid_char) {
         return Err(Error::FieldValue(value.to_string()));
@@ -139,7 +147,7 @@ mod tests {
             if s.chars().next().iter().all(|ch| ch.is_whitespace()) {
                 s = "x".to_string() + &s;
             }
-            Ok(Self::try_from(s).unwrap())
+            Ok(Self::new(s).unwrap())
         }
     }
 }

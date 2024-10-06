@@ -11,7 +11,7 @@ pub fn pgp_keys(key_type: KeyType) -> (SignedSecretKey, SignedPublicKey) {
         .can_encrypt(false)
         .can_certify(false)
         .can_sign(true)
-        .primary_user_id("no id".into());
+        .primary_user_id("wolfpack test id".into());
     let secret_key_params = key_params.build().unwrap();
     let secret_key = secret_key_params.generate(OsRng).unwrap();
     let signed_secret_key = secret_key.sign(OsRng, String::new).unwrap();

@@ -104,7 +104,7 @@ mod tests {
     fn package_name_to_simple() {
         arbtest(|u| {
             let expected: PackageName = u.arbitrary()?;
-            let simple1 = SimpleValue::try_from(expected.0.clone()).unwrap();
+            let simple1 = SimpleValue::new(expected.0.clone()).unwrap();
             let simple2: SimpleValue = expected.into();
             assert_eq!(simple1, simple2);
             Ok(())

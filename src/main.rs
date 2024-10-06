@@ -1,28 +1,24 @@
-use std::collections::HashSet;
 use std::fs::File;
-use std::path::Path;
 
-use ksign::IO;
-use pgp::composed::cleartext::CleartextSignedMessage;
+//use ksign::IO;
 use pgp::crypto::hash::HashAlgorithm;
 use pgp::packet::SignatureType;
 use pgp::types::PublicKeyTrait;
 use pgp::types::SecretKeyTrait;
 use rand::rngs::OsRng;
 use wolfpack::deb::ControlData;
-use wolfpack::deb::Packages;
-use wolfpack::deb::Release;
-use wolfpack::deb::SimpleValue;
+use wolfpack::deb::Repository;
 use wolfpack::pkg;
 use wolfpack::pkg::CompactManifest;
+use wolfpack::sign::PgpCleartextSigner;
 use wolfpack::sign::PgpSigner;
+use wolfpack::sign::PgpVerifier;
 use wolfpack::DebPackage;
 use wolfpack::IpkPackage;
 use wolfpack::PkgPackage;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let secret_key = generate_secret_key()?;
-    let public_key = secret_key.public_key();
+    let (secret_key, public_key) = generate_secret_key()?;
     println!("Key id: {:x}", public_key.key_id());
     println!(
         "Fingerprint: {}",
@@ -37,6 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         SignatureType::Binary,
         HashAlgorithm::SHA2_256,
     );
+    let deb_verifier = PgpVerifier::new(public_key.clone());
     DebPackage::write(
         &control_data,
         &directory,
@@ -57,41 +54,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let packages = pkg::Packages::new(["test.pkg"])?;
         packages.build(File::create("packagesite.pkg")?, &secret_key)?;
     }
-    let packages = Packages::new(["."])?;
-    let packages_string = packages.to_string();
-    let mut architectures: HashSet<SimpleValue> = HashSet::new();
-    for package in packages.into_iter() {
-        architectures.insert(package.control.architecture);
-    }
-    let release = Release::new(".", architectures, SimpleValue::try_from("test".into())?)?;
-    // TODO trim?
-    let signed_release =
-        CleartextSignedMessage::sign(OsRng, release.to_string().trim(), &secret_key, || {
-            String::new()
-        })?;
-    signed_release.to_armored_writer(&mut File::create("InRelease")?, Default::default())?;
-    signed_release.signatures()[0]
-        .to_armored_writer(&mut File::create("Release.gpg")?, Default::default())?;
+    let deb_release_signer = PgpCleartextSigner::new(secret_key.clone());
+    Repository::write(
+        "repo",
+        "test".parse()?,
+        ["test.deb"],
+        &deb_verifier,
+        &deb_release_signer,
+    )?;
     // TODO ipk has its own whitelist of fields, see opkg.py
     // TODO freebsd http://pkg.freebsd.org/FreeBSD:15:amd64/base_latest/
-    let ipk_signing_key = ksign::SigningKey::generate(None);
-    ipk_signing_key
-        .sign(packages_string.as_bytes())
-        .write_to_file(Path::new("Packages.sig"))?;
+    //let ipk_signing_key = ksign::SigningKey::generate(None);
+    //ipk_signing_key
+    //    .sign(packages_string.as_bytes())
+    //    .write_to_file(Path::new("Packages.sig"))?;
     Ok(())
 }
 
-fn generate_secret_key() -> Result<pgp::SignedSecretKey, pgp::errors::Error> {
+fn generate_secret_key() -> Result<(pgp::SignedSecretKey, pgp::SignedPublicKey), pgp::errors::Error>
+{
     use pgp::composed::*;
     use pgp::crypto::sym::SymmetricKeyAlgorithm;
     use pgp::types::CompressionAlgorithm;
     use smallvec::smallvec;
     let mut key_params = SecretKeyParamsBuilder::default();
     key_params
-        .key_type(KeyType::Rsa(2048))
+        .key_type(KeyType::EdDSALegacy)
         .can_certify(false)
         .can_sign(true)
-        .primary_user_id("Me <me@example.com>".into())
+        .primary_user_id("none".into())
         .preferred_symmetric_algorithms(smallvec![SymmetricKeyAlgorithm::AES256])
         .preferred_hash_algorithms(smallvec![HashAlgorithm::SHA2_512])
         .preferred_compression_algorithms(smallvec![CompressionAlgorithm::ZLIB]);
@@ -104,7 +95,11 @@ fn generate_secret_key() -> Result<pgp::SignedSecretKey, pgp::errors::Error> {
     let signed_secret_key = secret_key
         .sign(OsRng, String::new)
         .expect("Must be able to sign its own metadata");
-    Ok(signed_secret_key)
+    let signed_public_key = signed_secret_key
+        .public_key()
+        .sign(OsRng, &signed_secret_key, String::new)
+        .unwrap();
+    Ok((signed_secret_key, signed_public_key))
 }
 
 /*

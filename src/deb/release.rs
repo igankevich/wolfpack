@@ -1,19 +1,16 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::ffi::OsStr;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
-use std::fs::File;
-use std::path::Path;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
 use chrono::DateTime;
 use chrono::Utc;
-use walkdir::WalkDir;
 
 use crate::deb::Error;
+use crate::deb::Packages;
 use crate::deb::SimpleValue;
 use crate::hash::MultiHash;
 use crate::hash::MultiHashReader;
@@ -29,37 +26,27 @@ pub struct Release {
 }
 
 impl Release {
-    pub fn new<P: AsRef<Path>>(
-        directory: P,
-        architectures: HashSet<SimpleValue>,
-        suite: SimpleValue,
-    ) -> Result<Self, Error> {
+    pub fn new(suite: SimpleValue, packages: &Packages, packages_str: &str) -> Result<Self, Error> {
+        let architectures = packages.architectures();
         let mut checksums = HashMap::new();
-        for entry in WalkDir::new(directory).into_iter() {
-            let entry = entry?;
-            if entry.file_type().is_dir() {
-                continue;
-            }
-            let path = entry.path();
-            let file_stem = match path.file_stem() {
-                Some(file_stem) => file_stem,
-                None => continue,
-            };
-            if ![OsStr::new("Packages"), OsStr::new("Release")].contains(&file_stem)
-                || path.extension() == Some(OsStr::new("gpg"))
-            {
-                continue;
-            }
-            let reader = MultiHashReader::new(File::open(path)?);
+        let reader = MultiHashReader::new(packages_str.as_bytes());
+        let (hash, size) = reader.digest()?;
+        checksums.insert("Packages".into(), Checksums { size, hash });
+        for (arch, per_arch_packages) in packages.iter() {
+            let mut path = PathBuf::new();
+            path.push("main");
+            path.push(format!("binary-{}", arch));
+            path.push("Packages");
+            let per_arch_packages_string = per_arch_packages.to_string();
+            let reader = MultiHashReader::new(per_arch_packages_string.as_bytes());
             let (hash, size) = reader.digest()?;
-            checksums.insert(path.into(), Checksums { size, hash });
+            checksums.insert(path, Checksums { size, hash });
         }
         Ok(Self {
             date: SystemTime::now(),
             valid_until: None,
             architectures,
-            // TODO do we need them?
-            components: Default::default(),
+            components: ["main".parse::<SimpleValue>()?].into(),
             suite,
             checksums,
         })

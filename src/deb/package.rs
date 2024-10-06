@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn write_read() {
-        let (signing_key, verifying_key) = pgp_keys(KeyType::Ed25519);
+        let (signing_key, verifying_key) = pgp_keys(KeyType::EdDSALegacy);
         let signer = PgpSigner::new(signing_key, SignatureType::Binary, HashAlgorithm::SHA2_256);
         let verifier = PgpVerifier::new(verifying_key);
         arbtest(|u| {

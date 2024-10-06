@@ -80,6 +80,7 @@ mod tests {
     use arbtest::arbtest;
 
     use super::*;
+    use crate::test::chars;
 
     #[test]
     fn invalid_names() {
@@ -112,18 +113,12 @@ mod tests {
 
     impl<'a> Arbitrary<'a> for PackageName {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            let valid_first_chars: Vec<_> = ('a'..='z').chain('0'..='9').collect();
-            let valid_chars: Vec<_> = ('a'..='z')
-                .chain('0'..='9')
-                .chain(['+', '-', '.'])
-                .collect();
+            let valid_first_chars = chars!('a'..='z', '0'..='9');
+            let valid_chars = valid_first_chars.union(&chars!(&['+', '-', '.']));
             let len = u.int_in_range(2..=100)?;
-            let mut string = String::with_capacity(len);
-            string.push(*u.choose(&valid_first_chars)?);
-            for _ in 1..len {
-                string.push(*u.choose(&valid_chars)?);
-            }
-            Ok(Self::try_from(string).unwrap())
+            let mut s = valid_chars.arbitrary_string(u, len - 1)?;
+            s.insert(0, valid_first_chars.arbitrary_char(u)?);
+            Ok(Self::try_from(s).unwrap())
         }
     }
 }

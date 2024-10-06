@@ -187,7 +187,17 @@ mod tests {
     #[test]
     fn cleartext_sign_verify() {
         //let body = std::fs::read("InRelease.tmp").unwrap();
-        //CleartextSignedMessage::from_armor(&body[..]).unwrap();
+        //let body = std::fs::read("clearsign.txt").unwrap();
+        //let data = pgp::composed::Any::from_armor(&body[..]).unwrap();
+        //let data = pgp::composed::message::Message::from_armor_single(&body[..]).unwrap();
+        //let data = CleartextSignedMessage::from_armor(&body[..]).unwrap();
+        //eprintln!("{data:?}");
+        //let data = pgp::packet::LiteralData::from_slice(Default::default(), &body[..]).unwrap();
+        //eprintln!("{data:?}");
+        //let mut parser = PacketParser::new(&body[..]);
+        //for packet in parser {
+        //    eprintln!("package {packet:?}");
+        //}
         let message = "hello world";
         let (signing_key, verifying_key) = pgp_keys(KeyType::Ed25519);
         let signer = PgpCleartextSigner::new(signing_key);

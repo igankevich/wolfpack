@@ -5,26 +5,31 @@ use std::path::Path;
 use crate::deb::BasicPackage;
 use crate::deb::ControlData;
 use crate::deb::Error;
-use crate::sign::Signer;
-use crate::sign::Verifier;
+use crate::deb::PackageSigner;
+use crate::deb::PackageVerifier;
 
 pub struct Package;
 
 impl Package {
-    pub fn write<W: Write, S: Signer, P: AsRef<Path>>(
+    pub fn write<W: Write, P: AsRef<Path>>(
         control_data: &ControlData,
         directory: P,
         writer: W,
-        signer: &S,
+        signer: &PackageSigner,
     ) -> Result<(), std::io::Error> {
-        BasicPackage::write::<W, ar::Builder<W>, S, P>(control_data, directory, writer, signer)
+        BasicPackage::write::<W, ar::Builder<W>, PackageSigner, P>(
+            control_data,
+            directory,
+            writer,
+            signer,
+        )
     }
 
-    pub fn read_control<R: Read, V: Verifier>(
+    pub fn read_control<R: Read>(
         reader: R,
-        verifier: &V,
+        verifier: &PackageVerifier,
     ) -> Result<ControlData, Error> {
-        BasicPackage::read_control::<R, ar::Archive<R>, V>(reader, verifier)
+        BasicPackage::read_control::<R, ar::Archive<R>, PackageVerifier>(reader, verifier)
     }
 }
 
@@ -38,14 +43,11 @@ mod tests {
     use std::time::Duration;
 
     use arbtest::arbtest;
-    use pgp::crypto::hash::HashAlgorithm;
-    use pgp::packet::SignatureType;
     use pgp::types::PublicKeyTrait;
     use pgp::KeyType;
     use tempfile::TempDir;
 
     use super::*;
-    use crate::sign::PgpSigner;
     use crate::sign::PgpVerifier;
     use crate::test::pgp_keys;
     use crate::test::DirectoryOfFiles;
@@ -54,7 +56,7 @@ mod tests {
     #[test]
     fn write_read() {
         let (signing_key, verifying_key) = pgp_keys(KeyType::EdDSALegacy);
-        let signer = PgpSigner::new(signing_key, SignatureType::Binary, HashAlgorithm::SHA2_256);
+        let signer = PackageSigner::new(signing_key);
         let verifier = PgpVerifier::new(verifying_key);
         arbtest(|u| {
             let control: ControlData = u.arbitrary()?;
@@ -71,7 +73,7 @@ mod tests {
     #[test]
     fn dpkg_installs_random_packages() {
         let (signing_key, verifying_key) = pgp_keys(KeyType::EdDSALegacy);
-        let signer = PgpSigner::new(signing_key, SignatureType::Binary, HashAlgorithm::SHA2_256);
+        let signer = PackageSigner::new(signing_key);
         let workdir = TempDir::new().unwrap();
         let root = workdir.path().join("root");
         let debsig_keyrings = root.join("usr/share/debsig/keyrings");

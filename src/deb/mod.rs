@@ -11,6 +11,7 @@ mod package_version;
 mod packages;
 mod release;
 mod repository;
+mod signer;
 mod simple_value;
 mod value;
 
@@ -27,5 +28,6 @@ pub use self::package_version::*;
 pub use self::packages::*;
 pub use self::release::*;
 pub use self::repository::*;
+pub use self::signer::*;
 pub use self::simple_value::*;
 pub use self::value::*;

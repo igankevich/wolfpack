@@ -13,22 +13,25 @@ use walkdir::WalkDir;
 use crate::deb::ControlData;
 use crate::deb::Error;
 use crate::deb::Package;
+use crate::deb::PackageVerifier;
 use crate::deb::SimpleValue;
 use crate::hash::MultiHash;
 use crate::hash::MultiHashReader;
-use crate::sign::Verifier;
 
 pub struct Packages {
     packages: HashMap<SimpleValue, PerArchPackages>,
 }
 
 impl Packages {
-    pub fn new<I, P, P2, V>(output_dir: P2, paths: I, verifier: &V) -> Result<Self, Error>
+    pub fn new<I, P, P2>(
+        output_dir: P2,
+        paths: I,
+        verifier: &PackageVerifier,
+    ) -> Result<Self, Error>
     where
         I: IntoIterator<Item = P>,
         P: AsRef<Path>,
         P2: AsRef<Path>,
-        V: Verifier,
     {
         let mut packages: HashMap<SimpleValue, PerArchPackages> = HashMap::new();
         let mut push_package = |path: &Path| -> Result<(), Error> {
@@ -36,16 +39,18 @@ impl Packages {
             let mut reader = MultiHashReader::new(File::open(path)?);
             let control = Package::read_control(&mut reader, verifier)?;
             let (hash, size) = reader.digest()?;
-            let mut new_path = output_dir.as_ref().join("main");
-            new_path.push(format!("binary-{}", control.architecture));
-            create_dir_all(new_path.as_path())?;
-            new_path.push(path.file_name().unwrap());
+            let mut filename = PathBuf::new();
+            filename.push("data");
+            filename.push(hash.sha2.to_string());
+            create_dir_all(output_dir.as_ref().join(&filename))?;
+            filename.push(path.file_name().unwrap());
+            let new_path = output_dir.as_ref().join(&filename);
             std::fs::rename(path, &new_path)?;
             let control = ExtendedControlData {
                 control,
                 size,
                 hash,
-                filename: new_path.strip_prefix(output_dir.as_ref()).unwrap().to_path_buf(),
+                filename: filename.into(),
             };
             packages
                 .entry(control.control.architecture.clone())

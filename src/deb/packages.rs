@@ -45,12 +45,12 @@ impl Packages {
             create_dir_all(output_dir.as_ref().join(&filename))?;
             filename.push(path.file_name().unwrap());
             let new_path = output_dir.as_ref().join(&filename);
-            std::fs::rename(path, &new_path)?;
+            std::fs::rename(path, new_path)?;
             let control = ExtendedControlData {
                 control,
                 size,
                 hash,
-                filename: filename.into(),
+                filename,
             };
             packages
                 .entry(control.control.architecture.clone())

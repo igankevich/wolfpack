@@ -6,9 +6,7 @@ use pgp::packet::SignatureType;
 use pgp::types::PublicKeyTrait;
 use pgp::types::SecretKeyTrait;
 use rand::rngs::OsRng;
-use wolfpack::deb::ControlData;
-use wolfpack::deb::PackageSigner;
-use wolfpack::deb::Repository;
+use wolfpack::deb;
 use wolfpack::pkg;
 use wolfpack::pkg::CompactManifest;
 use wolfpack::sign::PgpCleartextSigner;
@@ -27,10 +25,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let control_file = std::env::args().nth(1).unwrap();
     let directory = std::env::args().nth(2).unwrap();
-    let control_data: ControlData = std::fs::read_to_string(control_file)?.parse()?;
+    let control_data: deb::ControlData = std::fs::read_to_string(control_file)?.parse()?;
     eprintln!("{}", control_data);
-    let deb_signer = PackageSigner::new(secret_key.clone());
-    let deb_verifier = PgpVerifier::new(public_key.clone());
+    let (deb_signing_key, deb_verifying_key) =
+        deb::SigningKey::generate("deb-key-id".into()).unwrap();
+    let deb_signer = deb::PackageSigner::new(deb_signing_key);
+    let deb_verifier = PgpVerifier::new(deb_verifying_key.into());
     DebPackage::write(
         &control_data,
         &directory,
@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         packages.build(File::create("packagesite.pkg")?, &secret_key)?;
     }
     let deb_release_signer = PgpCleartextSigner::new(secret_key.clone());
-    Repository::write(
+    deb::Repository::write(
         "repo",
         "test".parse()?,
         ["test.deb"],
@@ -103,29 +103,3 @@ fn generate_secret_key() -> Result<(pgp::SignedSecretKey, pgp::SignedPublicKey),
         .unwrap();
     Ok((signed_secret_key, signed_public_key))
 }
-
-/*
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-use std::io::BufRead;
-use std::io::BufReader;
-    let file = File::open(std::env::args().nth(1).unwrap())?;
-    let reader = BufReader::new(file);
-    let mut string = String::with_capacity(4096);
-    for line in reader.lines() {
-        let line = line?;
-        if line.is_empty() {
-            let control: ControlData = string.parse()?;
-            println!("{}", control);
-            string.clear();
-        } else {
-            string.push_str(&line);
-            string.push('\n');
-        }
-    }
-    if !string.is_empty() {
-        let control: ControlData = string.parse()?;
-        println!("{}", control);
-    }
-    Ok(())
-}
-*/

@@ -54,6 +54,10 @@ impl From<VerifyingKey> for SignedPublicKey {
 
 impl SigningKey {
     pub fn generate(user_id: String) -> Result<(SigningKey, VerifyingKey), Error> {
+        use pgp::crypto::aead::AeadAlgorithm::*;
+        use pgp::crypto::hash::HashAlgorithm::*;
+        use pgp::crypto::sym::SymmetricKeyAlgorithm::*;
+        use pgp::types::CompressionAlgorithm::*;
         let key_type = KeyType::EdDSALegacy;
         let mut key_params = SecretKeyParamsBuilder::default();
         key_params
@@ -61,7 +65,11 @@ impl SigningKey {
             .can_encrypt(false)
             .can_certify(false)
             .can_sign(true)
-            .primary_user_id(user_id);
+            .primary_user_id(user_id)
+            .preferred_symmetric_algorithms([AES256].as_slice().into())
+            .preferred_hash_algorithms([SHA2_256, SHA2_512].as_slice().into())
+            .preferred_compression_algorithms([ZLIB, BZip2, ZIP].as_slice().into())
+            .preferred_aead_algorithms([(AES256, Gcm)].as_slice().into());
         let secret_key_params = key_params.build().map_err(|_| Error)?;
         let secret_key = secret_key_params.generate(OsRng).map_err(|_| Error)?;
         let signed_secret_key = secret_key.sign(OsRng, String::new).map_err(|_| Error)?;

@@ -78,16 +78,15 @@ fn generate_secret_key() -> Result<(pgp::SignedSecretKey, pgp::SignedPublicKey),
     use pgp::composed::*;
     use pgp::crypto::sym::SymmetricKeyAlgorithm;
     use pgp::types::CompressionAlgorithm;
-    use smallvec::smallvec;
     let mut key_params = SecretKeyParamsBuilder::default();
     key_params
         .key_type(KeyType::EdDSALegacy)
         .can_certify(false)
         .can_sign(true)
         .primary_user_id("none".into())
-        .preferred_symmetric_algorithms(smallvec![SymmetricKeyAlgorithm::AES256])
-        .preferred_hash_algorithms(smallvec![HashAlgorithm::SHA2_512])
-        .preferred_compression_algorithms(smallvec![CompressionAlgorithm::ZLIB]);
+        .preferred_symmetric_algorithms([SymmetricKeyAlgorithm::AES256].as_slice().into())
+        .preferred_hash_algorithms([HashAlgorithm::SHA2_512].as_slice().into())
+        .preferred_compression_algorithms([CompressionAlgorithm::ZLIB].as_slice().into());
     let secret_key_params = key_params
         .build()
         .expect("Must be able to create secret key params");

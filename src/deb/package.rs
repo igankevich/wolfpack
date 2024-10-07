@@ -7,6 +7,7 @@ use crate::deb::ControlData;
 use crate::deb::Error;
 use crate::deb::PackageSigner;
 use crate::deb::PackageVerifier;
+use crate::deb::SignatureKind;
 
 pub struct Package;
 
@@ -22,6 +23,7 @@ impl Package {
             directory,
             writer,
             signer,
+            SignatureKind::Bundled { file_name: "_gpgorigin".into() },
         )
     }
 

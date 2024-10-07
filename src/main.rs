@@ -2,7 +2,6 @@ use std::fs::File;
 
 //use ksign::IO;
 use pgp::crypto::hash::HashAlgorithm;
-use pgp::packet::SignatureType;
 use pgp::types::PublicKeyTrait;
 use pgp::types::SecretKeyTrait;
 use rand::rngs::OsRng;
@@ -10,10 +9,7 @@ use wolfpack::deb;
 use wolfpack::pkg;
 use wolfpack::pkg::CompactManifest;
 use wolfpack::sign::PgpCleartextSigner;
-use wolfpack::sign::PgpSigner;
 use wolfpack::sign::PgpVerifier;
-use wolfpack::DebPackage;
-use wolfpack::IpkPackage;
 use wolfpack::PkgPackage;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -31,23 +27,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         deb::SigningKey::generate("deb-key-id".into()).unwrap();
     let deb_signer = deb::PackageSigner::new(deb_signing_key);
     let deb_verifier = PgpVerifier::new(deb_verifying_key.into());
-    DebPackage::write(
+    deb::Package::write(
         &control_data,
         &directory,
         File::create("test.deb")?,
         &deb_signer,
-    )?;
-    // TODO ipk signer
-    let ipk_signer = PgpSigner::new(
-        secret_key.clone(),
-        SignatureType::Binary,
-        HashAlgorithm::SHA2_256,
-    );
-    IpkPackage::write(
-        &control_data,
-        &directory,
-        File::create("test.ipk")?,
-        &ipk_signer,
     )?;
     let manifest: CompactManifest =
         std::fs::read_to_string("freebsd/+COMPACT_MANIFEST")?.parse()?;

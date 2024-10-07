@@ -16,6 +16,7 @@ use crate::deb::Value;
 pub struct ControlData {
     package: PackageName,
     version: PackageVersion,
+    license: SimpleValue,
     pub architecture: SimpleValue,
     maintainer: SimpleValue,
     description: MultilineValue,
@@ -33,6 +34,7 @@ impl Display for ControlData {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         writeln!(f, "Package: {}", self.package)?;
         writeln!(f, "Version: {}", self.version)?;
+        writeln!(f, "License: {}", self.license)?;
         writeln!(f, "Architecture: {}", self.architecture)?;
         writeln!(f, "Maintainer: {}", self.maintainer)?;
         if let Some(installed_size) = self.installed_size.as_ref() {
@@ -64,6 +66,7 @@ impl FromStr for ControlData {
         let control = ControlData {
             package: fields.remove("package")?.try_into()?,
             version: fields.remove("version")?.try_into()?,
+            license: fields.remove("license")?.try_into()?,
             architecture: fields.remove("architecture")?.try_into()?,
             description: fields.remove("description")?.try_into()?,
             maintainer: fields.remove("maintainer")?.try_into()?,

@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
+use std::path::PathBuf;
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -13,8 +14,6 @@ use crate::archive::ArchiveWrite;
 use crate::compress::AnyDecoder;
 use crate::deb::ControlData;
 use crate::deb::Error;
-use crate::deb::Md5Sums;
-use crate::hash::Md5Reader;
 use crate::sign::Signer;
 use crate::sign::Verifier;
 
@@ -26,6 +25,7 @@ impl BasicPackage {
         directory: P,
         writer: W,
         signer: &S,
+        signature_kind: SignatureKind,
     ) -> Result<(), std::io::Error> {
         let directory = directory.as_ref();
         let mut data = tar::Builder::new(GzEncoder::new(
@@ -36,7 +36,6 @@ impl BasicPackage {
             Vec::with_capacity(4096),
             Compression::best(),
         ));
-        let mut md5sums = Md5Sums::new();
         for entry in WalkDir::new(directory).into_iter() {
             let entry = entry?;
             let relative_path = Path::new(".").join(
@@ -55,14 +54,12 @@ impl BasicPackage {
             if entry.file_type().is_dir() {
                 data.append::<&[u8]>(&header, &[])?;
             } else {
-                let mut reader = Md5Reader::new(File::open(entry.path())?);
+                let mut reader = File::open(entry.path())?;
                 data.append(&header, &mut reader)?;
-                md5sums.insert(relative_path, reader.digest()?.0)?;
             }
         }
         let data = data.into_inner()?.finish()?;
         control.add_regular_file("control", control_data.to_string())?;
-        control.add_regular_file("md5sums", md5sums.to_string())?;
         let control = control.into_inner()?.finish()?;
         let debian_binary = "2.0\n";
         let mut message_bytes: Vec<u8> = Vec::new();
@@ -76,8 +73,17 @@ impl BasicPackage {
         package.add_regular_file("debian-binary", debian_binary)?;
         package.add_regular_file("control.tar.gz", control)?;
         package.add_regular_file("data.tar.gz", data)?;
-        package.add_regular_file("_gpgorigin", signature)?;
-        package.into_inner()?;
+        match signature_kind {
+            SignatureKind::Bundled { file_name } => {
+                package.add_regular_file(file_name, signature)?;
+                package.into_inner()?;
+            }
+            SignatureKind::Detached { mut writer } => {
+                package.into_inner()?;
+                writer.write_all(&signature[..])?;
+                writer.flush()?;
+            }
+        }
         Ok(())
     }
 
@@ -144,4 +150,9 @@ impl BasicPackage {
         }
         Err(Error::MissingFile("control.tar*".into()))
     }
+}
+
+pub enum SignatureKind {
+    Bundled { file_name: PathBuf },
+    Detached { writer: Box<dyn Write> },
 }

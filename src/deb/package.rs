@@ -23,7 +23,9 @@ impl Package {
             directory,
             writer,
             signer,
-            SignatureKind::Bundled { file_name: "_gpgorigin".into() },
+            SignatureKind::Bundled {
+                file_name: "_gpgorigin".into(),
+            },
         )
     }
 
@@ -46,20 +48,20 @@ mod tests {
 
     use arbtest::arbtest;
     use pgp::types::PublicKeyTrait;
-    use pgp::KeyType;
     use tempfile::TempDir;
 
     use super::*;
-    use crate::sign::PgpVerifier;
-    use crate::test::pgp_keys;
+    use crate::deb::PackageSigner;
+    use crate::deb::PackageVerifier;
+    use crate::deb::SigningKey;
     use crate::test::DirectoryOfFiles;
     use crate::test::UpperHex;
 
     #[test]
     fn write_read() {
-        let (signing_key, verifying_key) = pgp_keys(KeyType::EdDSALegacy);
+        let (signing_key, verifying_key) = SigningKey::generate("wolfpack-pgp-id".into()).unwrap();
         let signer = PackageSigner::new(signing_key);
-        let verifier = PgpVerifier::new(verifying_key);
+        let verifier = PackageVerifier::new(verifying_key);
         arbtest(|u| {
             let control: ControlData = u.arbitrary()?;
             let directory: DirectoryOfFiles = u.arbitrary()?;
@@ -74,7 +76,7 @@ mod tests {
     #[ignore]
     #[test]
     fn dpkg_installs_random_packages() {
-        let (signing_key, verifying_key) = pgp_keys(KeyType::EdDSALegacy);
+        let (signing_key, verifying_key) = SigningKey::generate("wolfpack-pgp-id".into()).unwrap();
         let signer = PackageSigner::new(signing_key);
         let workdir = TempDir::new().unwrap();
         let root = workdir.path().join("root");

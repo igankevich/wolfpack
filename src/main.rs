@@ -1,6 +1,5 @@
 use std::fs::File;
 
-//use ksign::IO;
 use pgp::crypto::hash::HashAlgorithm;
 use pgp::types::PublicKeyTrait;
 use pgp::types::SecretKeyTrait;
@@ -9,7 +8,6 @@ use wolfpack::deb;
 use wolfpack::pkg;
 use wolfpack::pkg::CompactManifest;
 use wolfpack::sign::PgpCleartextSigner;
-use wolfpack::sign::PgpVerifier;
 use wolfpack::PkgPackage;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -26,10 +24,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (deb_signing_key, deb_verifying_key) =
         deb::SigningKey::generate("deb-key-id".into()).unwrap();
     let deb_signer = deb::PackageSigner::new(deb_signing_key);
-    let deb_verifier = PgpVerifier::new(deb_verifying_key.into());
+    let deb_verifier = deb::PackageVerifier::new(deb_verifying_key);
     deb::Package::write(
         &control_data,
-        &directory,
+        directory,
         File::create("test.deb")?,
         &deb_signer,
     )?;

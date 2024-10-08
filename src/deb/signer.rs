@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use pgp::composed::KeyType;
 use pgp::crypto::hash::HashAlgorithm;
 use pgp::packet::SignatureType;
@@ -11,6 +13,7 @@ use crate::sign::Error;
 use crate::sign::PgpSigner;
 use crate::sign::PgpVerifier;
 use crate::sign::Signer;
+use crate::sign::Verifier;
 
 pub struct PackageSigner {
     inner: PgpSigner,
@@ -34,8 +37,25 @@ impl Signer for PackageSigner {
     }
 }
 
-pub type PackageVerifier = PgpVerifier;
+pub struct PackageVerifier {
+    inner: PgpVerifier,
+}
 
+impl PackageVerifier {
+    pub fn new(verifying_key: VerifyingKey) -> Self {
+        Self {
+            inner: PgpVerifier::new(verifying_key.into()),
+        }
+    }
+}
+
+impl Verifier for PackageVerifier {
+    fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
+        self.inner.verify(message, signature)
+    }
+}
+
+#[derive(Clone)]
 pub struct SigningKey(SignedSecretKey);
 
 impl From<SigningKey> for SignedSecretKey {
@@ -44,11 +64,19 @@ impl From<SigningKey> for SignedSecretKey {
     }
 }
 
+#[derive(Clone)]
 pub struct VerifyingKey(SignedPublicKey);
 
 impl From<VerifyingKey> for SignedPublicKey {
     fn from(other: VerifyingKey) -> Self {
         other.0
+    }
+}
+
+impl Deref for VerifyingKey {
+    type Target = SignedPublicKey;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 

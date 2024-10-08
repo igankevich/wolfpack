@@ -23,8 +23,3 @@ impl Verifier for PackageVerifier {
         Ok(())
     }
 }
-
-//let ipk_signing_key = ksign::SigningKey::generate(None);
-//ipk_signing_key
-//    .sign(packages_string.as_bytes())
-//    .write_to_file(Path::new("Packages.sig"))?;

@@ -61,26 +61,21 @@ mod tests {
 
     use arbtest::arbtest;
     use pgp::types::PublicKeyTrait;
-    use pgp::KeyType;
     use tempfile::TempDir;
 
     use super::*;
     use crate::deb::SimpleValue;
     use crate::deb::*;
-    use crate::sign::PgpVerifier;
-    use crate::test::pgp_keys;
     use crate::test::DirectoryOfFiles;
     use crate::test::UpperHex;
 
     #[ignore]
     #[test]
     fn apt_adds_random_repositories() {
-        let (signing_key, verifying_key) = pgp_keys(KeyType::EdDSALegacy);
-        //let (signing_key, verifying_key) = pgp_keys(KeyType::Rsa(2048));
-        //let (signing_key, verifying_key) = pgp_keys(KeyType::Ed25519);
+        let (signing_key, verifying_key) = SigningKey::generate("wolfpack-pgp-id".into()).unwrap();
         let signer = PackageSigner::new(signing_key.clone());
-        let verifier = PgpVerifier::new(verifying_key.clone());
-        let release_signer = PgpCleartextSigner::new(signing_key.clone());
+        let verifier = PackageVerifier::new(verifying_key.clone());
+        let release_signer = PgpCleartextSigner::new(signing_key.clone().into());
         let workdir = TempDir::new().unwrap();
         let root = workdir.path().join("root");
         let verifying_key_file = workdir.path().join("/etc/apt/trusted.gpg.d/test.asc");
@@ -119,7 +114,7 @@ mod tests {
                 format!(
                     "deb [signed-by={1}] file://{0} meta/\n",
                     root.display(),
-                    UpperHex(&fingerprint.as_bytes()),
+                    UpperHex(fingerprint.as_bytes()),
                 ),
             )
             .unwrap();

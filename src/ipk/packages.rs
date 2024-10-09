@@ -10,13 +10,13 @@ use std::path::PathBuf;
 
 use walkdir::WalkDir;
 
+use crate::hash::Sha256Hash;
+use crate::hash::Sha256Reader;
 use crate::ipk::ControlData;
 use crate::ipk::Error;
 use crate::ipk::Package;
 use crate::ipk::PackageVerifier;
 use crate::ipk::SimpleValue;
-use crate::hash::Sha256Hash;
-use crate::hash::Sha256Reader;
 
 pub struct Packages {
     packages: HashMap<SimpleValue, PerArchPackages>,

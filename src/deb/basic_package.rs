@@ -1,92 +1,17 @@
-use std::fs::File;
 use std::io::Read;
-use std::io::Write;
 use std::path::Path;
-use std::path::PathBuf;
 
-use flate2::write::GzEncoder;
-use flate2::Compression;
 use normalize_path::NormalizePath;
-use walkdir::WalkDir;
 
 use crate::archive::ArchiveRead;
-use crate::archive::ArchiveWrite;
 use crate::compress::AnyDecoder;
 use crate::deb::ControlData;
 use crate::deb::Error;
-use crate::sign::Signer;
 use crate::sign::Verifier;
 
 pub(crate) struct BasicPackage;
 
 impl BasicPackage {
-    pub(crate) fn write<W: Write, A: ArchiveWrite<W>, S: Signer, P: AsRef<Path>>(
-        control_data: &ControlData,
-        directory: P,
-        writer: W,
-        signer: &S,
-        signature_kind: SignatureKind,
-    ) -> Result<(), std::io::Error> {
-        let directory = directory.as_ref();
-        let mut data = tar::Builder::new(GzEncoder::new(
-            Vec::with_capacity(4096),
-            Compression::best(),
-        ));
-        let mut control = tar::Builder::new(GzEncoder::new(
-            Vec::with_capacity(4096),
-            Compression::best(),
-        ));
-        for entry in WalkDir::new(directory).into_iter() {
-            let entry = entry?;
-            let relative_path = Path::new(".").join(
-                entry
-                    .path()
-                    .strip_prefix(directory)
-                    .map_err(std::io::Error::other)?
-                    .normalize(),
-            );
-            let mut header = tar::Header::new_old();
-            header.set_metadata(&std::fs::metadata(entry.path())?);
-            header.set_path(relative_path.as_path())?;
-            header.set_uid(0);
-            header.set_gid(0);
-            header.set_cksum();
-            if entry.file_type().is_dir() {
-                data.append::<&[u8]>(&header, &[])?;
-            } else {
-                let mut reader = File::open(entry.path())?;
-                data.append(&header, &mut reader)?;
-            }
-        }
-        let data = data.into_inner()?.finish()?;
-        control.add_regular_file("control", control_data.to_string())?;
-        let control = control.into_inner()?.finish()?;
-        let debian_binary = "2.0\n";
-        let mut message_bytes: Vec<u8> = Vec::new();
-        message_bytes.extend(debian_binary.as_bytes());
-        message_bytes.extend(&control);
-        message_bytes.extend(&data);
-        let signature = signer
-            .sign(&message_bytes[..])
-            .map_err(|_| std::io::Error::other("failed to sign the archive"))?;
-        let mut package = A::new(writer);
-        package.add_regular_file("debian-binary", debian_binary)?;
-        package.add_regular_file("control.tar.gz", control)?;
-        package.add_regular_file("data.tar.gz", data)?;
-        match signature_kind {
-            SignatureKind::Bundled { file_name } => {
-                package.add_regular_file(file_name, signature)?;
-                package.into_inner()?;
-            }
-            SignatureKind::Detached { mut writer } => {
-                package.into_inner()?;
-                writer.write_all(&signature[..])?;
-                writer.flush()?;
-            }
-        }
-        Ok(())
-    }
-
     pub(crate) fn read_control<'a, R: 'a + Read, A: 'a + ArchiveRead<'a, R>, V: Verifier>(
         reader: R,
         verifier: &V,
@@ -152,7 +77,4 @@ impl BasicPackage {
     }
 }
 
-pub enum SignatureKind {
-    Bundled { file_name: PathBuf },
-    Detached { writer: Box<dyn Write> },
-}
+pub const DEBIAN_BINARY: &str = "2.0\n";

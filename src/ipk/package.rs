@@ -7,12 +7,14 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 
+use crate::archive::ArchiveWrite;
 use crate::deb::BasicPackage;
-use crate::deb::SignatureKind;
+use crate::deb::DEBIAN_BINARY;
 use crate::ipk::ControlData;
 use crate::ipk::Error;
 use crate::ipk::PackageSigner;
 use crate::ipk::PackageVerifier;
+use crate::sign::SignatureWriter;
 
 pub struct Package;
 
@@ -25,6 +27,7 @@ impl Package {
     ) -> Result<(), std::io::Error> {
         let output_file: PathBuf = output_file.into();
         let writer = File::create(output_file.as_path())?;
+        let writer = GzEncoder::new(writer, Compression::best());
         let mut signature_output_file = output_file;
         match signature_output_file.file_name() {
             Some(file_name) => {
@@ -34,16 +37,21 @@ impl Package {
             }
             None => signature_output_file.set_file_name("sig"),
         };
-        let gz = GzEncoder::new(writer, Compression::best());
-        BasicPackage::write::<GzEncoder<File>, tar::Builder<GzEncoder<File>>, PackageSigner, P1>(
-            control_data,
-            directory,
-            gz,
-            signer,
-            SignatureKind::Detached {
-                writer: Box::new(File::create(signature_output_file.as_path())?),
-            },
-        )
+        let writer = SignatureWriter::new(writer, signer, signature_output_file);
+        let data = tar::Builder::from_directory(directory, gz_writer())?.finish()?;
+        let control =
+            tar::Builder::from_files([("control", control_data.to_string())], gz_writer())?
+                .finish()?;
+        tar::Builder::from_files(
+            [
+                ("debian-binary", DEBIAN_BINARY.as_bytes()),
+                ("control.tar.gz", &control),
+                ("data.tar.gz", &data),
+            ],
+            writer,
+        )?
+        .write_signature()?;
+        Ok(())
     }
 
     pub fn read_control<R: Read>(
@@ -57,6 +65,10 @@ impl Package {
     }
 }
 
+fn gz_writer() -> GzEncoder<Vec<u8>> {
+    GzEncoder::new(Vec::new(), Compression::best())
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -67,6 +79,7 @@ mod tests {
     use crate::ipk::SigningKey;
     use crate::test::DirectoryOfFiles;
 
+    // TODO BasicPackage is weak
     #[test]
     fn write_read() {
         let workdir = TempDir::new().unwrap();

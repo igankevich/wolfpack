@@ -2,11 +2,17 @@ use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 
+use flate2::write::GzEncoder;
+use flate2::Compression;
+
+use crate::archive::ArchiveWrite;
 use crate::deb::BasicPackage;
 use crate::deb::ControlData;
 use crate::deb::Error;
 use crate::deb::PackageSigner;
 use crate::deb::PackageVerifier;
+use crate::deb::DEBIAN_BINARY;
+use crate::sign::Signer;
 
 pub struct Package;
 
@@ -17,12 +23,26 @@ impl Package {
         writer: W,
         signer: &PackageSigner,
     ) -> Result<(), std::io::Error> {
-        BasicPackage::write::<W, ar::Builder<W>, PackageSigner, P>(
-            control_data,
-            directory,
+        let data = TarGz::from_directory(directory, gz_writer())?.finish()?;
+        let control =
+            TarGz::from_files([("control", control_data.to_string())], gz_writer())?.finish()?;
+        let mut message_bytes: Vec<u8> = Vec::new();
+        message_bytes.extend(DEBIAN_BINARY.as_bytes());
+        message_bytes.extend(&control);
+        message_bytes.extend(&data);
+        let signature = signer
+            .sign(&message_bytes[..])
+            .map_err(|_| std::io::Error::other("failed to sign the archive"))?;
+        ar::Builder::<W>::from_files(
+            [
+                ("debian-binary", DEBIAN_BINARY.as_bytes()),
+                ("control.tar.gz", &control),
+                ("data.tar.gz", &data),
+                ("_gpgorigin", &signature),
+            ],
             writer,
-            signer,
-        )
+        )?;
+        Ok(())
     }
 
     pub fn read_control<R: Read>(
@@ -31,6 +51,12 @@ impl Package {
     ) -> Result<ControlData, Error> {
         BasicPackage::read_control::<R, ar::Archive<R>, PackageVerifier>(reader, verifier)
     }
+}
+
+type TarGz = tar::Builder<GzEncoder<Vec<u8>>>;
+
+fn gz_writer() -> GzEncoder<Vec<u8>> {
+    GzEncoder::new(Vec::new(), Compression::best())
 }
 
 #[cfg(test)]
@@ -44,20 +70,20 @@ mod tests {
 
     use arbtest::arbtest;
     use pgp::types::PublicKeyTrait;
-    use pgp::KeyType;
     use tempfile::TempDir;
 
     use super::*;
-    use crate::sign::PgpVerifier;
-    use crate::test::pgp_keys;
+    use crate::deb::PackageSigner;
+    use crate::deb::PackageVerifier;
+    use crate::deb::SigningKey;
     use crate::test::DirectoryOfFiles;
     use crate::test::UpperHex;
 
     #[test]
     fn write_read() {
-        let (signing_key, verifying_key) = pgp_keys(KeyType::EdDSALegacy);
+        let (signing_key, verifying_key) = SigningKey::generate("wolfpack-pgp-id".into()).unwrap();
         let signer = PackageSigner::new(signing_key);
-        let verifier = PgpVerifier::new(verifying_key);
+        let verifier = PackageVerifier::new(verifying_key);
         arbtest(|u| {
             let control: ControlData = u.arbitrary()?;
             let directory: DirectoryOfFiles = u.arbitrary()?;
@@ -72,7 +98,7 @@ mod tests {
     #[ignore]
     #[test]
     fn dpkg_installs_random_packages() {
-        let (signing_key, verifying_key) = pgp_keys(KeyType::EdDSALegacy);
+        let (signing_key, verifying_key) = SigningKey::generate("wolfpack-pgp-id".into()).unwrap();
         let signer = PackageSigner::new(signing_key);
         let workdir = TempDir::new().unwrap();
         let root = workdir.path().join("root");

@@ -10,13 +10,13 @@ use std::path::PathBuf;
 
 use walkdir::WalkDir;
 
-use crate::deb::ControlData;
-use crate::deb::Error;
-use crate::deb::Package;
-use crate::deb::PackageVerifier;
-use crate::deb::SimpleValue;
-use crate::hash::MultiHash;
-use crate::hash::MultiHashReader;
+use crate::hash::Sha256Hash;
+use crate::hash::Sha256Reader;
+use crate::ipk::ControlData;
+use crate::ipk::Error;
+use crate::ipk::Package;
+use crate::ipk::PackageVerifier;
+use crate::ipk::SimpleValue;
 
 pub struct Packages {
     packages: HashMap<SimpleValue, PerArchPackages>,
@@ -36,12 +36,12 @@ impl Packages {
         let mut packages: HashMap<SimpleValue, PerArchPackages> = HashMap::new();
         let mut push_package = |path: &Path| -> Result<(), Error> {
             eprintln!("reading {}", path.display());
-            let mut reader = MultiHashReader::new(File::open(path)?);
+            let mut reader = Sha256Reader::new(File::open(path)?);
             let control = Package::read_control(&mut reader, verifier)?;
             let (hash, size) = reader.digest()?;
             let mut filename = PathBuf::new();
             filename.push("data");
-            filename.push(hash.sha2.to_string());
+            filename.push(hash.to_string());
             create_dir_all(output_dir.as_ref().join(&filename))?;
             filename.push(path.file_name().unwrap());
             let new_path = output_dir.as_ref().join(&filename);
@@ -113,7 +113,7 @@ impl Display for PerArchPackages {
 
 pub struct ExtendedControlData {
     pub control: ControlData,
-    hash: MultiHash,
+    hash: Sha256Hash,
     filename: PathBuf,
     size: usize,
 }
@@ -123,9 +123,7 @@ impl Display for ExtendedControlData {
         write!(f, "{}", self.control)?;
         writeln!(f, "Filename: {}", self.filename.display())?;
         writeln!(f, "Size: {}", self.size)?;
-        writeln!(f, "MD5sum: {:x}", self.hash.md5)?;
-        writeln!(f, "SHA1: {}", self.hash.sha1)?;
-        writeln!(f, "SHA256: {}", self.hash.sha2)?;
+        writeln!(f, "SHA256sum: {}", self.hash)?;
         Ok(())
     }
 }

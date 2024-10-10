@@ -10,9 +10,8 @@ use std::path::PathBuf;
 
 use walkdir::WalkDir;
 
-use crate::deb::ControlData;
-use crate::deb::Error;
 use crate::deb::Package;
+use crate::deb::Error;
 use crate::deb::PackageVerifier;
 use crate::deb::SimpleValue;
 use crate::hash::MultiHash;
@@ -112,7 +111,7 @@ impl Display for PerArchPackages {
 }
 
 pub struct ExtendedControlData {
-    pub control: ControlData,
+    pub control: Package,
     hash: MultiHash,
     filename: PathBuf,
     size: usize,

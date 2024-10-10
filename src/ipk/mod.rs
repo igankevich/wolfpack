@@ -8,7 +8,6 @@ pub use self::packages::*;
 pub use self::repository::*;
 pub use self::signer::*;
 
-pub type ControlData = crate::deb::ControlData;
 pub type Error = crate::deb::Error;
 pub type MultilineValue = crate::deb::MultilineValue;
 pub type PackageName = crate::deb::PackageName;

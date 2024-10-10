@@ -13,7 +13,7 @@ pub enum Error {
     #[error("invalid field value {0:?}")]
     FieldValue(String),
     #[error("invalid line in control data: {0:?}")]
-    ControlData(String),
+    Package(String),
     #[error("{0:?} is missing")]
     MissingField(&'static str),
     #[error("duplicate field {0:?}")]

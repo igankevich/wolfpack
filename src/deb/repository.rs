@@ -86,19 +86,19 @@ mod tests {
             )
             .unwrap();
         arbtest(|u| {
-            let mut control: ControlData = u.arbitrary()?;
+            let mut control: Package = u.arbitrary()?;
             control.architecture = "amd64".parse().unwrap();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let deb_path = workdir.path().join("test.deb");
             let _ = remove_dir_all(root.as_path());
             let package_name = control.name();
-            Package::write(
-                &control,
-                directory.path(),
-                File::create(deb_path.as_path()).unwrap(),
-                &signer,
-            )
-            .unwrap();
+            control
+                .write(
+                    directory.path(),
+                    File::create(deb_path.as_path()).unwrap(),
+                    &signer,
+                )
+                .unwrap();
             let suite: SimpleValue = "meta".parse().unwrap();
             Repository::write(
                 root.as_path(),

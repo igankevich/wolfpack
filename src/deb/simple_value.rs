@@ -81,7 +81,7 @@ impl TryFrom<Value> for SimpleValue {
         match other {
             Value::Simple(value) => Ok(value),
             Value::Folded(value) => Ok(value.into()),
-            Value::Multiline(..) => Err(Error::ControlData(
+            Value::Multiline(..) => Err(Error::Package(
                 "expected simple value, received multiline".into(),
             )),
         }

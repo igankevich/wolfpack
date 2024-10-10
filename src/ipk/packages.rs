@@ -12,7 +12,6 @@ use walkdir::WalkDir;
 
 use crate::hash::Sha256Hash;
 use crate::hash::Sha256Reader;
-use crate::ipk::ControlData;
 use crate::ipk::Error;
 use crate::ipk::Package;
 use crate::ipk::PackageVerifier;
@@ -112,7 +111,7 @@ impl Display for PerArchPackages {
 }
 
 pub struct ExtendedControlData {
-    pub control: ControlData,
+    pub control: Package,
     hash: Sha256Hash,
     filename: PathBuf,
     size: usize,

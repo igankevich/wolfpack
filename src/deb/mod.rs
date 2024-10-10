@@ -1,11 +1,10 @@
-mod basic_package;
+mod constants;
 mod control_data;
 mod error;
 mod field_name;
 mod folded_value;
 mod md5_sums;
 mod multiline_value;
-mod package;
 mod package_name;
 mod package_version;
 mod packages;
@@ -15,14 +14,13 @@ mod signer;
 mod simple_value;
 mod value;
 
-pub(crate) use self::basic_package::*;
+pub use self::constants::*;
 pub use self::control_data::*;
 pub use self::error::*;
 pub use self::field_name::*;
 pub use self::folded_value::*;
 pub use self::md5_sums::*;
 pub use self::multiline_value::*;
-pub use self::package::*;
 pub use self::package_name::*;
 pub use self::package_version::*;
 pub use self::packages::*;

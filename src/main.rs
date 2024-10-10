@@ -19,18 +19,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let control_file = std::env::args().nth(1).unwrap();
     let directory = std::env::args().nth(2).unwrap();
-    let control_data: deb::ControlData = std::fs::read_to_string(control_file)?.parse()?;
+    let control_data: deb::Package = std::fs::read_to_string(control_file)?.parse()?;
     eprintln!("{}", control_data);
     let (deb_signing_key, deb_verifying_key) =
         deb::SigningKey::generate("deb-key-id".into()).unwrap();
     let deb_signer = deb::PackageSigner::new(deb_signing_key);
     let deb_verifier = deb::PackageVerifier::new(deb_verifying_key);
-    deb::Package::write(
-        &control_data,
-        directory,
-        File::create("test.deb")?,
-        &deb_signer,
-    )?;
+    control_data.write(directory, File::create("test.deb")?, &deb_signer)?;
     let manifest: CompactManifest =
         std::fs::read_to_string("freebsd/+COMPACT_MANIFEST")?.parse()?;
     PkgPackage::new(manifest, "freebsd/root".into()).build(File::create("test.pkg")?)?;

@@ -62,7 +62,7 @@ impl TryFrom<Value> for PackageName {
     fn try_from(other: Value) -> Result<Self, Self::Error> {
         match other {
             Value::Simple(value) => value.try_into(),
-            _ => Err(Error::ControlData(
+            _ => Err(Error::Package(
                 "expected simple value, received multiline/folded".into(),
             )),
         }

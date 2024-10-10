@@ -1,5 +1,8 @@
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::fs::File;
 use std::io::Read;
+use std::ops::Deref;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -11,20 +14,20 @@ use normalize_path::NormalizePath;
 use crate::archive::ArchiveRead;
 use crate::archive::ArchiveWrite;
 use crate::compress::AnyDecoder;
-use crate::deb::DEBIAN_BINARY;
+use crate::deb;
+use crate::deb::DEBIAN_BINARY_CONTENTS;
 use crate::deb::DEBIAN_BINARY_FILE_NAME;
-use crate::ipk::ControlData;
 use crate::ipk::Error;
 use crate::ipk::PackageSigner;
 use crate::ipk::PackageVerifier;
 use crate::sign::SignatureWriter;
 use crate::sign::VerifyingReader;
 
-pub struct Package;
+pub struct Package(deb::Package);
 
 impl Package {
     pub fn write<P1: AsRef<Path>, P2: Into<PathBuf>>(
-        control_data: &ControlData,
+        &self,
         directory: P1,
         output_file: P2,
         signer: &PackageSigner,
@@ -36,11 +39,10 @@ impl Package {
         let writer = GzEncoder::new(writer, Compression::best());
         let data = tar::Builder::from_directory(directory, gz_writer())?.finish()?;
         let control =
-            tar::Builder::from_files([("control", control_data.to_string())], gz_writer())?
-                .finish()?;
+            tar::Builder::from_files([("control", self.0.to_string())], gz_writer())?.finish()?;
         tar::Builder::from_files(
             [
-                (DEBIAN_BINARY_FILE_NAME, DEBIAN_BINARY.as_bytes()),
+                (DEBIAN_BINARY_FILE_NAME, DEBIAN_BINARY_CONTENTS.as_bytes()),
                 ("control.tar.gz", &control),
                 ("data.tar.gz", &data),
             ],
@@ -55,7 +57,7 @@ impl Package {
         reader: R,
         path: P,
         verifier: &PackageVerifier,
-    ) -> Result<ControlData, Error> {
+    ) -> Result<Package, Error> {
         let signature_path = to_signature_path(path.as_ref().to_path_buf());
         let reader = VerifyingReader::new(reader, verifier, signature_path);
         let reader = GzDecoder::new(reader);
@@ -72,7 +74,8 @@ impl Package {
                             let mut buf = String::with_capacity(4096);
                             entry.read_to_string(&mut buf)?;
                             return buf
-                                .parse::<ControlData>()
+                                .parse::<deb::Package>()
+                                .map(Into::into)
                                 .map(Some)
                                 .map_err(std::io::Error::other);
                         }
@@ -81,6 +84,26 @@ impl Package {
                 Ok(None)
             })?
             .ok_or_else(|| Error::MissingFile("missing control.tar*".into()))
+    }
+}
+
+impl Deref for Package {
+    type Target = deb::Package;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Display for Package {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl From<deb::Package> for Package {
+    fn from(other: deb::Package) -> Self {
+        Self(other)
     }
 }
 
@@ -116,7 +139,7 @@ mod tests {
         let signing_key = SigningKey::generate(Some("wolfpack".into()));
         let verifying_key = signing_key.to_verifying_key();
         arbtest(|u| {
-            let control: ControlData = u.arbitrary()?;
+            let control: Package = u.arbitrary()?;
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let file_path = workdir.path().join("test.ipk");
             Package::write(

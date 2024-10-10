@@ -96,7 +96,7 @@ impl TryFrom<Value> for MultilineValue {
         match other {
             Value::Simple(value) => Ok(value.into()),
             Value::Multiline(value) => Ok(value),
-            _ => Err(Error::ControlData(
+            _ => Err(Error::Package(
                 "expected multiline value, received folded".into(),
             )),
         }

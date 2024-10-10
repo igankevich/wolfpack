@@ -9,6 +9,7 @@ pub struct SignatureWriter<S: Signer, W: Write> {
     signer: S,
     signature_file: PathBuf,
     buffer: Vec<u8>,
+    signed: bool,
 }
 
 impl<S: Signer, W: Write> SignatureWriter<S, W> {
@@ -18,19 +19,25 @@ impl<S: Signer, W: Write> SignatureWriter<S, W> {
             signer,
             signature_file,
             buffer: Default::default(),
+            signed: false,
         }
     }
 
-    pub fn write_signature(self) -> Result<(), Error> {
+    pub fn write_signature(mut self) -> Result<(), Error> {
         self.do_write_signature()
     }
 
-    fn do_write_signature(&self) -> Result<(), Error> {
+    fn do_write_signature(&mut self) -> Result<(), Error> {
+        if self.signed {
+            return Ok(());
+        }
         let signature = self
             .signer
             .sign(&self.buffer[..])
             .map_err(|_| std::io::Error::other("failed to sign"))?;
-        std::fs::write(self.signature_file.as_path(), signature)
+        std::fs::write(self.signature_file.as_path(), signature)?;
+        self.signed = true;
+        Ok(())
     }
 }
 

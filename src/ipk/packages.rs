@@ -37,7 +37,7 @@ impl Packages {
         let mut push_package = |path: &Path| -> Result<(), Error> {
             eprintln!("reading {}", path.display());
             let mut reader = Sha256Reader::new(File::open(path)?);
-            let control = Package::read_control(&mut reader, verifier)?;
+            let control = Package::read_control(&mut reader, path, verifier)?;
             let (hash, size) = reader.digest()?;
             let mut filename = PathBuf::new();
             filename.push("data");

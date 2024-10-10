@@ -6,15 +6,19 @@ use std::path::PathBuf;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use normalize_path::NormalizePath;
 
+use crate::archive::ArchiveRead;
 use crate::archive::ArchiveWrite;
-use crate::deb::BasicPackage;
+use crate::compress::AnyDecoder;
 use crate::deb::DEBIAN_BINARY;
+use crate::deb::DEBIAN_BINARY_FILE_NAME;
 use crate::ipk::ControlData;
 use crate::ipk::Error;
 use crate::ipk::PackageSigner;
 use crate::ipk::PackageVerifier;
 use crate::sign::SignatureWriter;
+use crate::sign::VerifyingReader;
 
 pub struct Package;
 
@@ -27,46 +31,73 @@ impl Package {
     ) -> Result<(), std::io::Error> {
         let output_file: PathBuf = output_file.into();
         let writer = File::create(output_file.as_path())?;
-        let writer = GzEncoder::new(writer, Compression::best());
-        let mut signature_output_file = output_file;
-        match signature_output_file.file_name() {
-            Some(file_name) => {
-                let mut file_name = file_name.to_os_string();
-                file_name.push(".sig");
-                signature_output_file.set_file_name(file_name);
-            }
-            None => signature_output_file.set_file_name("sig"),
-        };
+        let signature_output_file = to_signature_path(output_file);
         let writer = SignatureWriter::new(writer, signer, signature_output_file);
+        let writer = GzEncoder::new(writer, Compression::best());
         let data = tar::Builder::from_directory(directory, gz_writer())?.finish()?;
         let control =
             tar::Builder::from_files([("control", control_data.to_string())], gz_writer())?
                 .finish()?;
         tar::Builder::from_files(
             [
-                ("debian-binary", DEBIAN_BINARY.as_bytes()),
+                (DEBIAN_BINARY_FILE_NAME, DEBIAN_BINARY.as_bytes()),
                 ("control.tar.gz", &control),
                 ("data.tar.gz", &data),
             ],
             writer,
         )?
+        .finish()?
         .write_signature()?;
         Ok(())
     }
 
-    pub fn read_control<R: Read>(
+    pub fn read_control<R: Read, P: AsRef<Path>>(
         reader: R,
+        path: P,
         verifier: &PackageVerifier,
     ) -> Result<ControlData, Error> {
-        let gz = GzDecoder::new(reader);
-        BasicPackage::read_control::<GzDecoder<R>, tar::Archive<GzDecoder<R>>, PackageVerifier>(
-            gz, verifier,
-        )
+        let signature_path = to_signature_path(path.as_ref().to_path_buf());
+        let reader = VerifyingReader::new(reader, verifier, signature_path);
+        let reader = GzDecoder::new(reader);
+        let mut reader = tar::Archive::new(reader);
+        reader
+            .find(|entry| {
+                let path = entry.normalized_path()?;
+                if matches!(path.to_str(), Some(path) if path.starts_with("control.tar")) {
+                    let mut tar_archive = tar::Archive::new(AnyDecoder::new(entry));
+                    for entry in tar_archive.entries()? {
+                        let mut entry = entry?;
+                        let path = entry.path()?.normalize();
+                        if path == Path::new("control") {
+                            let mut buf = String::with_capacity(4096);
+                            entry.read_to_string(&mut buf)?;
+                            return buf
+                                .parse::<ControlData>()
+                                .map(Some)
+                                .map_err(std::io::Error::other);
+                        }
+                    }
+                }
+                Ok(None)
+            })?
+            .ok_or_else(|| Error::MissingFile("missing control.tar*".into()))
     }
 }
 
 fn gz_writer() -> GzEncoder<Vec<u8>> {
     GzEncoder::new(Vec::new(), Compression::best())
+}
+
+fn to_signature_path(mut path: PathBuf) -> PathBuf {
+    match path.file_name() {
+        Some(file_name) => {
+            let mut file_name = file_name.to_os_string();
+            file_name.push(".sig");
+            path.set_file_name(file_name);
+        }
+        None => path.set_file_name("sig"),
+    };
+    path
 }
 
 #[cfg(test)]
@@ -79,7 +110,6 @@ mod tests {
     use crate::ipk::SigningKey;
     use crate::test::DirectoryOfFiles;
 
-    // TODO BasicPackage is weak
     #[test]
     fn write_read() {
         let workdir = TempDir::new().unwrap();
@@ -96,9 +126,12 @@ mod tests {
                 &signing_key,
             )
             .unwrap();
-            let actual =
-                Package::read_control(File::open(file_path.as_path()).unwrap(), &verifying_key)
-                    .unwrap();
+            let actual = Package::read_control(
+                File::open(file_path.as_path()).unwrap(),
+                file_path.as_path(),
+                &verifying_key,
+            )
+            .unwrap();
             assert_eq!(control, actual);
             Ok(())
         });

@@ -25,7 +25,15 @@ impl Signer for &PackageSigner {
 impl Verifier for PackageVerifier {
     fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
         let signature = Signature::from_bytes(signature, None).map_err(|_| Error)?;
-        self.verify(message, &signature).map_err(|_| Error)?;
+        ksign::VerifyingKey::verify(self, message, &signature).map_err(|_| Error)?;
+        Ok(())
+    }
+}
+
+impl Verifier for &PackageVerifier {
+    fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
+        let signature = Signature::from_bytes(signature, None).map_err(|_| Error)?;
+        ksign::VerifyingKey::verify(self, message, &signature).map_err(|_| Error)?;
         Ok(())
     }
 }

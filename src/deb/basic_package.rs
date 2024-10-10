@@ -23,7 +23,7 @@ impl BasicPackage {
         reader.find(|entry| {
             let path = entry.normalized_path()?;
             match path.to_str() {
-                Some("debian-binary") => {
+                Some(DEBIAN_BINARY_FILE_NAME) => {
                     message_parts[0].clear();
                     entry.read_to_end(&mut message_parts[0])?;
                 }
@@ -77,4 +77,5 @@ impl BasicPackage {
     }
 }
 
+pub const DEBIAN_BINARY_FILE_NAME: &str = "debian-binary";
 pub const DEBIAN_BINARY: &str = "2.0\n";

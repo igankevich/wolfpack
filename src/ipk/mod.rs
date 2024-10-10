@@ -1,10 +1,8 @@
 mod package;
-mod packages;
 mod repository;
 mod signer;
 
 pub use self::package::*;
-pub use self::packages::*;
 pub use self::repository::*;
 pub use self::signer::*;
 

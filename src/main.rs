@@ -34,19 +34,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         packages.build(File::create("packagesite.pkg")?, &secret_key)?;
     }
     let deb_release_signer = PgpCleartextSigner::new(secret_key.clone());
-    deb::Repository::write(
+    deb::Repository::new("repo", ["test.deb"], &deb_verifier)?.write(
         "repo",
         "test".parse()?,
-        ["test.deb"],
-        &deb_verifier,
         &deb_release_signer,
     )?;
-    // TODO ipk has its own whitelist of fields, see opkg.py
     // TODO freebsd http://pkg.freebsd.org/FreeBSD:15:amd64/base_latest/
-    //let ipk_signing_key = ksign::SigningKey::generate(None);
-    //ipk_signing_key
-    //    .sign(packages_string.as_bytes())
-    //    .write_to_file(Path::new("Packages.sig"))?;
     Ok(())
 }
 

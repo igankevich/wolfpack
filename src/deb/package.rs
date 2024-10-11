@@ -72,10 +72,7 @@ impl Package {
         Ok(())
     }
 
-    pub fn read_control<R: Read>(
-        reader: R,
-        verifier: &PackageVerifier,
-    ) -> Result<Package, Error> {
+    pub fn read_control<R: Read>(reader: R, verifier: &PackageVerifier) -> Result<Package, Error> {
         let mut reader = ar::Archive::new(reader);
         let mut control: Option<Vec<u8>> = None;
         let mut message_parts: [Vec<u8>; 3] = [Vec::new(), Vec::new(), Vec::new()];

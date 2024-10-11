@@ -83,11 +83,27 @@ fn is_valid_first_char(ch: u8) -> bool {
 }
 
 #[cfg(test)]
+impl<'a> arbitrary::Arbitrary<'a> for FieldName {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let valid_chars: Vec<_> = (b'!'..=(b'#' - 1))
+            .chain((b'#' + 1)..=(b'-' - 1))
+            .chain((b'-' + 1)..=b'9')
+            .chain(b';'..=b'~')
+            .collect();
+        let len = u.arbitrary_len::<u8>()?.max(2);
+        let mut string = Vec::with_capacity(len);
+        for _ in 0..len {
+            string.push(*u.choose(&valid_chars)?);
+        }
+        let string = String::from_utf8(string).unwrap();
+        Ok(Self::try_from(string).unwrap())
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::collections::hash_map::DefaultHasher;
 
-    use arbitrary::Arbitrary;
-    use arbitrary::Unstructured;
     use arbtest::arbtest;
 
     use super::*;
@@ -120,22 +136,5 @@ mod tests {
             assert_eq!(hash, lowercase_hash);
             Ok(())
         });
-    }
-
-    impl<'a> Arbitrary<'a> for FieldName {
-        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            let valid_chars: Vec<_> = (b'!'..=(b'#' - 1))
-                .chain((b'#' + 1)..=(b'-' - 1))
-                .chain((b'-' + 1)..=b'9')
-                .chain(b';'..=b'~')
-                .collect();
-            let len = u.arbitrary_len::<u8>()?.max(2);
-            let mut string = Vec::with_capacity(len);
-            for _ in 0..len {
-                string.push(*u.choose(&valid_chars)?);
-            }
-            let string = String::from_utf8(string).unwrap();
-            Ok(Self::try_from(string).unwrap())
-        }
     }
 }

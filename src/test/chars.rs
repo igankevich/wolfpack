@@ -13,7 +13,6 @@ pub struct CharRange {
 
 impl CharRange {
     // TODO ToRangeInclusive trait instead of CharArg
-    // TODO const intervals instead of dynamic
     pub fn new<'a, I, C>(intervals: I) -> Self
     where
         I: IntoIterator<Item = C>,

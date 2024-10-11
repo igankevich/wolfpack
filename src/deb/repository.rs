@@ -213,16 +213,10 @@ mod tests {
                 )
                 .unwrap();
             let suite: SimpleValue = "meta".parse().unwrap();
-            Repository::new(
-                root.as_path(),
-                [deb_path.as_path()],
-                &verifier,
-            ).unwrap().write(
-                root.as_path(),
-                suite.clone(),
-                &release_signer,
-            )
-            .unwrap();
+            Repository::new(root.as_path(), [deb_path.as_path()], &verifier)
+                .unwrap()
+                .write(root.as_path(), suite.clone(), &release_signer)
+                .unwrap();
             let fingerprint = verifying_key.fingerprint();
             std::fs::write(
                 "/etc/apt/sources.list.d/test.list",

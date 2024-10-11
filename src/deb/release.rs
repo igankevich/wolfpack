@@ -26,7 +26,11 @@ pub struct Release {
 }
 
 impl Release {
-    pub fn new(suite: SimpleValue, packages: &Repository, packages_str: &str) -> Result<Self, Error> {
+    pub fn new(
+        suite: SimpleValue,
+        packages: &Repository,
+        packages_str: &str,
+    ) -> Result<Self, Error> {
         let architectures = packages.architectures();
         let mut checksums = HashMap::new();
         let reader = MultiHashReader::new(packages_str.as_bytes());

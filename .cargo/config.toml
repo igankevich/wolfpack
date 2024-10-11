@@ -1,0 +1,12 @@
+[alias]
+test-deb = [
+    "test",
+    "--lib",
+    "--config",
+    "target.'cfg(target_os = \"linux\")'.runner=\"./ci/runner.sh ghcr.io/igankevich/wolfpack-ci-debian:latest\"",
+    "--",
+    "--nocapture",
+    "--ignored",
+    "dpkg",
+    "apt",
+]

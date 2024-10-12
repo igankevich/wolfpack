@@ -11,7 +11,7 @@ shift
 executable="$1"
 shift
 filename="$(basename "$executable")"
-workdir="$(mktemp -d)"
+workdir="$(mktemp -d /dev/shm/.wolfpack-runner-XXXXXXXX)"
 cp -v "$executable" "$workdir"/"$filename"
 ldd "$executable" |
     while read -r _lib _arrow path _rest; do

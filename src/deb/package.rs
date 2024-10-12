@@ -30,14 +30,14 @@ use crate::sign::Verifier;
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 pub struct Package {
-    name: PackageName,
-    version: PackageVersion,
-    license: SimpleValue,
+    pub name: PackageName,
+    pub version: PackageVersion,
+    pub license: SimpleValue,
     pub architecture: SimpleValue,
-    maintainer: SimpleValue,
-    description: MultilineValue,
-    installed_size: Option<u64>,
-    other: Fields,
+    pub maintainer: SimpleValue,
+    pub description: MultilineValue,
+    pub installed_size: Option<u64>,
+    pub other: Fields,
 }
 
 impl Package {
@@ -251,21 +251,25 @@ fn is_multiline(name: &FieldName) -> bool {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
-struct Fields {
+pub struct Fields {
     fields: HashMap<FieldName, Value>,
 }
 
 impl Fields {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             fields: Default::default(),
         }
     }
 
-    fn remove(&mut self, name: &'static str) -> Result<Value, Error> {
+    pub fn remove(&mut self, name: &'static str) -> Result<Value, Error> {
         self.fields
             .remove(&FieldName::new_unchecked(name))
             .ok_or_else(|| Error::MissingField(name))
+    }
+
+    pub fn clear(&mut self) {
+        self.fields.clear();
     }
 }
 

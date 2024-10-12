@@ -3,6 +3,7 @@ use std::fmt::Formatter;
 use std::fs::File;
 use std::io::Read;
 use std::ops::Deref;
+use std::ops::DerefMut;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -97,6 +98,12 @@ impl Deref for Package {
     }
 }
 
+impl DerefMut for Package {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 impl Display for Package {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         Display::fmt(&self.0, f)
@@ -127,6 +134,9 @@ fn to_signature_path(mut path: PathBuf) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+
+    use std::process::Command;
+    use std::time::Duration;
 
     use arbtest::arbtest;
     use tempfile::TempDir;
@@ -160,5 +170,45 @@ mod tests {
             assert_eq!(control, actual);
             Ok(())
         });
+    }
+
+    #[ignore]
+    #[test]
+    fn opkg_installs_random_packages() {
+        let workdir = TempDir::new().unwrap();
+        let signing_key = SigningKey::generate(Some("wolfpack".into()));
+        let _verifying_key = signing_key.to_verifying_key();
+        arbtest(|u| {
+            let mut package: Package = u.arbitrary()?;
+            package.architecture = "all".parse().unwrap();
+            package.installed_size = Some(100);
+            let directory: DirectoryOfFiles = u.arbitrary()?;
+            let package_path = workdir.path().join("test.ipk");
+            package
+                .write(directory.path(), package_path.as_path(), &signing_key)
+                .unwrap();
+            assert!(
+                Command::new("opkg")
+                    .arg("install")
+                    .arg(package_path.as_path())
+                    .status()
+                    .unwrap()
+                    .success(),
+                "package:\n========{}========",
+                package
+            );
+            assert!(
+                Command::new("opkg")
+                    .arg("remove")
+                    .arg(package.name().to_string())
+                    .status()
+                    .unwrap()
+                    .success(),
+                "package:\n========{}========",
+                package
+            );
+            Ok(())
+        })
+        .budget(Duration::from_secs(10));
     }
 }

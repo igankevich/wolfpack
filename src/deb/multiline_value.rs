@@ -108,9 +108,13 @@ mod tests {
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use arbtest::arbtest;
+    use rand::Rng;
+    use rand_mt::Mt64;
 
     use super::*;
-    use crate::test::MS_DOS_NEWLINE;
+    use crate::test::Chars;
+    use crate::test::CONTROL;
+    use crate::test::UNICODE;
 
     #[test]
     fn multiline_display_parse() {
@@ -125,15 +129,17 @@ mod tests {
 
     impl<'a> Arbitrary<'a> for MultilineValue {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            let mut string: String = u.arbitrary()?;
-            string = string.replace(['\r', MS_DOS_NEWLINE], "");
-            if string.starts_with(dpkg_is_whitespace) {
-                string = "x".to_string() + &string;
-            }
-            if string.is_empty() {
-                string.push('x');
-            }
-            Ok(Self::try_from(string).unwrap())
+            let seed: u64 = u.arbitrary()?;
+            let mut rng = Mt64::new(seed);
+            let valid_chars = Chars::from(UNICODE).difference(CONTROL);
+            let s = loop {
+                let len: usize = rng.gen_range(1..=100);
+                let s = valid_chars.random_string(&mut rng, len);
+                if !s.starts_with(dpkg_is_whitespace) {
+                    break s;
+                }
+            };
+            Ok(Self::try_from(s).unwrap())
         }
     }
 

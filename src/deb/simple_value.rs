@@ -155,7 +155,6 @@ mod tests {
                 if !s.chars().next().iter().all(|ch| ch.is_whitespace()) {
                     break s;
                 }
-                eprintln!("ws {:?}", s);
             };
             Ok(Self::new(s).unwrap())
         }

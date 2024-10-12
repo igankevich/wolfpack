@@ -367,16 +367,13 @@ mod tests {
                     r#"<?xml version="1.0"?>
 <!DOCTYPE Policy SYSTEM "http://www.debian.org/debsig/1.0/policy.dtd">
 <Policy xmlns="https://www.debian.org/debsig/1.0/">
-
   <Origin Name="test" id="{0}" Description="Test package"/>
-
   <Selection>
     <Required Type="origin" File="debsig.gpg" id="{0}"/>
   </Selection>
-
-   <Verification MinOptional="0">
+  <Verification MinOptional="0">
     <Required Type="origin" File="debsig.gpg" id="{0}"/>
-   </Verification>
+  </Verification>
 </Policy>
 "#,
                     verifying_key_hex
@@ -396,23 +393,30 @@ mod tests {
                     &signer,
                 )
                 .unwrap();
-            assert!(Command::new("gpg")
-                .arg("--dearmor")
-                .arg("--output")
-                .arg(keyring_file.as_path())
-                .arg(verifying_key_file.as_path())
-                .status()
-                .unwrap()
-                .success());
-            assert!(Command::new("debsig-verify")
-                .arg("--debug")
-                .arg("--root")
-                .arg(root.as_path())
-                .arg(path.as_path())
-                .status()
-                .unwrap()
-                .success());
-            eprint!("{}", control);
+            assert!(
+                Command::new("gpg")
+                    .arg("--dearmor")
+                    .arg("--output")
+                    .arg(keyring_file.as_path())
+                    .arg(verifying_key_file.as_path())
+                    .status()
+                    .unwrap()
+                    .success(),
+                "control:\n========{}========",
+                control
+            );
+            assert!(
+                Command::new("debsig-verify")
+                    .arg("--debug")
+                    .arg("--root")
+                    .arg(root.as_path())
+                    .arg(path.as_path())
+                    .status()
+                    .unwrap()
+                    .success(),
+                "control:\n========{}========",
+                control
+            );
             assert!(
                 Command::new("dpkg")
                     .arg("--root")
@@ -422,18 +426,22 @@ mod tests {
                     .status()
                     .unwrap()
                     .success(),
-                "control = {:?}",
+                "control:\n========{}========",
                 control
             );
-            assert!(Command::new("dpkg-query")
-                .arg("--root")
-                .arg(root.as_path())
-                .arg("-L")
-                .arg(control.name().as_str())
-                .stdout(Stdio::null())
-                .status()
-                .unwrap()
-                .success());
+            assert!(
+                Command::new("dpkg-query")
+                    .arg("--root")
+                    .arg(root.as_path())
+                    .arg("-L")
+                    .arg(control.name().as_str())
+                    .stdout(Stdio::null())
+                    .status()
+                    .unwrap()
+                    .success(),
+                "control:\n========{}========",
+                control
+            );
             Ok(())
         })
         .budget(Duration::from_secs(10));

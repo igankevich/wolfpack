@@ -1287,15 +1287,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "patchelf"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dad9ad0be261cb118cb6ee66675910ce718da9e600746b0427a81521e5a91524"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "pem-rfc7468"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2085,7 +2076,6 @@ dependencies = [
  "log",
  "md5",
  "normalize-path",
- "patchelf",
  "pgp",
  "rand",
  "rand_mt",

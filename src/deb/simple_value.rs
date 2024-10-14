@@ -81,7 +81,7 @@ impl TryFrom<Value> for SimpleValue {
         match other {
             Value::Simple(value) => Ok(value),
             Value::Folded(value) => Ok(value.into()),
-            Value::Multiline(..) => Err(Error::ControlData(
+            Value::Multiline(..) => Err(Error::Package(
                 "expected simple value, received multiline".into(),
             )),
         }
@@ -115,12 +115,16 @@ fn is_valid_char(ch: &u8) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::test::MS_DOS_NEWLINE;
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use arbtest::arbtest;
+    use rand::Rng;
+    use rand_mt::Mt64;
 
     use super::*;
+    use crate::test::Chars;
+    use crate::test::CONTROL;
+    use crate::test::UNICODE;
 
     #[test]
     fn invalid_simple_value() {
@@ -142,11 +146,16 @@ mod tests {
 
     impl<'a> Arbitrary<'a> for SimpleValue {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            let s: String = u.arbitrary()?;
-            let mut s = s.replace(['\n', '\r', MS_DOS_NEWLINE], " ");
-            if s.chars().next().iter().all(|ch| ch.is_whitespace()) {
-                s = "x".to_string() + &s;
-            }
+            let seed: u64 = u.arbitrary()?;
+            let mut rng = Mt64::new(seed);
+            let valid_chars = Chars::from(UNICODE).difference(CONTROL);
+            let s = loop {
+                let len: usize = rng.gen_range(1..=100);
+                let s = valid_chars.random_string(&mut rng, len);
+                if !s.chars().next().iter().all(|ch| ch.is_whitespace()) {
+                    break s;
+                }
+            };
             Ok(Self::new(s).unwrap())
         }
     }

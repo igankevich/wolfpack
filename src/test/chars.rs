@@ -5,33 +5,36 @@ use gcollections::ops::*;
 use interval::ops::*;
 use interval::Interval;
 use interval::IntervalSet;
+use rand::Rng;
 
 #[derive(Debug, Clone)]
-pub struct CharRange {
+pub struct Chars {
     intervals: IntervalSet<u32>,
 }
 
-impl CharRange {
-    // TODO ToRangeInclusive trait instead of CharArg
-    // TODO const intervals instead of dynamic
-    pub fn new<'a, I, C>(intervals: I) -> Self
-    where
-        I: IntoIterator<Item = C>,
-        C: Into<CharArg<'a>>,
-    {
-        let mut set = IntervalSet::empty();
-        for interval in intervals.into_iter() {
-            let chars: CharArg = interval.into();
-            chars.merge_into(&mut set);
+impl Chars {
+    pub fn union<O: Into<Self>>(&self, other: O) -> Self {
+        let other: Self = other.into();
+        Self {
+            intervals: self.intervals.union(&other.intervals),
         }
-        Self { intervals: set }
+    }
+
+    pub fn difference<O: Into<Self>>(&self, other: O) -> Self {
+        let other: Self = other.into();
+        Self {
+            intervals: self.intervals.difference(&other.intervals),
+        }
     }
 
     pub fn get(&self, mut i: u32) -> Option<char> {
         for interval in self.intervals.iter() {
             let s = interval.size();
             if i < s {
-                return char::from_u32(interval.lower() + i);
+                return Some(
+                    char::from_u32(interval.lower() + i)
+                        .expect(&format!("failed on {:x}", interval.lower() + i)),
+                );
             }
             i -= s;
         }
@@ -51,12 +54,6 @@ impl CharRange {
         self.intervals.contains(&ch)
     }
 
-    pub fn union(&self, other: &Self) -> CharRange {
-        Self {
-            intervals: self.intervals.union(&other.intervals),
-        }
-    }
-
     pub fn arbitrary_char(&self, u: &mut Unstructured<'_>) -> arbitrary::Result<char> {
         let i = u.int_in_range(0..=(self.len() - 1))?;
         Ok(self.get(i).expect("should not fail"))
@@ -73,71 +70,53 @@ impl CharRange {
         }
         Ok(s)
     }
-}
 
-pub enum CharArg<'a> {
-    RangeInclusive(RangeInclusive<u32>),
-    Slice(&'a [char]),
-}
+    pub fn random_char<R: Rng>(&self, rng: &mut R) -> char {
+        let i = rng.gen_range(0..=(self.len() - 1));
+        self.get(i).expect("should not fail")
+    }
 
-impl<'a> CharArg<'a> {
-    pub fn merge_into(self, set: &mut IntervalSet<u32>) {
-        match self {
-            Self::RangeInclusive(range) => {
-                let (a, b) = range.into_inner();
-                set.extend([Interval::new(a, b)]);
-            }
-            Self::Slice(slice) => {
-                set.extend(slice.iter().map(|ch| {
-                    let i = *ch as u32;
-                    Interval::new(i, i)
-                }));
-            }
+    pub fn random_string<R: Rng>(&self, rng: &mut R, len: usize) -> String {
+        let mut s = String::with_capacity(len);
+        for _ in 0..len {
+            s.push(self.random_char(rng));
         }
+        s
     }
 }
 
-impl<'a> From<RangeInclusive<char>> for CharArg<'a> {
+impl From<RangeInclusive<char>> for Chars {
     fn from(other: RangeInclusive<char>) -> Self {
         let (a, b) = other.into_inner();
-        Self::RangeInclusive((a as u32)..=(b as u32))
+        let mut intervals = IntervalSet::empty();
+        intervals.extend([Interval::new(a as u32, b as u32)]);
+        Self { intervals }
     }
 }
 
-impl<'a> From<&'a [char]> for CharArg<'a> {
-    fn from(other: &'a [char]) -> Self {
-        Self::Slice(other)
+impl<const N: usize> From<[RangeInclusive<char>; N]> for Chars {
+    fn from(other: [RangeInclusive<char>; N]) -> Self {
+        let mut iter = other.into_iter();
+        let mut set = Self::from(iter.next().unwrap());
+        for range in iter {
+            set = set.union(range);
+        }
+        set
     }
 }
 
-impl<'a, const N: usize> From<&'a [char; N]> for CharArg<'a> {
-    fn from(other: &'a [char; N]) -> Self {
-        Self::Slice(other.as_slice())
+impl From<&[char]> for Chars {
+    fn from(other: &[char]) -> Self {
+        let mut intervals = IntervalSet::empty();
+        for ch in other {
+            intervals.extend([Interval::new(*ch as u32, *ch as u32)]);
+        }
+        Self { intervals }
     }
 }
 
-#[macro_export]
-macro_rules! chars {
-    ($($arg:expr),*) => {
-        $crate::test::CharRange::new([$($crate::test::CharArg::from($arg)),*])
-    }
-}
-
-pub use chars;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chars() {
-        let chars = CharRange::new(['a'..='z', '0'..='9']);
-        assert_eq!(26 + 10, chars.len());
-        assert_eq!(Some('2'), chars.get(2));
-        assert_eq!(Some('3'), chars.get(3));
-        assert_eq!(Some('a'), chars.get(10));
-        assert_eq!(Some('b'), chars.get(11));
-        let chars = chars!('a'..='z', '0'..='9', &['+']);
-        assert!(chars.contains('+'));
+impl<const N: usize> From<[char; N]> for Chars {
+    fn from(other: [char; N]) -> Self {
+        Self::from(&other[..])
     }
 }

@@ -10,7 +10,7 @@ use chrono::DateTime;
 use chrono::Utc;
 
 use crate::deb::Error;
-use crate::deb::Packages;
+use crate::deb::Repository;
 use crate::deb::SimpleValue;
 use crate::hash::MultiHash;
 use crate::hash::MultiHashReader;
@@ -26,7 +26,11 @@ pub struct Release {
 }
 
 impl Release {
-    pub fn new(suite: SimpleValue, packages: &Packages, packages_str: &str) -> Result<Self, Error> {
+    pub fn new(
+        suite: SimpleValue,
+        packages: &Repository,
+        packages_str: &str,
+    ) -> Result<Self, Error> {
         let architectures = packages.architectures();
         let mut checksums = HashMap::new();
         let reader = MultiHashReader::new(packages_str.as_bytes());

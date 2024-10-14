@@ -237,7 +237,13 @@ mod tests {
                 let num_chars = rng.gen_range(1..128);
                 let mut line = String::with_capacity(num_chars);
                 for _ in 0..num_chars {
-                    line.push(chars[rng.gen_range(0..chars.len())] as char);
+                    let ch = loop {
+                        let ch = chars[rng.gen_range(0..chars.len())] as char;
+                        if !dpkg_is_whitespace(ch) {
+                            break ch;
+                        }
+                    };
+                    line.push(ch);
                 }
                 lines.push(line);
             }

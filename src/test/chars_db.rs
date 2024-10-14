@@ -15,6 +15,11 @@ pub const CONTROL: [char; 65] = [
 // TODO ranges allow constructing invalid chars
 pub const UNICODE: [RangeInclusive<char>; 2] = ['\u{0}'..='\u{d7ff}', '\u{e000}'..='\u{10FFFF}'];
 
+pub const ASCII: RangeInclusive<char> = '\u{0}'..='\u{127}';
+pub const ASCII_LOWERCASE: RangeInclusive<char> = 'a'..='z';
+pub const ASCII_UPPERCASE: RangeInclusive<char> = 'A'..='Z';
+pub const ASCII_DIGIT: RangeInclusive<char> = '0'..='9';
+
 #[cfg(test)]
 mod tests {
     use super::*;

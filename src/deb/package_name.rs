@@ -74,19 +74,6 @@ fn is_valid_char(ch: char) -> bool {
 }
 
 #[cfg(test)]
-impl<'a> arbitrary::Arbitrary<'a> for PackageName {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        use crate::test::chars;
-        let valid_first_chars = chars!('a'..='z', '0'..='9');
-        let valid_chars = valid_first_chars.union(&chars!(&['+', '-', '.']));
-        let len = u.int_in_range(2..=100)?;
-        let mut s = valid_chars.arbitrary_string(u, len - 1)?;
-        s.insert(0, valid_first_chars.arbitrary_char(u)?);
-        Ok(Self::try_from(s).unwrap())
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use arbtest::arbtest;
 
@@ -119,5 +106,19 @@ mod tests {
             assert_eq!(simple1, simple2);
             Ok(())
         });
+    }
+
+    impl<'a> arbitrary::Arbitrary<'a> for PackageName {
+        fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+            use crate::test::Chars;
+            use crate::test::ASCII_DIGIT;
+            use crate::test::ASCII_LOWERCASE;
+            let valid_first_chars = Chars::from(ASCII_LOWERCASE).union(ASCII_DIGIT);
+            let valid_chars = valid_first_chars.union(['+', '-', '.']);
+            let len = u.int_in_range(2..=100)?;
+            let mut s = valid_chars.arbitrary_string(u, len - 1)?;
+            s.insert(0, valid_first_chars.arbitrary_char(u)?);
+            Ok(Self::try_from(s).unwrap())
+        }
     }
 }

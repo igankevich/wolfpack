@@ -17,7 +17,7 @@ EOF
 }
 
 build_other() {
-    for suffix in '' '-debian'; do
+    for suffix in '' '-debian' '-freebsd'; do
         image=ghcr.io/igankevich/wolfpack-ci"$suffix":latest
         docker build --tag "$image" - <ci/Dockerfile"$suffix"
         #docker push $image
@@ -26,7 +26,7 @@ build_other() {
 
 main() {
     . ./ci/preamble.sh
-    build_openwrt
+    #build_openwrt
     build_other
 }
 

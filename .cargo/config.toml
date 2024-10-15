@@ -20,3 +20,13 @@ test-ipk = [
     "--ignored",
     "opkg",
 ]
+test-pkg = [
+    "test",
+    "--lib",
+    "--config",
+    "target.'cfg(target_os = \"linux\")'.runner=\"./ci/runner.sh ghcr.io/igankevich/wolfpack-ci-freebsd:latest\"",
+    "--",
+    "--nocapture",
+    "--ignored",
+    "freebsd",
+]

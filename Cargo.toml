@@ -15,8 +15,10 @@ log = "0.4.22"
 md5 = "0.7.0"
 normalize-path = "0.2.1"
 pgp = "0.14.0"
+pkcs8 = { version = "0.10.2", features = ["std", "encryption"], default-features = false }
 rand = "0.8.5"
 rand_mt = "4.2.2"
+secp256k1 = { version = "0.30.0", features = ["std", "rand", "global-context", "hashes"], default-features = false }
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1.0.128"
 sha1 = "0.10.6"

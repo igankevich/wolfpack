@@ -33,7 +33,7 @@ impl Chars {
             if i < s {
                 return Some(
                     char::from_u32(interval.lower() + i)
-                        .expect(&format!("failed on {:x}", interval.lower() + i)),
+                        .unwrap_or_else(|| panic!("failed on {:x}", interval.lower() + i)),
                 );
             }
             i -= s;

@@ -2173,6 +2173,7 @@ dependencies = [
  "arbtest",
  "bzip2",
  "chrono",
+ "der",
  "flate2",
  "gcollections",
  "hex",
@@ -2191,11 +2192,13 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "spki",
  "tar",
  "tempfile",
  "thiserror",
  "walkdir",
  "xz",
+ "zeroize",
  "zstd",
 ]
 

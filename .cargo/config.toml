@@ -28,5 +28,6 @@ test-pkg = [
     "--",
     "--nocapture",
     "--ignored",
-    "freebsd",
+    # TODO
+    "freebsd_pkg_installs_random_packages",
 ]

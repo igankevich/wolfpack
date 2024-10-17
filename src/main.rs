@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     control_data.write(directory, File::create("test.deb")?, &deb_signer)?;
     let manifest: CompactManifest =
         std::fs::read_to_string("freebsd/+COMPACT_MANIFEST")?.parse()?;
-    PkgPackage::new(manifest, "freebsd/root".into()).build(File::create("test.pkg")?)?;
+    PkgPackage::new(manifest, "freebsd/root".into()).write(File::create("test.pkg")?)?;
     {
         let packages = pkg::Packages::new(["test.pkg"])?;
         packages.build(File::create("packagesite.pkg")?, &secret_key)?;

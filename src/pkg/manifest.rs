@@ -1,27 +1,33 @@
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::fmt::Formatter;
 use std::path::PathBuf;
 use std::str::FromStr;
 
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::deb::PackageName;
+use crate::deb::PackageVersion;
+
 #[derive(Serialize, Deserialize, Clone)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct CompactManifest {
-    name: String,
+    name: PackageName,
     origin: String,
-    version: String,
+    version: PackageVersion,
     comment: String,
     maintainer: String,
     www: String,
     abi: String,
     arch: String,
     prefix: PathBuf,
-    flatsize: u64,
-    licenselogic: String,
+    pub flatsize: u32,
+    licenselogic: LicenseLogic,
     licenses: Vec<String>,
     desc: String,
     #[serde(default)]
-    deps: HashMap<String, Dependency>,
+    deps: HashMap<PackageName, Dependency>,
     categories: Vec<String>,
     shlibs_required: Vec<PathBuf>,
     shlibs_provided: Vec<PathBuf>,
@@ -30,14 +36,20 @@ pub struct CompactManifest {
 
 impl ToString for CompactManifest {
     fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap()
+        // TODO
+        serde_json::to_string_pretty(self).unwrap()
+    }
+}
+
+impl Debug for CompactManifest {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        f.write_str(serde_json::to_string_pretty(self).unwrap().as_str())
     }
 }
 
 impl FromStr for CompactManifest {
     type Err = serde_json::Error;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        eprintln!("parse");
         serde_json::from_str(value)
     }
 }
@@ -54,7 +66,8 @@ pub struct Manifest {
 
 impl ToString for Manifest {
     fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap()
+        // TODO
+        serde_json::to_string_pretty(self).unwrap()
     }
 }
 
@@ -97,7 +110,21 @@ impl FromStr for PackageMeta {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Dependency {
     origin: String,
     version: String,
+}
+
+impl Debug for Dependency {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        f.write_str(serde_json::to_string_pretty(self).unwrap().as_str())
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+pub enum LicenseLogic {
+    Single,
 }

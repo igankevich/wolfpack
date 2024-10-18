@@ -273,6 +273,12 @@ impl Fields {
     }
 }
 
+impl Default for Fields {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 type TarGz = tar::Builder<GzEncoder<Vec<u8>>>;
 
 fn gz_writer() -> GzEncoder<Vec<u8>> {

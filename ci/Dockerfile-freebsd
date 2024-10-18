@@ -1,0 +1,11 @@
+FROM debian:bookworm
+
+RUN export DEBIAN_FRONTEND=noninteractive \
+    && apt-get -qq update \
+    && apt-get -qq install -y build-essential libbsd-dev git libarchive-dev libz-dev libbz2-dev liblzma-dev libssl-dev m4 \
+    && git clone --depth=1 --branch=1.21.3 https://github.com/freebsd/pkg /tmp/pkg \
+    && cd /tmp/pkg \
+    && ./configure \
+    && make \
+    && make install \
+    && rm -rf /var/lib/apt/lists/* /tmp/pkg

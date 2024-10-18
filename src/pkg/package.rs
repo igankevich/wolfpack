@@ -14,6 +14,7 @@ use zstd::stream::read::Decoder as ZstdDecoder;
 use zstd::stream::write::Encoder as ZstdEncoder;
 
 use crate::archive::ArchiveWrite;
+use crate::archive::TarBuilder;
 use crate::hash::Sha256Reader;
 use crate::pkg::CompactManifest;
 use crate::pkg::Manifest;
@@ -31,8 +32,8 @@ impl Package {
         }
     }
 
-    pub fn build<W: Write>(&self, writer: W) -> Result<(), std::io::Error> {
-        let mut package = tar::Builder::new(ZstdEncoder::new(writer, COMPRESSION_LEVEL)?);
+    pub fn write<W: Write>(&self, writer: W) -> Result<(), std::io::Error> {
+        let mut package = TarBuilder::new(ZstdEncoder::new(writer, COMPRESSION_LEVEL)?);
         let mut files: HashMap<PathBuf, String> = HashMap::new();
         let mut config: HashSet<PathBuf> = HashSet::new();
         let mut directories: HashMap<PathBuf, String> = HashMap::new();
@@ -45,7 +46,6 @@ impl Package {
                 .map_err(std::io::Error::other)?
                 .normalize();
             let absolute_path = Path::new("/").join(path.as_path());
-            let relative_path = Path::new("./").join(path);
             if absolute_path == Path::new("/") {
                 continue;
             }
@@ -62,7 +62,7 @@ impl Package {
                 let mut contents = Vec::new();
                 reader.read_to_end(&mut contents)?;
                 let metadata = std::fs::metadata(entry.path())?;
-                file_contents.insert(relative_path, (metadata, contents));
+                file_contents.insert(absolute_path.clone(), (metadata, contents));
                 let (sha256, _) = reader.digest()?;
                 files.insert(absolute_path, format!("1${}", sha256));
             }
@@ -101,3 +101,73 @@ impl Package {
 }
 
 const COMPRESSION_LEVEL: i32 = 22;
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+    use std::time::Duration;
+
+    use arbtest::arbtest;
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::pkg::CompactManifest;
+    use crate::test::prevent_concurrency;
+    use crate::test::DirectoryOfFiles;
+
+    #[test]
+    fn write_read() {
+        arbtest(|u| {
+            let package: CompactManifest = u.arbitrary()?;
+            let directory: DirectoryOfFiles = u.arbitrary()?;
+            let mut buf: Vec<u8> = Vec::new();
+            Package::new(package.clone(), directory.path().into())
+                .write(&mut buf)
+                .unwrap();
+            let actual = Package::read_compact_manifest(&buf[..]).unwrap();
+            assert_eq!(package, actual);
+            Ok(())
+        });
+    }
+
+    #[ignore]
+    #[test]
+    fn freebsd_pkg_installs_random_packages() {
+        let _guard = prevent_concurrency("freebsd-pkg");
+        let workdir = TempDir::new().unwrap();
+        let package_file = workdir.path().join("test.pkg");
+        arbtest(|u| {
+            let mut package: CompactManifest = u.arbitrary()?;
+            package.flatsize = 100;
+            package.deps.clear(); // missing dependencies
+            let directory: DirectoryOfFiles = u.arbitrary()?;
+            Package::new(package.clone(), directory.path().into())
+                .write(File::create(package_file.as_path()).unwrap())
+                .unwrap();
+            assert!(
+                Command::new("pkg")
+                    .arg("install")
+                    .arg("-y")
+                    .arg(package_file.as_path())
+                    .status()
+                    .unwrap()
+                    .success(),
+                "manifest:\n========{:?}========",
+                package
+            );
+            assert!(
+                Command::new("pkg")
+                    .arg("remove")
+                    .arg("-y")
+                    .arg(package.name.to_string())
+                    .status()
+                    .unwrap()
+                    .success(),
+                "manifest:\n========{:?}========",
+                package
+            );
+            Ok(())
+        })
+        .budget(Duration::from_secs(5));
+    }
+}

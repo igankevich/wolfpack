@@ -4,6 +4,9 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::hash::Hasher;
 
+use serde::Deserialize;
+use serde::Serialize;
+
 use crate::deb::Error;
 use crate::deb::SimpleValue;
 use crate::deb::Value;
@@ -11,7 +14,8 @@ use crate::deb::Value;
 pub type Epoch = u16;
 
 /// https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct PackageVersion {
     epoch: Epoch,
     upstream_version: UpstreamVersion,
@@ -19,11 +23,11 @@ pub struct PackageVersion {
 }
 
 impl PackageVersion {
-    pub fn try_from(version: &str) -> Result<Self, Error> {
-        Self::do_try_from(version).map_err(|version| Error::PackageVersion(version.to_string()))
+    pub fn new(version: &str) -> Result<Self, Error> {
+        Self::do_new(version).map_err(|version| Error::PackageVersion(version.to_string()))
     }
 
-    fn do_try_from(version: &str) -> Result<Self, &str> {
+    fn do_new(version: &str) -> Result<Self, &str> {
         let (epoch, version) = match version.find(|ch| ch == ':') {
             Some(i) => (
                 version[..i].parse().map_err(|_| version)?,
@@ -84,7 +88,7 @@ impl Display for PackageVersion {
 impl TryFrom<SimpleValue> for PackageVersion {
     type Error = Error;
     fn try_from(other: SimpleValue) -> Result<Self, Self::Error> {
-        Self::try_from(other.as_str())
+        Self::new(other.as_str())
     }
 }
 
@@ -98,6 +102,19 @@ impl TryFrom<Value> for PackageVersion {
                 "expected simple value, received multiline/folded".into(),
             )),
         }
+    }
+}
+
+impl From<PackageVersion> for String {
+    fn from(other: PackageVersion) -> Self {
+        other.to_string()
+    }
+}
+
+impl TryFrom<String> for PackageVersion {
+    type Error = Error;
+    fn try_from(other: String) -> Result<Self, Self::Error> {
+        Self::new(other.as_str())
     }
 }
 

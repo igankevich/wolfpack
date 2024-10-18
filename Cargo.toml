@@ -5,8 +5,10 @@ edition = "2021"
 
 [dependencies]
 ar = "0.9.0"
+blake2b_simd = "1.0.2"
 bzip2 = "0.4.4"
 chrono = { version = "0.4.38", features = ["std"], default-features = false }
+der = { version = "0.7.9", features = ["std", "zeroize"], default-features = false }
 flate2 = "1.0.33"
 hex = "0.4.3"
 #ksign = "0.2.0"
@@ -15,16 +17,20 @@ log = "0.4.22"
 md5 = "0.7.0"
 normalize-path = "0.2.1"
 pgp = "0.14.0"
+pkcs8 = { version = "0.10.2", features = ["std", "encryption"], default-features = false }
 rand = "0.8.5"
 rand_mt = "4.2.2"
+secp256k1 = { version = "0.30.0", features = ["std", "rand", "global-context", "hashes"], default-features = false }
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1.0.128"
 sha1 = "0.10.6"
 sha2 = "0.10.8"
+spki = "0.7.3"
 tar = { version = "0.4.42", features = [], default-features = false }
 thiserror = "1.0.64"
 walkdir = "2.5.0"
 xz = "0.1.0"
+zeroize = { version = "1.8.1", features = ["derive", "zeroize_derive"] }
 zstd = "0.13.2"
 
 [dev-dependencies]
@@ -33,4 +39,6 @@ arbtest = "0.3.1"
 gcollections = "1.5.0"
 intervallum = "1.4.1"
 lddtree = "0.3.5"
+parking_lot = "0.12.3"
+pretty-hex = "0.4.1"
 tempfile = "3.13.0"

@@ -89,7 +89,7 @@ impl Repository {
         signer: &PackageSigner,
     ) -> Result<(), Error> {
         let output_dir = output_dir.as_ref();
-        create_dir_all(&output_dir)?;
+        create_dir_all(output_dir)?;
         let packages_string = self.to_string();
         std::fs::write(output_dir.join("Packages"), packages_string.as_bytes())?;
         {

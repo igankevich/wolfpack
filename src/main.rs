@@ -5,10 +5,7 @@ use pgp::types::PublicKeyTrait;
 use pgp::types::SecretKeyTrait;
 use rand::rngs::OsRng;
 use wolfpack::deb;
-use wolfpack::pkg;
-use wolfpack::pkg::CompactManifest;
 use wolfpack::sign::PgpCleartextSigner;
-use wolfpack::PkgPackage;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (secret_key, public_key) = generate_secret_key()?;
@@ -26,13 +23,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let deb_signer = deb::PackageSigner::new(deb_signing_key);
     let deb_verifier = deb::PackageVerifier::new(deb_verifying_key);
     control_data.write(directory, File::create("test.deb")?, &deb_signer)?;
-    let manifest: CompactManifest =
-        std::fs::read_to_string("freebsd/+COMPACT_MANIFEST")?.parse()?;
-    PkgPackage::new(manifest, "freebsd/root".into()).build(File::create("test.pkg")?)?;
-    {
-        let packages = pkg::Packages::new(["test.pkg"])?;
-        packages.build(File::create("packagesite.pkg")?, &secret_key)?;
-    }
     let deb_release_signer = PgpCleartextSigner::new(secret_key.clone());
     deb::Repository::new("repo", ["test.deb"], &deb_verifier)?.write(
         "repo",

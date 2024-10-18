@@ -3,11 +3,15 @@ use std::fmt::Formatter;
 use std::ops::Deref;
 use std::str::FromStr;
 
+use serde::Deserialize;
+use serde::Serialize;
+
 use crate::deb::Error;
 use crate::deb::SimpleValue;
 use crate::deb::Value;
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct PackageName(String);
 
 impl PackageName {

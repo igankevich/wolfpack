@@ -105,6 +105,7 @@ const COMPRESSION_LEVEL: i32 = 22;
 #[cfg(test)]
 mod tests {
     use std::process::Command;
+    use std::time::Duration;
 
     use arbtest::arbtest;
     use tempfile::TempDir;
@@ -136,6 +137,7 @@ mod tests {
         arbtest(|u| {
             let mut package: CompactManifest = u.arbitrary()?;
             package.flatsize = 100;
+            package.deps.clear(); // missing dependencies
             let directory: DirectoryOfFiles = u.arbitrary()?;
             Package::new(package.clone(), directory.path().into())
                 .write(File::create(package_file.as_path()).unwrap())
@@ -151,7 +153,19 @@ mod tests {
                 "manifest:\n========{:?}========",
                 package
             );
+            assert!(
+                Command::new("pkg")
+                    .arg("remove")
+                    .arg("-y")
+                    .arg(package.name.to_string())
+                    .status()
+                    .unwrap()
+                    .success(),
+                "manifest:\n========{:?}========",
+                package
+            );
             Ok(())
-        });
+        })
+        .budget(Duration::from_secs(5));
     }
 }

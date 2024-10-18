@@ -14,7 +14,7 @@ use crate::archive::ArchiveWrite;
 /// This builder retains original paths in the tar file.
 ///
 /// This is in contrast to the default builder that removes leading `/` and `./`.
-/// FreeBSD `pkg` needs leading `/`.
+/// FreeBSD `pkg` needs leading `/` and `ustar` tar archive format.
 pub struct TarBuilder<W: Write> {
     inner: tar::Builder<W>,
 }
@@ -37,7 +37,7 @@ impl<W: Write> ArchiveWrite<W> for TarBuilder<W> {
             Err(_) => &path,
         };
         let contents = contents.as_ref();
-        let mut header = tar::Header::new_old();
+        let mut header = tar::Header::new_ustar();
         header.set_size(contents.len() as u64);
         header.set_uid(0);
         header.set_gid(0);
@@ -63,7 +63,7 @@ impl<W: Write> ArchiveWrite<W> for TarBuilder<W> {
             Err(_) => &path,
         };
         let contents = contents.as_ref();
-        let mut header = tar::Header::new_old();
+        let mut header = tar::Header::new_ustar();
         header.set_metadata(metadata);
         header.set_size(contents.len() as u64);
         header.set_uid(0);

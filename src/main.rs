@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::read_to_string("freebsd/+COMPACT_MANIFEST")?.parse()?;
     PkgPackage::new(manifest, "freebsd/root".into()).write(File::create("test.pkg")?)?;
     {
-        let packages = pkg::Packages::new(["test.pkg"])?;
+        let packages = pkg::Repository::new(["test.pkg"])?;
         packages.build(File::create("packagesite.pkg")?, &secret_key)?;
     }
     let deb_release_signer = PgpCleartextSigner::new(secret_key.clone());

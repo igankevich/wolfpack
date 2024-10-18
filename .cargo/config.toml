@@ -28,6 +28,5 @@ test-pkg = [
     "--",
     "--nocapture",
     "--ignored",
-    # TODO
-    "freebsd_pkg_adds_repo",
+    "freebsd_pkg",
 ]

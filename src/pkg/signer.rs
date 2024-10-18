@@ -1,3 +1,4 @@
+use blake2b_simd::blake2b;
 use der::asn1::Any;
 use der::asn1::BitString;
 use der::Decode;
@@ -43,9 +44,15 @@ impl SigningKey {
             .signing_key())
     }
 
+    /// Sign file.
     pub fn sign(&self, message: &[u8]) -> Result<Signature, Error> {
-        let digest = sha256::Hash::hash(message);
-        let message = Message::from_digest(digest.to_byte_array());
+        self.sign_data(blake2b(message).as_bytes())
+    }
+
+    /// Sign raw data.
+    pub fn sign_data(&self, message: &[u8]) -> Result<Signature, Error> {
+        let message = sha256::Hash::hash(message);
+        let message = Message::from_digest(message.to_byte_array());
         Ok(self.0.sign_ecdsa(message))
     }
 }
@@ -87,9 +94,15 @@ impl VerifyingKey {
         Ok(Self(verifying_key))
     }
 
+    /// Verify signed file.
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), Error> {
-        let digest = sha256::Hash::hash(message);
-        let message = Message::from_digest(digest.to_byte_array());
+        self.verify_data(blake2b(message).as_bytes(), signature)
+    }
+
+    /// Verify raw data.
+    pub fn verify_data(&self, message: &[u8], signature: &Signature) -> Result<(), Error> {
+        let message = sha256::Hash::hash(message);
+        let message = Message::from_digest(message.to_byte_array());
         signature.verify(&message, &self.0).map_err(|_| Error)?;
         Ok(())
     }
@@ -208,6 +221,6 @@ mod tests {
         }
         let signature = child.wait_with_output().unwrap().stdout;
         let signature = Signature::from_der(&signature[..]).unwrap();
-        verifying_key.verify(message, &signature).unwrap();
+        verifying_key.verify_data(message, &signature).unwrap();
     }
 }

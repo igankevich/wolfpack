@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 ar = "0.9.0"
+blake2b_simd = "1.0.2"
 bzip2 = "0.4.4"
 chrono = { version = "0.4.38", features = ["std"], default-features = false }
 der = { version = "0.7.9", features = ["std", "zeroize"], default-features = false }
@@ -38,4 +39,6 @@ arbtest = "0.3.1"
 gcollections = "1.5.0"
 intervallum = "1.4.1"
 lddtree = "0.3.5"
+parking_lot = "0.12.3"
+pretty-hex = "0.4.1"
 tempfile = "3.13.0"

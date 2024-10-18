@@ -43,7 +43,7 @@ impl<W: Write> ArchiveWrite<W> for TarBuilder<W> {
         header.set_gid(0);
         header.set_mode(0o644);
         header.set_entry_type(tar::EntryType::Regular);
-        header.set_path(&relative_path)?;
+        header.set_path(relative_path)?;
         let actual_path = &mut header.as_old_mut().name;
         fix_path(&mut actual_path[..], &path)?;
         header.set_cksum();
@@ -68,7 +68,7 @@ impl<W: Write> ArchiveWrite<W> for TarBuilder<W> {
         header.set_size(contents.len() as u64);
         header.set_uid(0);
         header.set_gid(0);
-        header.set_path(&relative_path)?;
+        header.set_path(relative_path)?;
         let actual_path = &mut header.as_old_mut().name;
         fix_path(&mut actual_path[..], &path)?;
         header.set_cksum();

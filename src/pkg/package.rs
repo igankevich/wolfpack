@@ -112,6 +112,7 @@ mod tests {
 
     use super::*;
     use crate::pkg::CompactManifest;
+    use crate::test::prevent_concurrency;
     use crate::test::DirectoryOfFiles;
 
     #[test]
@@ -132,6 +133,7 @@ mod tests {
     #[ignore]
     #[test]
     fn freebsd_pkg_installs_random_packages() {
+        let _guard = prevent_concurrency("freebsd-pkg");
         let workdir = TempDir::new().unwrap();
         let package_file = workdir.path().join("test.pkg");
         arbtest(|u| {

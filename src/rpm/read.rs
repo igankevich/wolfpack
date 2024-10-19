@@ -163,7 +163,10 @@ const INDEX_ENTRY_LEN: usize = 16;
 
 #[cfg(test)]
 mod tests {
+    use cpio::newc::Reader as CpioReader;
+
     use super::*;
+    use crate::compress::AnyDecoder;
     use crate::rpm::SignatureTag;
     use crate::rpm::Tag;
 
@@ -178,5 +181,18 @@ mod tests {
         eprintln!("header {:?}", header);
         let archive = &rpm[(LEAD_LEN + offset1 + offset2)..];
         eprintln!("archive {:02x?}", &archive[..10]);
+        let mut reader = AnyDecoder::new(&archive[..]);
+        loop {
+            let cpio = CpioReader::new(reader).unwrap();
+            if cpio.entry().is_trailer() {
+                break;
+            }
+            eprintln!(
+                "{} ({} bytes)",
+                cpio.entry().name(),
+                cpio.entry().file_size()
+            );
+            reader = cpio.finish().unwrap();
+        }
     }
 }

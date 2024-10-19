@@ -1,14 +1,16 @@
+use std::collections::HashSet;
+use std::hash::Hash;
 use std::io::Error;
 
-use crate::rpm::IndexEntryKind;
+use crate::rpm::EntryRead;
 
 #[derive(Debug)]
-struct Header<Tag> {
-    entries: Vec<IndexEntry<Tag>>,
+struct Header<E: Hash + Eq + EntryRead> {
+    entries: HashSet<E>,
     version: u8,
 }
 
-impl<Tag: From<u32>> Header<Tag> {
+impl<E: Hash + Eq + EntryRead> Header<E> {
     fn read(input: &[u8]) -> Result<(Self, usize), Error> {
         if input.len() < MIN_HEADER_LEN {
             return Err(Error::other("rpm header is too small"));
@@ -31,40 +33,23 @@ impl<Tag: From<u32>> Header<Tag> {
         if input.len() - MIN_HEADER_LEN - index_len < store_len {
             return Err(Error::other("rpm header is too small"));
         }
-        let mut entries = Vec::with_capacity(num_entries);
+        let store_offset = MIN_HEADER_LEN + index_len;
+        let store = &input[store_offset..(store_offset + store_len)];
+        let mut entries = HashSet::with_capacity(num_entries);
         let mut i = MIN_HEADER_LEN;
         for _ in 0..num_entries {
-            let tag = get_u32(&input[i..(i + 4)]).into();
-            i += 4;
-            let kind: IndexEntryKind = get_u32(&input[i..(i + 4)]).try_into()?;
-            i += 4;
-            let offset = get_u32(&input[i..(i + 4)]);
-            i += 4;
-            // TODO take into account type size
-            if offset as usize >= store_len {
-                return Err(Error::other(format!("invalid offset: {}", offset)));
+            let entry = E::read(&input[i..store_offset], store)?;
+            if let Some(entry) = entry {
+                entries.insert(entry);
             }
-            let count = get_u32(&input[i..(i + 4)]);
-            i += 4;
-            kind.validate_count(count)?;
-            entries.push(IndexEntry {
-                tag,
-                kind,
-                offset,
-                count,
-            });
+            i += INDEX_ENTRY_LEN;
         }
-        // TODO read store
+        assert_eq!(i, store_offset);
+        eprintln!("store offset = {}", store_offset);
+        eprintln!("store len = {}", store_len);
+        eprintln!("name offset global = {}", 11016 + store_offset);
         Ok((Self { version, entries }, i + store_len))
     }
-}
-
-#[derive(Debug)]
-struct IndexEntry<Tag> {
-    tag: Tag,
-    kind: IndexEntryKind,
-    offset: u32,
-    count: u32,
 }
 
 #[derive(Debug)]
@@ -167,17 +152,18 @@ mod tests {
 
     use super::*;
     use crate::compress::AnyDecoder;
-    use crate::rpm::SignatureTag;
-    use crate::rpm::Tag;
+    use crate::rpm::Entry;
+    use crate::rpm::SignatureEntry;
 
     #[test]
     fn lead_read() {
-        let rpm = std::fs::read("wireguard-tools-1.0.20210914-7.fc41.x86_64.rpm").unwrap();
+        let rpm = std::fs::read("wg.rpm").unwrap();
         let lead = Lead::read(&rpm[..]).unwrap();
         eprintln!("lead {:?}", lead);
-        let (header, offset1) = Header::<SignatureTag>::read(&rpm[LEAD_LEN..]).unwrap();
+        let (header, offset1) = Header::<SignatureEntry>::read(&rpm[LEAD_LEN..]).unwrap();
         eprintln!("header {:?}", header);
-        let (header, offset2) = Header::<Tag>::read(&rpm[(LEAD_LEN + offset1)..]).unwrap();
+        eprintln!("store2 plus offset = {}", offset1);
+        let (header, offset2) = Header::<Entry>::read(&rpm[(LEAD_LEN + offset1)..]).unwrap();
         eprintln!("header {:?}", header);
         let archive = &rpm[(LEAD_LEN + offset1 + offset2)..];
         eprintln!("archive {:02x?}", &archive[..10]);
@@ -187,11 +173,11 @@ mod tests {
             if cpio.entry().is_trailer() {
                 break;
             }
-            eprintln!(
-                "{} ({} bytes)",
-                cpio.entry().name(),
-                cpio.entry().file_size()
-            );
+            //eprintln!(
+            //    "{} ({} bytes)",
+            //    cpio.entry().name(),
+            //    cpio.entry().file_size()
+            //);
             reader = cpio.finish().unwrap();
         }
     }

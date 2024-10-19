@@ -1,8 +1,9 @@
-// TODO create algebraic type that include correct values and parses index entry
-// replace index entry with this type
-#[derive(Debug, Clone, Copy)]
+use std::fmt::Debug;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum Tag {
+    I18nTable = 100,
     Name = 1000,
     Version = 1001,
     Release = 1002,
@@ -37,7 +38,7 @@ pub enum Tag {
     FileUids = 1031,
     FileGids = 1032,
     FileRdevs = 1033,
-    FilemTimes = 1034,
+    FileMtimes = 1034,
     FileDigests = 1035,
     FileLinkTos = 1036,
     FileFlags = 1037,
@@ -315,6 +316,7 @@ impl From<u32> for Tag {
     fn from(other: u32) -> Self {
         use Tag::*;
         match other {
+            100 => I18nTable,
             1000 => Name,
             1001 => Version,
             1002 => Release,
@@ -349,7 +351,7 @@ impl From<u32> for Tag {
             1031 => FileUids,
             1032 => FileGids,
             1033 => FileRdevs,
-            1034 => FilemTimes,
+            1034 => FileMtimes,
             1035 => FileDigests,
             1036 => FileLinkTos,
             1037 => FileFlags,

@@ -1,11 +1,11 @@
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum SignatureTag {
     Signatures = 62,
     Size = 1000,
-    Lemd5_1 = 1001,
+    LeMd5_1 = 1001,
     Pgp = 1002,
-    Lemd5_2 = 1003,
+    LeMd5_2 = 1003,
     Md5 = 1004,
     Gpg = 1005,
     Pgp5 = 1006,
@@ -32,9 +32,9 @@ impl From<u32> for SignatureTag {
         match other {
             62 => Signatures,
             1000 => Size,
-            1001 => Lemd5_1,
+            1001 => LeMd5_1,
             1002 => Pgp,
-            1003 => Lemd5_2,
+            1003 => LeMd5_2,
             1004 => Md5,
             1005 => Gpg,
             1006 => Pgp5,

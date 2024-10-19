@@ -1,9 +1,10 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::fmt::Debug;
 use std::ops::Deref;
 use std::str::FromStr;
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 pub struct HashArray<const N: usize>([u8; N]);
 
@@ -16,6 +17,13 @@ impl<const N: usize> HashArray<N> {
 impl<const N: usize> From<[u8; N]> for HashArray<N> {
     fn from(data: [u8; N]) -> Self {
         Self(data)
+    }
+}
+
+impl<const N: usize> TryFrom<&[u8]> for HashArray<N> {
+    type Error = HashTryFromError;
+    fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
+        Ok(Self(data.try_into().map_err(|_| HashTryFromError)?))
     }
 }
 
@@ -42,6 +50,12 @@ impl<const N: usize> Display for HashArray<N> {
     }
 }
 
+impl<const N: usize> Debug for HashArray<N> {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        Display::fmt(self, f)
+    }
+}
+
 impl<const N: usize> FromStr for HashArray<N> {
     type Err = HashParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -60,3 +74,6 @@ impl<const N: usize> FromStr for HashArray<N> {
 
 #[derive(Debug)]
 pub struct HashParseError;
+
+#[derive(Debug)]
+pub struct HashTryFromError;

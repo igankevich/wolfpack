@@ -191,7 +191,7 @@ mod tests {
         let release_signer = PgpCleartextSigner::new(signing_key.clone().into());
         let workdir = TempDir::new().unwrap();
         let root = workdir.path().join("root");
-        let verifying_key_file = workdir.path().join("/etc/apt/trusted.gpg.d/test.asc");
+        let verifying_key_file = workdir.path().join("etc/apt/trusted.gpg.d/test.asc");
         verifying_key
             .to_armored_writer(
                 &mut File::create(verifying_key_file.as_path()).unwrap(),

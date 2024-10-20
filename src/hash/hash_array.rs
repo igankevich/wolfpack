@@ -9,8 +9,12 @@ use std::str::FromStr;
 pub struct HashArray<const N: usize>([u8; N]);
 
 impl<const N: usize> HashArray<N> {
-    pub fn new(array: [u8; N]) -> Self {
+    pub const fn new(array: [u8; N]) -> Self {
         Self(array)
+    }
+
+    pub const fn len(&self) -> usize {
+        N
     }
 }
 

@@ -2,15 +2,40 @@ use std::collections::HashSet;
 use std::hash::Hash;
 use std::io::Error;
 
-use crate::rpm::EntryRead;
+use crate::rpm::EntryIo;
 
 #[derive(Debug)]
-struct Header<E: Hash + Eq + EntryRead> {
+pub struct Header<E: Hash> {
     entries: HashSet<E>,
     version: u8,
 }
 
-impl<E: Hash + Eq + EntryRead> Header<E> {
+impl<E: Hash> Header<E> {
+    pub fn new(entries: HashSet<E>) -> Self {
+        Self {
+            entries,
+            version: DEFAULT_HEADER_VERSION,
+        }
+    }
+}
+
+impl<E: Hash + EntryIo> Header<E> {
+    pub fn write<W: Write>(&self, writer: W) -> Result<(), Error> {
+        let mut store = Vec::new();
+        for entry in self.entries.iter() {
+            let offset = store.len();
+            if offset > u32::MAX as usize {
+                return Err(Error::other("the store is too big"));
+            }
+            entry.write(writer, &mut store, offset as u32)?;
+            assert_eq!(offset + INDEX_ENTRY_LEN, store.len());
+        }
+        writer.write_all(&store)?;
+        Ok(())
+    }
+}
+
+impl<E: Hash + Eq + EntryIo> Header<E> {
     fn read(input: &[u8]) -> Result<(Self, usize), Error> {
         if input.len() < MIN_HEADER_LEN {
             return Err(Error::other("rpm header is too small"));
@@ -145,6 +170,7 @@ const NAME_LEN: usize = 66;
 const LEAD_LEN: usize = 96;
 const MIN_HEADER_LEN: usize = 16;
 const INDEX_ENTRY_LEN: usize = 16;
+const DEFAULT_HEADER_VERSION: u8 = 1;
 
 #[cfg(test)]
 mod tests {

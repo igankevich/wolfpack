@@ -1,11 +1,7 @@
 #![allow(dead_code)]
-mod entry;
-mod index_entry_kind;
+mod package;
 mod read;
-mod signature_tag;
-mod tag;
+mod entry;
 
+pub use self::package::*;
 pub use self::entry::*;
-pub use self::index_entry_kind::*;
-pub use self::signature_tag::*;
-pub use self::tag::*;

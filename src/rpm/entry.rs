@@ -7,6 +7,7 @@ use crate::hash::Sha1Hash;
 use crate::hash::Sha256Hash;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[repr(u32)]
 pub enum EntryKind {
     Null = 0,
@@ -28,6 +29,22 @@ impl EntryKind {
             return Err(Error::other(format!("{:?}: invalid count", self)));
         }
         Ok(())
+    }
+
+    pub fn align(self) -> usize {
+        use EntryKind::*;
+        match self {
+            Null => 1,
+            Char => 1,
+            Int8 => 1,
+            Int16 => 2,
+            Int32 => 4,
+            Int64 => 8,
+            String => 1,
+            Bin => 1,
+            StringArray => 1,
+            I18nString => 1,
+        }
     }
 }
 
@@ -51,23 +68,28 @@ impl TryFrom<u32> for EntryKind {
     }
 }
 
-pub trait EntryRead {
+pub trait EntryIo {
+    type Tag;
+
     fn read(input: &[u8], store: &[u8]) -> Result<Option<Self>, Error>
     where
         Self: Sized;
 
-    fn write<W1: Write, W2: Write>(
-        &self,
-        writer: &mut W1,
-        store: &mut W2,
-        offset: u32,
-    ) -> Result<(), Error>;
+    fn write<W1: Write, W2: Write>(&self, writer: W1, store: W2, offset: u32) -> Result<(), Error>;
+
+    fn tag(&self) -> Self::Tag;
+
+    fn leader_entry(index_len: u32) -> Self
+    where
+        Self: Sized;
 }
 
 define_entry_enums! {
     //Size = (1000, Int32, u32, one, read_u32, write_u32),
     Tag,
     Entry,
+    Immutable,
+    Immutable = (63, Bin, Vec<u8>, Vec::len, read_vec, write_vec),
     //I18nTable = 100,
     Name = (1000, String, String, one, read_string, write_string),
     Version = (1001, String, String, one, read_string, write_string),
@@ -97,24 +119,24 @@ define_entry_enums! {
     //PreUn = 1025,
     //PostUn = 1026,
     //OldFileNames = 1027,
-    //FileSizes = 1028,
+    FileSizes = (1028, Int32, Vec<u32>, Vec::len, read_u32_array, write_u32_array),
     //FileStates = 1029,
-    //FileModes = 1030,
+    FileModes = (1030, Int16, Vec<u16>, Vec::len, read_u16_array, write_u16_array),
     //FileUids = 1031,
     //FileGids = 1032,
-    //FileRdevs = 1033,
-    //FileMtimes = 1034,
-    //FileDigests = 1035,
-    //FileLinkTos = 1036,
-    //FileFlags = 1037,
+    FileRdevs = (1033, Int16, Vec<u16>, Vec::len, read_u16_array, write_u16_array),
+    FileMtimes = (1034, Int32, Vec<u32>, Vec::len, read_u32_array, write_u32_array),
+    FileDigests = (1035, StringArray, Vec<String>, Vec::len, read_string_array, write_string_array),
+    FileLinkToS = (1036, StringArray, Vec<String>, Vec::len, read_string_array, write_string_array),
+    FileFlags = (1037, Int32, Vec<u32>, Vec::len, read_u32_array, write_u32_array),
     //Root = 1038,
-    //FileUserName = 1039,
-    //FileGroupName = 1040,
+    FileUserName = (1039, StringArray, Vec<String>, Vec::len, read_string_array, write_string_array),
+    FileGroupName = (1040, StringArray, Vec<String>, Vec::len, read_string_array, write_string_array),
     //Exclude = 1041,
     //Exclusive = 1042,
     //Icon = 1043,
     //SourceRpm = 1044,
-    //FileVerifyFlags = 1045,
+    FileVerifyFlags = (1045, Int32, Vec<u32>, Vec::len, read_u32_array, write_u32_array),
     //ArchiveSize = 1046,
     //ProvideName = 1047,
     //RequireFlags = 1048,
@@ -155,9 +177,9 @@ define_entry_enums! {
     //TriggerScriptProg = 1092,
     //DocDir = 1093,
     //Cookie = 1094,
-    //FileDevices = 1095,
-    //FileInodes = 1096,
-    //FileLangs = 1097,
+    FileDevices = (1095, Int32, Vec<u32>, Vec::len, read_u32_array, write_u32_array),
+    FileInodes = (1096, Int32, Vec<u32>, Vec::len, read_u32_array, write_u32_array),
+    FileLangs = (1097, StringArray, Vec<String>, Vec::len, read_string_array, write_string_array),
     //Prefixes = 1098,
     //InstPrefixes = 1099,
     //TriggerIn = 1100,
@@ -176,16 +198,16 @@ define_entry_enums! {
     //ProvideVersion = 1113,
     //ObsoleteFlags = 1114,
     //ObsoleteVersion = 1115,
-    //DirIndexes = 1116,
-    //BaseNames = 1117,
-    //DirNames = 1118,
+    DirIndexes = (1116, Int32, Vec<u32>, Vec::len, read_u32_array, write_u32_array),
+    BaseNames = (1117, StringArray, Vec<String>, Vec::len, read_string_array, write_string_array),
+    DirNames = (1118, StringArray, Vec<String>, Vec::len, read_string_array, write_string_array),
     //OrigDirIndexes = 1119,
     //OrigBaseNames = 1120,
     //OrigDirNames = 1121,
     //OptFlags = 1122,
     //DistUrl = 1123,
-    //PayloadFormat = 1124,
-    //PayloadCompressor = 1125,
+    PayloadFormat = (1124, String, String, one, read_string, write_string),
+    PayloadCompressor = (1125, String, String, one, read_string, write_string),
     //PayloadFlags = 1126,
     //InstallColor = 1127,
     //InstallTid = 1128,
@@ -200,12 +222,12 @@ define_entry_enums! {
     //CachePkgPath = 1137,
     //CachePkgSize = 1138,
     //CachePkgMtime = 1139,
-    //FileColors = 1140,
-    //FileClass = 1141,
+    FileColors = (1140, Int32, Vec<u32>, Vec::len, read_u32_array, write_u32_array),
+    FileClass = (1141, Int32, Vec<u32>, Vec::len, read_u32_array, write_u32_array),
     //ClassDict = 1142,
-    //FileDependsX = 1143,
-    //FileDependsN = 1144,
-    //DependsDict = 1145,
+    FileDependsX = (1143, Int32, Vec<u32>, Vec::len, read_u32_array, write_u32_array),
+    FileDependsN = (1144, Int32, Vec<u32>, Vec::len, read_u32_array, write_u32_array),
+    DependsDict = (1145, Int32, Vec<u32>, Vec::len, read_u32_array, write_u32_array),
     //SourcePkgId = 1146,
     //FileContexts = 1147,
     //FsContexts = 1148,
@@ -379,13 +401,14 @@ define_entry_enums! {
 define_entry_enums! {
     SignatureTag,
     SignatureEntry,
+    Signatures,
     Signatures = (62, Bin, Vec<u8>, Vec::len, read_vec, write_vec),
     Size = (1000, Int32, u32, one, read_u32, write_u32),
     //LeMd5_1 = 1001,
     //Pgp = 1002,
     //LeMd5_2 = 1003,
     Md5 = (1004, Bin, Md5Hash, Md5Hash::len, read_md5, write_md5),
-    //Gpg = 1005,
+    Gpg = (1005, Bin, Vec<u8>, Vec::len, read_vec, write_vec),
     //Pgp5 = 1006,
     PayloadSize = (1007, Int32, u32, one, read_u32, write_u32),
     //ReservedSpace = 1008,
@@ -393,10 +416,10 @@ define_entry_enums! {
     //BadSha1_2 = 265,
     Dsa = (267, Bin, Vec<u8>, Vec::len, read_vec, write_vec),
     Rsa = (268, Bin, Vec<u8>, Vec::len, read_vec, write_vec),
-    Sha1 = (269, String, Sha1Hash, Sha1Hash::len, read_sha1, write_sha1),
+    Sha1 = (269, String, Sha1Hash, one, read_sha1, write_sha1),
     //LongSize = 270,
     //LongArchiveSize = 271,
-    Sha256 = (273, String, Sha256Hash, Sha256Hash::len, read_sha256, write_sha256),
+    Sha256 = (273, String, Sha256Hash, one, read_sha256, write_sha256),
     //FileSignatures = 274,
     //FileSignatureLength = 275,
     //VeritySignatures = 276,
@@ -407,13 +430,49 @@ fn one<T>(_: T) -> usize {
     1
 }
 
+fn write_u16<W: Write>(mut writer: W, value: &u16) -> Result<(), Error> {
+    writer.write_all(value.to_be_bytes().as_slice())
+}
+
+fn read_u16_array(mut input: &[u8], count: usize) -> Result<Vec<u16>, Error> {
+    let mut array = Vec::with_capacity(count);
+    for _ in 0..count {
+        array.push(u16::from_be_bytes([input[0], input[1]]));
+        input = &input[2..];
+    }
+    Ok(array)
+}
+
+fn write_u16_array<W: Write>(mut writer: W, array: &[u16]) -> Result<(), Error> {
+    for n in array {
+        write_u16(writer.by_ref(), n)?;
+    }
+    Ok(())
+}
+
 fn read_u32(input: &[u8], _count: usize) -> Result<u32, Error> {
     assert!(4 <= input.len());
     Ok(u32::from_be_bytes([input[0], input[1], input[2], input[3]]))
 }
 
-fn write_u32<W: Write>(writer: &mut W, value: &u32) -> Result<(), Error> {
+pub(crate) fn write_u32<W: Write>(mut writer: W, value: &u32) -> Result<(), Error> {
     writer.write_all(value.to_be_bytes().as_slice())
+}
+
+fn read_u32_array(mut input: &[u8], count: usize) -> Result<Vec<u32>, Error> {
+    let mut array = Vec::with_capacity(count);
+    for _ in 0..count {
+        array.push(u32::from_be_bytes([input[0], input[1], input[2], input[3]]));
+        input = &input[4..];
+    }
+    Ok(array)
+}
+
+fn write_u32_array<W: Write>(mut writer: W, array: &[u32]) -> Result<(), Error> {
+    for n in array {
+        write_u32(writer.by_ref(), n)?;
+    }
+    Ok(())
 }
 
 fn read_vec(input: &[u8], count: usize) -> Result<Vec<u8>, Error> {
@@ -421,7 +480,7 @@ fn read_vec(input: &[u8], count: usize) -> Result<Vec<u8>, Error> {
     Ok(input[..count].into())
 }
 
-fn write_vec<W: Write>(writer: &mut W, value: &[u8]) -> Result<(), Error> {
+fn write_vec<W: Write>(mut writer: W, value: &[u8]) -> Result<(), Error> {
     writer.write_all(value)
 }
 
@@ -435,9 +494,32 @@ fn read_string(input: &[u8], _count: usize) -> Result<String, Error> {
     Ok(s.into())
 }
 
-fn write_string<W: Write>(writer: &mut W, value: &str) -> Result<(), Error> {
+fn write_string<W: Write>(mut writer: W, value: &str) -> Result<(), Error> {
     writer.write_all(value.as_bytes())?;
     writer.write_all(&[0_u8])?;
+    Ok(())
+}
+
+fn read_string_array(mut input: &[u8], count: usize) -> Result<Vec<String>, Error> {
+    let mut strings = Vec::with_capacity(count);
+    for _ in 0..count {
+        let n = input
+            .iter()
+            .position(|ch| *ch == 0)
+            .ok_or_else(|| Error::other("string is not terminated"))?;
+        let s = from_utf8(&input[..n])
+            .map_err(|e| Error::other(format!("invalid utf-8 string: {}", e)))?;
+        strings.push(s.into());
+        input = &input[(n + 1)..];
+    }
+    Ok(strings)
+}
+
+fn write_string_array<W: Write>(mut writer: W, strings: &[String]) -> Result<(), Error> {
+    for s in strings {
+        writer.write_all(s.as_bytes())?;
+        writer.write_all(&[0_u8])?;
+    }
     Ok(())
 }
 
@@ -449,7 +531,7 @@ fn read_md5(input: &[u8], count: usize) -> Result<Md5Hash, Error> {
         .map_err(|_| Error::other("invalid md5 size"))
 }
 
-fn write_md5<W: Write>(writer: &mut W, value: &Md5Hash) -> Result<(), Error> {
+fn write_md5<W: Write>(writer: W, value: &Md5Hash) -> Result<(), Error> {
     write_vec(writer, value.as_slice())
 }
 
@@ -459,8 +541,8 @@ fn read_sha1(input: &[u8], count: usize) -> Result<Sha1Hash, Error> {
         .map_err(|_| Error::other("invalid sha1"))
 }
 
-fn write_sha1<W: Write>(writer: &mut W, value: &Sha1Hash) -> Result<(), Error> {
-    write_vec(writer, value.as_slice())
+fn write_sha1<W: Write>(writer: W, value: &Sha1Hash) -> Result<(), Error> {
+    write_string(writer, &value.to_string())
 }
 
 fn read_sha256(input: &[u8], count: usize) -> Result<Sha256Hash, Error> {
@@ -469,16 +551,25 @@ fn read_sha256(input: &[u8], count: usize) -> Result<Sha256Hash, Error> {
         .map_err(|_| Error::other("invalid sha256"))
 }
 
-fn write_sha256<W: Write>(writer: &mut W, value: &Sha256Hash) -> Result<(), Error> {
-    write_vec(writer, value.as_slice())
+fn write_sha256<W: Write>(writer: W, value: &Sha256Hash) -> Result<(), Error> {
+    write_string(writer, &value.to_string())
 }
 
-const INDEX_ENTRY_LEN: usize = 16;
+pub(crate) fn pad(offset: u32, align: u32) -> u32 {
+    let remaining = offset % align;
+    if remaining == 0 {
+        return 0;
+    }
+    align - remaining
+}
+
+pub(crate) const ENTRY_LEN: usize = 16;
 
 macro_rules! define_entry_enums {
     {
         $tag_enum:ident,
         $entry_enum:ident,
+        $leader_tag:ident,
         $($name:ident = (
             $value:literal,
             $entry_kind:ident,
@@ -488,7 +579,8 @@ macro_rules! define_entry_enums {
             $entry_write:expr
         ),)*
     } => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        #[cfg_attr(test, derive(arbitrary::Arbitrary))]
         #[repr(u32)]
         pub enum $tag_enum {
             $( $name = $value, )*
@@ -519,18 +611,13 @@ macro_rules! define_entry_enums {
             }
         }
 
-        #[derive(Debug, PartialEq, Eq, Hash)]
+        #[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        #[cfg_attr(test, derive(arbitrary::Arbitrary))]
         pub enum $entry_enum {
             $( $name($entry_type), )*
         }
 
         impl $entry_enum {
-            pub fn tag(&self) -> $tag_enum {
-                match self {
-                    $( $entry_enum::$name(..) => $tag_enum::$name, )*
-                }
-            }
-
             pub fn kind(&self) -> EntryKind {
                 match self {
                     $( $entry_enum::$name(..) => EntryKind::$entry_kind, )*
@@ -579,17 +666,36 @@ macro_rules! define_entry_enums {
                 }
             }
 
-            fn do_write<W: Write>(&self, store: &mut W) -> Result<(), Error> {
+            fn do_write<W: Write>(&self, store: W) -> Result<(), Error> {
                 match self {
                     $( $entry_enum::$name(value) => $entry_write(store, value), )*
                 }
             }
         }
 
-        impl EntryRead for $entry_enum {
+        impl EntryIo for $entry_enum {
+            type Tag = $tag_enum;
+
+            fn tag(&self) -> $tag_enum {
+                match self {
+                    $( $entry_enum::$name(..) => $tag_enum::$name, )*
+                }
+            }
+
+            fn leader_entry(index_len: u32) -> Self where Self: Sized {
+                let tag: u32 = $tag_enum::$leader_tag.into();
+                let offset: i32 = -(index_len as i32);
+                let mut data = Vec::new();
+                data.extend(tag.to_be_bytes());
+                data.extend((EntryKind::Bin as u32).to_be_bytes());
+                data.extend((offset as u32).to_be_bytes());
+                data.extend(16_u32.to_be_bytes());
+                $entry_enum::$leader_tag(data)
+            }
+
             fn read(input: &[u8], store: &[u8]) -> Result<Option<Self>, Error> {
-                if input.len() < INDEX_ENTRY_LEN {
-                    return Err(Error::other("rpm index entry is too small"));
+                if input.len() < ENTRY_LEN {
+                    return Err(Error::other("index entry is too small"));
                 }
                 let tag: $tag_enum = read_u32(&input[0..4], 1)?.into();
                 let kind: EntryKind = read_u32(&input[4..8], 1)?.try_into()?;
@@ -599,26 +705,37 @@ macro_rules! define_entry_enums {
                 }
                 let count: u32 = read_u32(&input[12..16], 1)?;
                 kind.validate_count(count)?;
-                eprintln!("tag {:?} {:?} {}", tag, kind, count);
+                eprintln!("tag {:?} {:?} {} {}", tag, kind, count, offset);
                 $entry_enum::do_read(tag, kind, count as usize, &store[offset..])
             }
 
             fn write<W1: Write, W2: Write>(
                 &self,
-                index: &mut W1,
-                store: &mut W2,
-                offset: u32,
+                mut index: W1,
+                mut store: W2,
+                mut offset: u32,
             ) -> Result<(), Error> {
                 let (tag, kind, count) = self.tag_kind_count();
-                write_u32(index, &tag.as_u32())?;
-                write_u32(index, &(kind as u32))?;
-                write_u32(index, &offset)?;
+                let padding = pad(offset, kind.align() as u32);
+                offset += padding;
+                write_u32(index.by_ref(), &tag.as_u32())?;
+                write_u32(index.by_ref(), &(kind as u32))?;
+                write_u32(index.by_ref(), &offset)?;
                 if count > u32::MAX as usize {
                     return Err(Error::other("rpm index entry is too big"));
                 }
-                write_u32(index, &(count as u32))?;
+                write_u32(index.by_ref(), &(count as u32))?;
+                if padding != 0 {
+                    store.write_all(&vec![0_u8; padding as usize])?;
+                }
                 self.do_write(store)?;
                 Ok(())
+            }
+        }
+
+        impl From<$entry_enum> for ($tag_enum, $entry_enum) {
+            fn from(other: $entry_enum) -> ($tag_enum, $entry_enum) {
+                (other.tag(), other)
             }
         }
     };

@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::ops::Deref;
 
 use pgp::composed::KeyType;
@@ -64,22 +65,6 @@ impl From<SigningKey> for SignedSecretKey {
     }
 }
 
-#[derive(Clone)]
-pub struct VerifyingKey(SignedPublicKey);
-
-impl From<VerifyingKey> for SignedPublicKey {
-    fn from(other: VerifyingKey) -> Self {
-        other.0
-    }
-}
-
-impl Deref for VerifyingKey {
-    type Target = SignedPublicKey;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 impl SigningKey {
     pub fn generate(user_id: String) -> Result<(SigningKey, VerifyingKey), Error> {
         use pgp::crypto::aead::AeadAlgorithm::*;
@@ -95,7 +80,7 @@ impl SigningKey {
             .can_sign(true)
             .primary_user_id(user_id)
             .preferred_symmetric_algorithms([AES256].as_slice().into())
-            .preferred_hash_algorithms([SHA2_256, SHA2_512].as_slice().into())
+            .preferred_hash_algorithms([SHA2_512].as_slice().into())
             .preferred_compression_algorithms([ZLIB, BZip2, ZIP].as_slice().into())
             .preferred_aead_algorithms([(AES256, Gcm)].as_slice().into());
         let secret_key_params = key_params.build().map_err(|_| Error)?;
@@ -109,5 +94,29 @@ impl SigningKey {
             SigningKey(signed_secret_key),
             VerifyingKey(signed_public_key),
         ))
+    }
+}
+
+#[derive(Clone)]
+pub struct VerifyingKey(SignedPublicKey);
+
+impl VerifyingKey {
+    pub fn write_armored<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        self.0
+            .to_armored_writer(writer.by_ref(), Default::default())
+            .map_err(std::io::Error::other)
+    }
+}
+
+impl From<VerifyingKey> for SignedPublicKey {
+    fn from(other: VerifyingKey) -> Self {
+        other.0
+    }
+}
+
+impl Deref for VerifyingKey {
+    type Target = SignedPublicKey;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }

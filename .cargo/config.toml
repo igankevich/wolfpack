@@ -30,3 +30,13 @@ test-pkg = [
     "--ignored",
     "freebsd_pkg",
 ]
+test-rpm = [
+    "test",
+    "--lib",
+    "--config",
+    "target.'cfg(target_os = \"linux\")'.runner=\"./ci/runner.sh fedora:40\"",
+    "--",
+    "--nocapture",
+    "--ignored",
+    "rpm",
+]

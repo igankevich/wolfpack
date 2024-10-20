@@ -71,6 +71,22 @@ impl Chars {
         Ok(s)
     }
 
+    pub fn arbitrary_byte_string(
+        &self,
+        u: &mut Unstructured<'_>,
+        len: usize,
+    ) -> arbitrary::Result<String> {
+        let mut s = String::with_capacity(len);
+        for _ in 0..len {
+            s.push(self.arbitrary_char(u)?);
+            if s.as_bytes().len() > len {
+                s.pop();
+                break;
+            }
+        }
+        Ok(s)
+    }
+
     pub fn random_char<R: Rng>(&self, rng: &mut R) -> char {
         let i = rng.gen_range(0..=(self.len() - 1));
         self.get(i).expect("should not fail")

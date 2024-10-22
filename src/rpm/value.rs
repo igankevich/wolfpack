@@ -170,6 +170,10 @@ impl ValueIo for Md5Hash {
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         writer.write_all(self.as_slice())
     }
+
+    fn count(&self) -> usize {
+        self.len()
+    }
 }
 
 impl ValueIo for Sha1Hash {

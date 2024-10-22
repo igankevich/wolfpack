@@ -124,7 +124,7 @@ pub trait EntryIo {
     where
         Self: Sized;
 
-    fn write<W1: Write, W2: Write>(&self, writer: W1, store: W2, offset: u32) -> Result<(), Error>;
+    fn write<W1: Write, W2: Write>(&self, index: W1, store: W2, offset: u32) -> Result<(), Error>;
 
     fn tag(&self) -> Self::Tag;
 
@@ -137,54 +137,55 @@ define_entry_enums! {
     Tag,
     Entry,
     Immutable,
-    Immutable = (63, Bin, Vec<u8>, Vec::len),
+    Immutable = (63, Bin, Vec<u8>),
     //I18nTable = 100,
-    Name = (1000, String, String, one),
-    Version = (1001, String, String, one),
-    Release = (1002, String, String, one),
+    // TODO CString everywhere
+    Name = (1000, String, String),
+    Version = (1001, String, String),
+    Release = (1002, String, String),
     //Epoch = 1003,
-    Summary = (1004, I18nString, String, one),
-    Description = (1005, I18nString, String, one),
+    Summary = (1004, I18nString, String),
+    Description = (1005, I18nString, String),
     //BuildTime = 1006,
     //BuildHost = 1007,
     //InstallTime = 1008,
-    Size = (1009, Int32, u32, one),
+    Size = (1009, Int32, u32),
     //Distribution = 1010,
-    Vendor = (1011, String, String, one),
+    Vendor = (1011, String, String),
     //Gif = 1012,
     //Xpm = 1013,
-    License = (1014, String, String, one),
+    License = (1014, String, String),
     //Packager = 1015,
     //Group = 1016,
     //Changelog = 1017,
     //Source = 1018,
     //Patch = 1019,
-    Url = (1020, String, String, one),
-    Os = (1021, String, String, one),
-    Arch = (1022, String, String, one),
+    Url = (1020, String, String),
+    Os = (1021, String, String),
+    Arch = (1022, String, String),
     //PreIn = 1023,
     //PostIn = 1024,
     //PreUn = 1025,
     //PostUn = 1026,
     //OldFileNames = 1027,
-    FileSizes = (1028, Int32, Vec<u32>, Vec::len),
+    FileSizes = (1028, Int32, Vec<u32>),
     //FileStates = 1029,
-    FileModes = (1030, Int16, Vec<u16>, Vec::len),
+    FileModes = (1030, Int16, Vec<u16>),
     //FileUids = 1031,
     //FileGids = 1032,
-    FileRdevs = (1033, Int16, Vec<u16>, Vec::len),
-    FileMtimes = (1034, Int32, Vec<u32>, Vec::len),
-    FileDigests = (1035, StringArray, Vec<String>, Vec::len),
-    FileLinkToS = (1036, StringArray, Vec<String>, Vec::len),
-    FileFlags = (1037, Int32, Vec<u32>, Vec::len),
+    FileRdevs = (1033, Int16, Vec<u16>),
+    FileMtimes = (1034, Int32, Vec<u32>),
+    FileDigests = (1035, StringArray, Vec<String>),
+    FileLinkToS = (1036, StringArray, Vec<String>),
+    FileFlags = (1037, Int32, Vec<u32>),
     //Root = 1038,
-    FileUserName = (1039, StringArray, Vec<String>, Vec::len),
-    FileGroupName = (1040, StringArray, Vec<String>, Vec::len),
+    FileUserName = (1039, StringArray, Vec<String>),
+    FileGroupName = (1040, StringArray, Vec<String>),
     //Exclude = 1041,
     //Exclusive = 1042,
     //Icon = 1043,
     //SourceRpm = 1044,
-    FileVerifyFlags = (1045, Int32, Vec<u32>, Vec::len),
+    FileVerifyFlags = (1045, Int32, Vec<u32>),
     //ArchiveSize = 1046,
     //ProvideName = 1047,
     //RequireFlags = 1048,
@@ -225,9 +226,9 @@ define_entry_enums! {
     //TriggerScriptProg = 1092,
     //DocDir = 1093,
     //Cookie = 1094,
-    FileDevices = (1095, Int32, Vec<u32>, Vec::len),
-    FileInodes = (1096, Int32, Vec<u32>, Vec::len),
-    FileLangs = (1097, StringArray, Vec<String>, Vec::len),
+    FileDevices = (1095, Int32, Vec<u32>),
+    FileInodes = (1096, Int32, Vec<u32>),
+    FileLangs = (1097, StringArray, Vec<String>),
     //Prefixes = 1098,
     //InstPrefixes = 1099,
     //TriggerIn = 1100,
@@ -246,16 +247,16 @@ define_entry_enums! {
     //ProvideVersion = 1113,
     //ObsoleteFlags = 1114,
     //ObsoleteVersion = 1115,
-    DirIndexes = (1116, Int32, Vec<u32>, Vec::len),
-    BaseNames = (1117, StringArray, Vec<String>, Vec::len),
-    DirNames = (1118, StringArray, Vec<String>, Vec::len),
+    DirIndexes = (1116, Int32, Vec<u32>),
+    BaseNames = (1117, StringArray, Vec<String>),
+    DirNames = (1118, StringArray, Vec<String>),
     //OrigDirIndexes = 1119,
     //OrigBaseNames = 1120,
     //OrigDirNames = 1121,
     //OptFlags = 1122,
     //DistUrl = 1123,
-    PayloadFormat = (1124, String, String, one),
-    PayloadCompressor = (1125, String, String, one),
+    PayloadFormat = (1124, String, String),
+    PayloadCompressor = (1125, String, String),
     //PayloadFlags = 1126,
     //InstallColor = 1127,
     //InstallTid = 1128,
@@ -270,12 +271,12 @@ define_entry_enums! {
     //CachePkgPath = 1137,
     //CachePkgSize = 1138,
     //CachePkgMtime = 1139,
-    FileColors = (1140, Int32, Vec<u32>, Vec::len),
-    FileClass = (1141, Int32, Vec<u32>, Vec::len),
+    FileColors = (1140, Int32, Vec<u32>),
+    FileClass = (1141, Int32, Vec<u32>),
     //ClassDict = 1142,
-    FileDependsX = (1143, Int32, Vec<u32>, Vec::len),
-    FileDependsN = (1144, Int32, Vec<u32>, Vec::len),
-    DependsDict = (1145, Int32, Vec<u32>, Vec::len),
+    FileDependsX = (1143, Int32, Vec<u32>),
+    FileDependsN = (1144, Int32, Vec<u32>),
+    DependsDict = (1145, Int32, Vec<u32>),
     //SourcePkgId = 1146,
     //FileContexts = 1147,
     //FsContexts = 1148,
@@ -337,9 +338,9 @@ define_entry_enums! {
     //OrigFileNames = 5007,
     // TODO
     //LongFileSizes = 5008,
-    LongSize = (5009, Int64, u64, one),
+    LongSize = (5009, Int64, u64),
     //FileCaps = 5010,
-    FileDigestAlgo = (5011, Int32, HashAlgorithm, one),
+    FileDigestAlgo = (5011, Int32, HashAlgorithm),
     //BugUrl = 5012,
     //Evr = 5013,
     //Nvr = 5014,
@@ -419,12 +420,12 @@ define_entry_enums! {
     //TransFileTriggerType = 5089,
     //FileSignatures = 5090,
     //FileSignatureLength = 5091,
-    PayloadDigest = (5092, StringArray, Sha256Hash, one),
-    PayloadDigestAlgo = (5093, Int32, HashAlgorithm, one),
+    PayloadDigest = (5092, StringArray, Sha256Hash),
+    PayloadDigestAlgo = (5093, Int32, HashAlgorithm),
     //AutoInstalled = 5094,
     //Identity = 5095,
     //ModularityLabel = 5096,
-    PayloadDigestAlt = (5097, StringArray, Sha256Hash, one),
+    PayloadDigestAlt = (5097, StringArray, Sha256Hash),
     //ArchSuffix = 5098,
     //Spec = 5099,
     //TranslationUrl = 5100,
@@ -451,32 +452,28 @@ define_entry_enums! {
     SignatureTag,
     SignatureEntry,
     Signatures,
-    Signatures = (62, Bin, Vec<u8>, Vec::len),
-    Size = (1000, Int32, u32, one),
+    Signatures = (62, Bin, Vec<u8>),
+    Size = (1000, Int32, u32),
     //LeMd5_1 = 1001,
     //Pgp = 1002,
     //LeMd5_2 = 1003,
-    Md5 = (1004, Bin, Md5Hash, Md5Hash::len),
-    Gpg = (1005, Bin, Vec<u8>, Vec::len),
+    Md5 = (1004, Bin, Md5Hash),
+    Gpg = (1005, Bin, Vec<u8>),
     //Pgp5 = 1006,
-    PayloadSize = (1007, Int32, u32, one),
+    PayloadSize = (1007, Int32, u32),
     //ReservedSpace = 1008,
     //BadSha1_1 = 264,
     //BadSha1_2 = 265,
-    Dsa = (267, Bin, Vec<u8>, Vec::len),
-    Rsa = (268, Bin, Vec<u8>, Vec::len),
-    Sha1 = (269, String, Sha1Hash, one),
+    Dsa = (267, Bin, Vec<u8>),
+    Rsa = (268, Bin, Vec<u8>),
+    Sha1 = (269, String, Sha1Hash),
     //LongSize = 270,
     //LongArchiveSize = 271,
-    Sha256 = (273, String, Sha256Hash, one),
+    Sha256 = (273, String, Sha256Hash),
     //FileSignatures = 274,
     //FileSignatureLength = 275,
     //VeritySignatures = 276,
     //VeritySignatureAlgo = 277,
-}
-
-fn one<T>(_: T) -> usize {
-    1
 }
 
 pub(crate) fn pad(offset: u32, align: u32) -> u32 {
@@ -497,8 +494,7 @@ macro_rules! define_entry_enums {
         $($name:ident = (
             $value:literal,
             $entry_kind:ident,
-            $entry_type:ty,
-            $entry_count:expr
+            $entry_type:ty
         ),)*
     } => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -559,7 +555,7 @@ macro_rules! define_entry_enums {
 
             pub fn count(&self) -> usize {
                 match self {
-                    $( $entry_enum::$name(v) => $entry_count(v), )*
+                    $( $entry_enum::$name(v) => ValueIo::count(v), )*
                 }
             }
 
@@ -568,7 +564,7 @@ macro_rules! define_entry_enums {
                     $( $entry_enum::$name(v) => (
                         $tag_enum::$name,
                         EntryKind::$entry_kind,
-                        $entry_count(v)
+                        ValueIo::count(v)
                     ), )*
                 }
             }

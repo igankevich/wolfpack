@@ -1,17 +1,22 @@
 use std::collections::HashMap;
 use std::io::Error;
 use std::io::Write;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use normalize_path::NormalizePath;
 use walkdir::WalkDir;
 
 //use zstd::stream::write::Encoder as ZstdEncoder;
 use crate::archive::ArchiveWrite;
 use crate::archive::CpioBuilder;
+use crate::hash::Hasher;
+use crate::hash::Sha256Hash;
 use crate::rpm::pad;
 use crate::rpm::Entry;
+use crate::rpm::HashAlgorithm;
 use crate::rpm::Header;
 use crate::rpm::Lead;
 use crate::rpm::PackageSigner;
@@ -40,6 +45,7 @@ impl Package {
         signer: &PackageSigner,
     ) -> Result<(), Error>
     where
+        // TODO + Seek
         W: Write,
         P: AsRef<Path>,
     {
@@ -49,45 +55,91 @@ impl Package {
         let mut basenames = Vec::<String>::new();
         let mut dirnames = Vec::<String>::new();
         let mut dirindices = Vec::<u32>::new();
+        let mut usernames = Vec::<String>::new();
+        let mut groupnames = Vec::<String>::new();
+        let mut filedigests = Vec::<String>::new();
+        let mut filemodes = Vec::<u16>::new();
+        let mut filesizes = Vec::<u32>::new();
         // TODO do not repeat walkdir in from_directory
         for entry in WalkDir::new(&directory).into_iter() {
             let entry = entry?;
+            //let meta = entry.metadata()?;
             let path = entry.path();
+            let entry_path = entry
+                .path()
+                .strip_prefix(&directory)
+                .map_err(std::io::Error::other)?
+                .normalize();
+            if entry_path == Path::new("") {
+                continue;
+            }
+            //let entry_path = Path::new(".").join(entry_path);
+            let entry_path = Path::new("/tmp/rpm").join(entry_path);
+            let meta = entry.metadata()?;
             if let (Some(file_name), Some(parent)) = (
-                path.file_name().and_then(|x| x.to_str()),
-                path.parent().and_then(|x| x.to_str()),
+                entry_path.file_name().and_then(|x| x.to_str()),
+                entry_path.parent().and_then(|x| x.to_str()),
             ) {
+                let parent = if parent.is_empty() {
+                    parent.to_string()
+                } else {
+                    format!("{}/", parent)
+                };
                 let i = basenames.len();
                 basenames.push(file_name.into());
-                dirnames.push(parent.into());
+                dirnames.push(parent);
                 dirindices.push(i as u32);
+                usernames.push("root".into());
+                groupnames.push("root".into());
+                filemodes.push(meta.mode() as u16);
+                filesizes.push(meta.size() as u32);
+                let hash = if path.is_dir() {
+                    String::new()
+                } else {
+                    sha2::Sha256::compute(&std::fs::read(path)?).to_string()
+                };
+                filedigests.push(hash);
             }
         }
         let mut header2 = Header::new(self.into());
         header2.insert(Entry::BaseNames(basenames));
         header2.insert(Entry::DirNames(dirnames));
         header2.insert(Entry::DirIndexes(dirindices));
+        header2.insert(Entry::FileUserName(usernames));
+        header2.insert(Entry::FileGroupName(groupnames));
+        header2.insert(Entry::FileDigestAlgo(HashAlgorithm::Sha256));
+        header2.insert(Entry::FileDigests(filedigests));
+        header2.insert(Entry::FileModes(filemodes));
+        header2.insert(Entry::FileSizes(filesizes));
+        let mut payload = Vec::new();
+        CpioBuilder::from_directory(
+            directory,
+            GzEncoder::new(&mut payload, Compression::best()),
+            // TODO
+            //ZstdEncoder::new(&mut payload, COMPRESSION_LEVEL)?,
+        )?
+        .finish()?;
+        let payload_sha256 = sha2::Sha256::compute(&payload);
+        header2.insert(Entry::PayloadDigestAlgo(HashAlgorithm::Sha256));
+        header2.insert(Entry::PayloadDigest(payload_sha256.clone()));
+        header2.insert(Entry::PayloadDigestAlt(payload_sha256));
         let mut header2 = header2.to_vec()?;
+        let header_sha256 = sha2::Sha256::compute(&header2);
         // sign second header without the leading padding
         let signature_v4 = signer
             .sign(&header2)
             .map_err(|_| Error::other("failed to sign rpm"))?;
-
-        CpioBuilder::from_directory(
-            directory,
-            GzEncoder::new(&mut header2, Compression::best()),
-            // TODO
-            //ZstdEncoder::new(&mut header2, COMPRESSION_LEVEL)?,
-        )?
-        .finish()?;
+        header2.extend(payload);
         // sign second header without the leading padding and the rest of the file
         let signature_v3 = signer
             .sign(&header2)
             .map_err(|_| Error::other("failed to sign rpm"))?;
+        eprintln!("header2 len {}", header2.len());
         let header1 = Header::new(
             Signatures {
                 signature_v3,
                 signature_v4,
+                header_sha256,
             }
             .into(),
         );
@@ -108,10 +160,12 @@ impl From<Package> for HashMap<Tag, Entry> {
         [
             Entry::Name(other.name).into(),
             Entry::Version(other.version).into(),
+            Entry::Release("1".into()).into(),
             Entry::Summary(other.summary).into(),
             Entry::Description(other.description).into(),
             Entry::License(other.license).into(),
             Entry::Url(other.url).into(),
+            Entry::Os("linux".into()).into(),
             Entry::Arch(other.arch).into(),
             Entry::PayloadFormat("cpio".into()).into(),
             Entry::PayloadCompressor("gzip".into()).into(),
@@ -123,6 +177,7 @@ impl From<Package> for HashMap<Tag, Entry> {
 pub struct Signatures {
     pub signature_v3: Vec<u8>,
     pub signature_v4: Vec<u8>,
+    pub header_sha256: Sha256Hash,
 }
 
 impl From<Signatures> for HashMap<SignatureTag, SignatureEntry> {
@@ -130,6 +185,7 @@ impl From<Signatures> for HashMap<SignatureTag, SignatureEntry> {
         [
             SignatureEntry::Gpg(other.signature_v3).into(),
             SignatureEntry::Dsa(other.signature_v4).into(),
+            SignatureEntry::Sha256(other.header_sha256).into(),
         ]
         .into()
     }
@@ -186,7 +242,7 @@ mod tests {
         verifying_key.write_armored(&mut verifying_key_vec).unwrap();
         let verifying_key_str = String::from_utf8(verifying_key_vec).unwrap();
         assert!(
-            Command::new("rpm")
+            Command::new(RPMKEYS)
                 .arg("--verbose")
                 .arg("--import")
                 .arg(verifying_key_file.as_path())
@@ -198,7 +254,9 @@ mod tests {
         );
         eprintln!("added public key");
         arbtest(|u| {
-            let package: Package = u.arbitrary()?;
+            let mut package: Package = u.arbitrary()?;
+            package.arch = "x86_64".into();
+            package.name = "test".into();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             package
                 .clone()
@@ -231,18 +289,18 @@ mod tests {
             //    "manifest:\n========{:?}========",
             //    package
             //);
+            //assert!(
+            //    Command::new("cp")
+            //        .arg(package_file.as_path())
+            //        .arg("/src/test.rpm")
+            //        .status()
+            //        .unwrap()
+            //        .success(),
+            //    "manifest:\n========{:?}========",
+            //    package
+            //);
             assert!(
-                Command::new("cp")
-                    .arg(package_file.as_path())
-                    .arg("/src/test.rpm")
-                    .status()
-                    .unwrap()
-                    .success(),
-                "manifest:\n========{:?}========",
-                package
-            );
-            assert!(
-                Command::new("rpm")
+                Command::new(RPM)
                     .arg("--verbose")
                     .arg("--query")
                     .arg("--dump")
@@ -254,7 +312,7 @@ mod tests {
                 package
             );
             assert!(
-                Command::new("rpm")
+                Command::new(RPM)
                     .arg("--debug")
                     .arg("--verbose")
                     .arg("--install")
@@ -266,7 +324,7 @@ mod tests {
                 package
             );
             assert!(
-                Command::new("rpm")
+                Command::new(RPM)
                     .arg("--verbose")
                     .arg("--erase")
                     .arg(&package.name)
@@ -280,4 +338,9 @@ mod tests {
         })
         .budget(Duration::from_secs(5));
     }
+
+    const RPM: &str = "/home/igankevich/workspace/etd/rpm/tmp/tools/rpm";
+    const RPMKEYS: &str = "/home/igankevich/workspace/etd/rpm/tmp/tools/rpmkeys";
+    //const RPM: &str = "rpm";
+    //const RPMKEYS: &str = "rpmkeys";
 }

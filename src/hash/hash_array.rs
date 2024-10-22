@@ -1,10 +1,10 @@
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::fmt::Debug;
 use std::ops::Deref;
 use std::str::FromStr;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 pub struct HashArray<const N: usize>([u8; N]);
 
@@ -15,6 +15,10 @@ impl<const N: usize> HashArray<N> {
 
     pub const fn len(&self) -> usize {
         N
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        N == 0
     }
 }
 

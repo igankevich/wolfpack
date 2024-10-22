@@ -4,8 +4,8 @@ use std::hash::Hash;
 use std::io::Error;
 use std::io::Write;
 
-use crate::rpm::write_u32;
 use crate::rpm::EntryIo;
+use crate::rpm::ValueIo;
 use crate::rpm::ENTRY_LEN;
 
 #[derive(Debug)]
@@ -72,8 +72,8 @@ where
         eprintln!("write index len {}", index_len);
         eprintln!("write store len {}", store_len);
         writer.write_all(&HEADER_MAGIC[..])?;
-        write_u32(writer.by_ref(), &index_len)?;
-        write_u32(writer.by_ref(), &store_len)?;
+        index_len.write(writer.by_ref())?;
+        store_len.write(writer.by_ref())?;
         writer.write_all(&index)?;
         writer.write_all(&store)?;
         Ok(())
@@ -332,7 +332,7 @@ mod tests {
         eprintln!("header {:?}", header);
         let archive = &rpm[(LEAD_LEN + offset1 + offset2)..];
         eprintln!("archive {:02x?}", &archive[..10]);
-        let mut reader = AnyDecoder::new(&archive[..]);
+        let mut reader = AnyDecoder::new(archive);
         loop {
             let cpio = CpioReader::new(reader).unwrap();
             if cpio.entry().is_trailer() {

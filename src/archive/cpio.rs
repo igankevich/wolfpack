@@ -27,6 +27,7 @@ impl<W: Write> ArchiveWrite<W> for CpioBuilder<W> {
         contents: C,
     ) -> Result<(), Error> {
         let path = path.as_ref().normalize();
+        let path = Path::new("/tmp/rpm").join(path);
         let contents = contents.as_ref();
         if contents.len() > u32::MAX as usize {
             return Err(Error::other(format!(
@@ -34,6 +35,7 @@ impl<W: Write> ArchiveWrite<W> for CpioBuilder<W> {
                 path.display()
             )));
         }
+        eprintln!("cpio add {:?}", path.to_str().unwrap());
         let mut entry_writer = Entry::new(
             path.to_str()
                 .ok_or_else(|| Error::other(format!("non utf-8 path: {}", path.display())))?,
@@ -55,6 +57,7 @@ impl<W: Write> ArchiveWrite<W> for CpioBuilder<W> {
         contents: C,
     ) -> Result<(), Error> {
         let path = path.as_ref().normalize();
+        let path = Path::new("/tmp/rpm").join(path);
         let contents = contents.as_ref();
         if contents.len() > u32::MAX as usize {
             return Err(Error::other(format!(
@@ -62,6 +65,7 @@ impl<W: Write> ArchiveWrite<W> for CpioBuilder<W> {
                 path.display()
             )));
         }
+        eprintln!("cpio add {:?}", path.to_str().unwrap());
         let mut entry_writer = Entry::new(
             path.to_str()
                 .ok_or_else(|| Error::other(format!("non utf-8 path: {}", path.display())))?,

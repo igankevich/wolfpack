@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::io::Error;
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
@@ -52,12 +53,12 @@ impl Package {
         let lead = Lead::new(self.name.clone());
         eprintln!("write {lead:?}");
         lead.write(writer.by_ref())?;
-        let mut basenames = Vec::<String>::new();
-        let mut dirnames = Vec::<String>::new();
+        let mut basenames = Vec::<CString>::new();
+        let mut dirnames = Vec::<CString>::new();
         let mut dirindices = Vec::<u32>::new();
-        let mut usernames = Vec::<String>::new();
-        let mut groupnames = Vec::<String>::new();
-        let mut filedigests = Vec::<String>::new();
+        let mut usernames = Vec::<CString>::new();
+        let mut groupnames = Vec::<CString>::new();
+        let mut filedigests = Vec::<CString>::new();
         let mut filemodes = Vec::<u16>::new();
         let mut filesizes = Vec::<u32>::new();
         // TODO do not repeat walkdir in from_directory
@@ -86,11 +87,11 @@ impl Package {
                     format!("{}/", parent)
                 };
                 let i = basenames.len();
-                basenames.push(file_name.into());
-                dirnames.push(parent);
+                basenames.push(CString::new(file_name).unwrap());
+                dirnames.push(CString::new(parent).unwrap());
                 dirindices.push(i as u32);
-                usernames.push("root".into());
-                groupnames.push("root".into());
+                usernames.push(c"root".into());
+                groupnames.push(c"root".into());
                 filemodes.push(meta.mode() as u16);
                 filesizes.push(meta.size() as u32);
                 let hash = if path.is_dir() {
@@ -98,7 +99,7 @@ impl Package {
                 } else {
                     sha2::Sha256::compute(&std::fs::read(path)?).to_string()
                 };
-                filedigests.push(hash);
+                filedigests.push(CString::new(hash).unwrap());
             }
         }
         let mut header2 = Header::new(self.into());
@@ -158,17 +159,17 @@ impl Package {
 impl From<Package> for HashMap<Tag, Entry> {
     fn from(other: Package) -> Self {
         [
-            Entry::Name(other.name).into(),
-            Entry::Version(other.version).into(),
-            Entry::Release("1".into()).into(),
-            Entry::Summary(other.summary).into(),
-            Entry::Description(other.description).into(),
-            Entry::License(other.license).into(),
-            Entry::Url(other.url).into(),
-            Entry::Os("linux".into()).into(),
-            Entry::Arch(other.arch).into(),
-            Entry::PayloadFormat("cpio".into()).into(),
-            Entry::PayloadCompressor("gzip".into()).into(),
+            Entry::Name(CString::new(other.name).unwrap()).into(),
+            Entry::Version(CString::new(other.version).unwrap()).into(),
+            Entry::Release(c"1".into()).into(),
+            Entry::Summary(CString::new(other.summary).unwrap()).into(),
+            Entry::Description(CString::new(other.description).unwrap()).into(),
+            Entry::License(CString::new(other.license).unwrap()).into(),
+            Entry::Url(CString::new(other.url).unwrap()).into(),
+            Entry::Os(c"linux".into()).into(),
+            Entry::Arch(CString::new(other.arch).unwrap()).into(),
+            Entry::PayloadFormat(c"cpio".into()).into(),
+            Entry::PayloadCompressor(c"gzip".into()).into(),
         ]
         .into()
     }

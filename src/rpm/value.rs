@@ -2,7 +2,7 @@ use std::ffi::CStr;
 use std::ffi::CString;
 use std::io::Error;
 use std::io::Write;
-use std::str::from_utf8;
+use std::ops::Deref;
 
 use crate::hash::Md5Hash;
 use crate::hash::Sha1Hash;
@@ -66,9 +66,9 @@ value_io_array!(u16, 2);
 value_io_array!(u32, 4);
 value_io_array!(u64, 8);
 
-impl ValueIo for Vec<u8> {
-    fn read(input: &[u8], count: usize) -> Result<Vec<u8>, Error> {
-        Ok(input[..count].into())
+impl ValueIo for NonEmptyVec<u8> {
+    fn read(input: &[u8], count: usize) -> Result<NonEmptyVec<u8>, Error> {
+        input[..count].try_into()
     }
 
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
@@ -77,22 +77,6 @@ impl ValueIo for Vec<u8> {
 
     fn count(&self) -> usize {
         self.len()
-    }
-}
-
-impl ValueIo for String {
-    fn read(input: &[u8], _count: usize) -> Result<String, Error> {
-        let c_str = CStr::from_bytes_until_nul(input)
-            .map_err(|_| Error::other("string is not terminated"))?;
-        let s = from_utf8(c_str.to_bytes())
-            .map_err(|e| Error::other(format!("invalid utf-8 string: {}", e)))?;
-        Ok(s.into())
-    }
-
-    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        writer.write_all(self.as_bytes())?;
-        writer.write_all(&[0_u8])?;
-        Ok(())
     }
 }
 
@@ -109,7 +93,7 @@ impl ValueIo for CString {
     }
 }
 
-impl ValueIo for Vec<CString> {
+impl ValueIo for NonEmptyVec<CString> {
     fn read(mut input: &[u8], count: usize) -> Result<Self, Error> {
         let mut strings = Vec::with_capacity(count);
         for _ in 0..count {
@@ -118,37 +102,12 @@ impl ValueIo for Vec<CString> {
             strings.push(c_string);
             input = &input[n..];
         }
-        Ok(strings)
+        strings.try_into()
     }
 
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        for s in self {
+        for s in self.iter() {
             s.write(writer.by_ref())?;
-        }
-        Ok(())
-    }
-
-    fn count(&self) -> usize {
-        self.len()
-    }
-}
-
-impl ValueIo for Vec<String> {
-    fn read(mut input: &[u8], count: usize) -> Result<Vec<String>, Error> {
-        let mut strings = Vec::with_capacity(count);
-        for _ in 0..count {
-            let s = String::read(input, 1)?;
-            let n = s.len();
-            strings.push(s);
-            input = &input[(n + 1)..];
-        }
-        Ok(strings)
-    }
-
-    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        for s in self {
-            writer.write_all(s.as_bytes())?;
-            writer.write_all(&[0_u8])?;
         }
         Ok(())
     }
@@ -178,42 +137,83 @@ impl ValueIo for Md5Hash {
 
 impl ValueIo for Sha1Hash {
     fn read(input: &[u8], count: usize) -> Result<Sha1Hash, Error> {
-        String::read(input, count)?
+        CString::read(input, count)?
+            .to_str()
+            .map_err(|_| Error::other("invalid sha1"))?
             .parse()
             .map_err(|_| Error::other("invalid sha1"))
     }
 
     fn write<W: Write>(&self, writer: W) -> Result<(), Error> {
-        self.to_string().write(writer)
+        let vec = self.to_string().into();
+        unsafe { CString::from_vec_unchecked(vec) }.write(writer)
     }
 }
 
 impl ValueIo for Sha256Hash {
     fn read(input: &[u8], count: usize) -> Result<Sha256Hash, Error> {
-        String::read(input, count)?
+        CString::read(input, count)?
+            .to_str()
+            .map_err(|_| Error::other("invalid sha256"))?
             .parse()
             .map_err(|_| Error::other("invalid sha256"))
     }
 
     fn write<W: Write>(&self, writer: W) -> Result<(), Error> {
-        self.to_string().write(writer)
+        let vec = self.to_string().into();
+        unsafe { CString::from_vec_unchecked(vec) }.write(writer)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct NonEmptyVec<T>(Vec<T>);
+
+impl<T> Deref for NonEmptyVec<T> {
+    type Target = Vec<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> TryFrom<Vec<T>> for NonEmptyVec<T> {
+    type Error = Error;
+
+    fn try_from(other: Vec<T>) -> Result<Self, Self::Error> {
+        if other.is_empty() {
+            Err(Error::other("vector is empty"))
+        } else {
+            Ok(Self(other))
+        }
+    }
+}
+
+impl<T: Clone> TryFrom<&[T]> for NonEmptyVec<T> {
+    type Error = Error;
+
+    fn try_from(other: &[T]) -> Result<Self, Self::Error> {
+        if other.is_empty() {
+            Err(Error::other("vector is empty"))
+        } else {
+            Ok(Self(other.into()))
+        }
     }
 }
 
 macro_rules! value_io_array {
     ($type:ty, $size:literal) => {
-        impl ValueIo for Vec<$type> {
-            fn read(mut input: &[u8], count: usize) -> Result<Vec<$type>, Error> {
-                let mut array = Vec::with_capacity(count);
+        impl ValueIo for NonEmptyVec<$type> {
+            fn read(mut input: &[u8], count: usize) -> Result<NonEmptyVec<$type>, Error> {
+                let mut vec = Vec::with_capacity(count);
                 for _ in 0..count {
-                    array.push(<$type as ValueIo>::read(input, 1)?);
+                    vec.push(<$type as ValueIo>::read(input, 1)?);
                     input = &input[$size..];
                 }
-                Ok(array)
+                vec.try_into()
             }
 
             fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-                for n in self {
+                for n in self.iter() {
                     <$type as ValueIo>::write(n, writer.by_ref())?;
                 }
                 Ok(())
@@ -230,6 +230,9 @@ use value_io_array;
 
 #[cfg(test)]
 mod tests {
+    use arbitrary::Arbitrary;
+    use arbitrary::Unstructured;
+
     use super::*;
     use crate::rpm::test::write_read_symmetry;
 
@@ -240,10 +243,20 @@ mod tests {
         write_read_symmetry::<u32>();
         write_read_symmetry::<u64>();
         write_read_symmetry::<CString>();
-        write_read_symmetry::<Vec<u8>>();
-        write_read_symmetry::<Vec<u16>>();
-        write_read_symmetry::<Vec<u32>>();
-        write_read_symmetry::<Vec<u64>>();
-        write_read_symmetry::<Vec<CString>>();
+        write_read_symmetry::<NonEmptyVec<u8>>();
+        write_read_symmetry::<NonEmptyVec<u16>>();
+        write_read_symmetry::<NonEmptyVec<u32>>();
+        write_read_symmetry::<NonEmptyVec<u64>>();
+        write_read_symmetry::<NonEmptyVec<CString>>();
+    }
+
+    impl<'a, T: Arbitrary<'a>> Arbitrary<'a> for NonEmptyVec<T> {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let mut vec = u.arbitrary::<Vec<T>>()?;
+            if vec.is_empty() {
+                vec.push(u.arbitrary()?);
+            }
+            Ok(Self(vec))
+        }
     }
 }

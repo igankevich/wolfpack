@@ -5,13 +5,13 @@ use std::io::Write;
 use crate::hash::Md5Hash;
 use crate::hash::Sha1Hash;
 use crate::hash::Sha256Hash;
+use crate::rpm::NonEmptyVec;
 use crate::rpm::ValueIo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[repr(u32)]
 pub enum EntryKind {
-    Null = 0,
     Char = 1,
     Int8 = 2,
     Int16 = 3,
@@ -35,7 +35,6 @@ impl EntryKind {
     pub fn align(self) -> usize {
         use EntryKind::*;
         match self {
-            Null => 1,
             Char => 1,
             Int8 => 1,
             Int16 => 2,
@@ -54,7 +53,6 @@ impl TryFrom<u32> for EntryKind {
     fn try_from(other: u32) -> Result<Self, Error> {
         use EntryKind::*;
         match other {
-            0 => Ok(Null),
             1 => Ok(Char),
             2 => Ok(Int8),
             3 => Ok(Int16),
@@ -118,10 +116,39 @@ impl ValueIo for HashAlgorithm {
     }
 }
 
+pub struct RawEntry {
+    pub tag: u32,
+    pub kind: EntryKind,
+    pub offset: u32,
+    pub count: u32,
+}
+
+impl RawEntry {
+    pub fn read(index: &[u8], store: &[u8]) -> Result<Self, Error> {
+        if index.len() < ENTRY_LEN {
+            return Err(Error::other("index entry is too small"));
+        }
+        let tag = u32::read(&index[0..4], 1)?;
+        let kind = EntryKind::read(&index[4..8], 1)?;
+        let offset = u32::read(&index[8..12], 1)?;
+        if offset as usize >= store.len() {
+            return Err(Error::other("invalid offset in index entry"));
+        }
+        let count: u32 = u32::read(&index[12..16], 1)?;
+        kind.validate_count(count)?;
+        Ok(Self {
+            tag,
+            kind,
+            offset,
+            count,
+        })
+    }
+}
+
 pub trait EntryIo {
     type Tag;
 
-    fn read(input: &[u8], store: &[u8]) -> Result<Option<Self>, Error>
+    fn read(tag: u32, kind: EntryKind, count: usize, store: &[u8]) -> Result<Option<Self>, Error>
     where
         Self: Sized;
 
@@ -132,15 +159,16 @@ pub trait EntryIo {
     fn leader_entry(index_len: u32) -> Self
     where
         Self: Sized;
+
+    fn leader_tag() -> Self::Tag;
 }
 
 define_entry_enums! {
     Tag,
     Entry,
     Immutable,
-    Immutable = (63, Bin, Vec<u8>),
+    Immutable = (63, Bin, NonEmptyVec<u8>),
     //I18nTable = 100,
-    // TODO CString everywhere
     Name = (1000, String, CString),
     Version = (1001, String, CString),
     Release = (1002, String, CString),
@@ -164,29 +192,29 @@ define_entry_enums! {
     Url = (1020, String, CString),
     Os = (1021, String, CString),
     Arch = (1022, String, CString),
-    //PreIn = 1023,
-    //PostIn = 1024,
-    //PreUn = 1025,
-    //PostUn = 1026,
+    PreIn = (1023, String, CString),
+    PostIn = (1024, String, CString),
+    PreUn = (1025, String, CString),
+    PostUn = (1026, String, CString),
     //OldFileNames = 1027,
-    FileSizes = (1028, Int32, Vec<u32>),
+    FileSizes = (1028, Int32, NonEmptyVec<u32>),
     //FileStates = 1029,
-    FileModes = (1030, Int16, Vec<u16>),
+    FileModes = (1030, Int16, NonEmptyVec<u16>),
     //FileUids = 1031,
     //FileGids = 1032,
-    FileRdevs = (1033, Int16, Vec<u16>),
-    FileMtimes = (1034, Int32, Vec<u32>),
-    FileDigests = (1035, StringArray, Vec<CString>),
-    FileLinkToS = (1036, StringArray, Vec<CString>),
-    FileFlags = (1037, Int32, Vec<u32>),
+    FileRdevs = (1033, Int16, NonEmptyVec<u16>),
+    FileMtimes = (1034, Int32, NonEmptyVec<u32>),
+    FileDigests = (1035, StringArray, NonEmptyVec<CString>),
+    FileLinkToS = (1036, StringArray, NonEmptyVec<CString>),
+    FileFlags = (1037, Int32, NonEmptyVec<u32>),
     //Root = 1038,
-    FileUserName = (1039, StringArray, Vec<CString>),
-    FileGroupName = (1040, StringArray, Vec<CString>),
+    FileUserName = (1039, StringArray, NonEmptyVec<CString>),
+    FileGroupName = (1040, StringArray, NonEmptyVec<CString>),
     //Exclude = 1041,
     //Exclusive = 1042,
     //Icon = 1043,
     //SourceRpm = 1044,
-    FileVerifyFlags = (1045, Int32, Vec<u32>),
+    FileVerifyFlags = (1045, Int32, NonEmptyVec<u32>),
     //ArchiveSize = 1046,
     //ProvideName = 1047,
     //RequireFlags = 1048,
@@ -227,9 +255,9 @@ define_entry_enums! {
     //TriggerScriptProg = 1092,
     //DocDir = 1093,
     //Cookie = 1094,
-    FileDevices = (1095, Int32, Vec<u32>),
-    FileInodes = (1096, Int32, Vec<u32>),
-    FileLangs = (1097, StringArray, Vec<CString>),
+    FileDevices = (1095, Int32, NonEmptyVec<u32>),
+    FileInodes = (1096, Int32, NonEmptyVec<u32>),
+    FileLangs = (1097, StringArray, NonEmptyVec<CString>),
     //Prefixes = 1098,
     //InstPrefixes = 1099,
     //TriggerIn = 1100,
@@ -248,9 +276,9 @@ define_entry_enums! {
     //ProvideVersion = 1113,
     //ObsoleteFlags = 1114,
     //ObsoleteVersion = 1115,
-    DirIndexes = (1116, Int32, Vec<u32>),
-    BaseNames = (1117, StringArray, Vec<CString>),
-    DirNames = (1118, StringArray, Vec<CString>),
+    DirIndexes = (1116, Int32, NonEmptyVec<u32>),
+    BaseNames = (1117, StringArray, NonEmptyVec<CString>),
+    DirNames = (1118, StringArray, NonEmptyVec<CString>),
     //OrigDirIndexes = 1119,
     //OrigBaseNames = 1120,
     //OrigDirNames = 1121,
@@ -272,12 +300,12 @@ define_entry_enums! {
     //CachePkgPath = 1137,
     //CachePkgSize = 1138,
     //CachePkgMtime = 1139,
-    FileColors = (1140, Int32, Vec<u32>),
-    FileClass = (1141, Int32, Vec<u32>),
+    FileColors = (1140, Int32, NonEmptyVec<u32>),
+    FileClass = (1141, Int32, NonEmptyVec<u32>),
     //ClassDict = 1142,
-    FileDependsX = (1143, Int32, Vec<u32>),
-    FileDependsN = (1144, Int32, Vec<u32>),
-    DependsDict = (1145, Int32, Vec<u32>),
+    FileDependsX = (1143, Int32, NonEmptyVec<u32>),
+    FileDependsN = (1144, Int32, NonEmptyVec<u32>),
+    DependsDict = (1145, Int32, NonEmptyVec<u32>),
     //SourcePkgId = 1146,
     //FileContexts = 1147,
     //FsContexts = 1148,
@@ -337,8 +365,7 @@ define_entry_enums! {
     //TriggerConds = 5005,
     //TriggerType = 5006,
     //OrigFileNames = 5007,
-    // TODO
-    //LongFileSizes = 5008,
+    LongFileSizes = (5008, Int64, NonEmptyVec<u64>),
     LongSize = (5009, Int64, u64),
     //FileCaps = 5010,
     FileDigestAlgo = (5011, Int32, HashAlgorithm),
@@ -453,23 +480,23 @@ define_entry_enums! {
     SignatureTag,
     SignatureEntry,
     Signatures,
-    Signatures = (62, Bin, Vec<u8>),
+    Signatures = (62, Bin, NonEmptyVec<u8>),
     Size = (1000, Int32, u32),
     //LeMd5_1 = 1001,
     //Pgp = 1002,
     //LeMd5_2 = 1003,
     Md5 = (1004, Bin, Md5Hash),
-    Gpg = (1005, Bin, Vec<u8>),
+    Gpg = (1005, Bin, NonEmptyVec<u8>),
     //Pgp5 = 1006,
     PayloadSize = (1007, Int32, u32),
     //ReservedSpace = 1008,
     //BadSha1_1 = 264,
     //BadSha1_2 = 265,
-    Dsa = (267, Bin, Vec<u8>),
-    Rsa = (268, Bin, Vec<u8>),
+    Dsa = (267, Bin, NonEmptyVec<u8>),
+    Rsa = (268, Bin, NonEmptyVec<u8>),
     Sha1 = (269, String, Sha1Hash),
-    //LongSize = 270,
-    //LongArchiveSize = 271,
+    LongSize = (270, Int64, u64),
+    LongArchiveSize = (271, Int64, u64),
     Sha256 = (273, String, Sha256Hash),
     //FileSignatures = 274,
     //FileSignatureLength = 275,
@@ -570,32 +597,6 @@ macro_rules! define_entry_enums {
                 }
             }
 
-            fn do_read(
-                tag: $tag_enum,
-                kind: EntryKind,
-                count: usize,
-                input: &[u8]
-            ) -> Result<Option<$entry_enum>, Error> {
-                match tag {
-                    $( $tag_enum::$name => {
-                        if EntryKind::$entry_kind != kind {
-                            return Err(Error::other(format!(
-                                "{:?}: invalid entry type: expected {:?}, actual {:?}",
-                                tag,
-                                EntryKind::$entry_kind,
-                                kind,
-                            )));
-                        }
-                        let value = ValueIo::read(input, count)?;
-                        Ok(Some($entry_enum::$name(value)))
-                    },)*
-                    $tag_enum::Other(tag) => {
-                        eprintln!("unsupported tag: {}", tag);
-                        Ok(None)
-                    }
-                }
-            }
-
             fn do_write<W: Write>(&self, store: W) -> Result<(), Error> {
                 match self {
                     $( $entry_enum::$name(value) => ValueIo::write(value, store), )*
@@ -612,6 +613,10 @@ macro_rules! define_entry_enums {
                 }
             }
 
+            fn leader_tag() -> Self::Tag {
+                $tag_enum::$leader_tag
+            }
+
             fn leader_entry(index_len: u32) -> Self where Self: Sized {
                 let tag: u32 = $tag_enum::$leader_tag.into();
                 let offset: i32 = -(index_len as i32);
@@ -620,23 +625,34 @@ macro_rules! define_entry_enums {
                 data.extend((EntryKind::Bin as u32).to_be_bytes());
                 data.extend((offset as u32).to_be_bytes());
                 data.extend(16_u32.to_be_bytes());
-                $entry_enum::$leader_tag(data)
+                $entry_enum::$leader_tag(data.try_into().expect("always non-empty"))
             }
 
-            fn read(input: &[u8], store: &[u8]) -> Result<Option<Self>, Error> {
-                if input.len() < ENTRY_LEN {
-                    return Err(Error::other("index entry is too small"));
+            fn read(
+                tag: u32,
+                kind: EntryKind,
+                count: usize,
+                store: &[u8]
+            ) -> Result<Option<$entry_enum>, Error> {
+                let tag: $tag_enum = tag.into();
+                match tag {
+                    $( $tag_enum::$name => {
+                        if EntryKind::$entry_kind != kind {
+                            return Err(Error::other(format!(
+                                "{:?}: invalid entry type: expected {:?}, actual {:?}",
+                                tag,
+                                EntryKind::$entry_kind,
+                                kind,
+                            )));
+                        }
+                        let value = ValueIo::read(store, count)?;
+                        Ok(Some($entry_enum::$name(value)))
+                    },)*
+                    $tag_enum::Other(tag) => {
+                        eprintln!("unsupported tag: {}", tag);
+                        Ok(None)
+                    }
                 }
-                let tag = $tag_enum::read(&input[0..4], 1)?;
-                let kind = EntryKind::read(&input[4..8], 1)?;
-                let offset = u32::read(&input[8..12], 1)? as usize;
-                if offset >= store.len() {
-                    return Err(Error::other("invalid offset in index entry"));
-                }
-                let count: u32 = u32::read(&input[12..16], 1)?;
-                kind.validate_count(count)?;
-                eprintln!("tag {:?} {:?} {} {}", tag, kind, count, offset);
-                $entry_enum::do_read(tag, kind, count as usize, &store[offset..])
             }
 
             fn write<W1: Write, W2: Write>(
@@ -646,6 +662,7 @@ macro_rules! define_entry_enums {
                 mut offset: u32,
             ) -> Result<(), Error> {
                 let (tag, kind, count) = self.tag_kind_count();
+                assert!(count != 0, "zero count is illegal in rpm");
                 let padding = pad(offset, kind.align() as u32);
                 offset += padding;
                 tag.as_u32().write(index.by_ref())?;
@@ -656,9 +673,8 @@ macro_rules! define_entry_enums {
                 }
                 (count as u32).write(index.by_ref())?;
                 if padding != 0 {
-                    store.write_all(&vec![0_u8; padding as usize])?;
+                    store.write_all(get_zeroes(padding as usize))?;
                 }
-                eprintln!("write tag {:?} {:?} {} {}", tag, kind, count, offset);
                 self.do_write(store)?;
                 Ok(())
             }
@@ -672,11 +688,18 @@ macro_rules! define_entry_enums {
     };
 }
 
-pub(crate) use define_entry_enums;
+use define_entry_enums;
+
+pub(crate) fn get_zeroes(len: usize) -> &'static [u8] {
+    &PADDING[..len]
+}
+
+const PADDING: [u8; 7] = [0_u8; 7];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    //use crate::rpm::test::write_read_entry_symmetry;
     use crate::rpm::test::write_read_symmetry;
 
     #[test]
@@ -685,5 +708,7 @@ mod tests {
         write_read_symmetry::<EntryKind>();
         write_read_symmetry::<Tag>();
         write_read_symmetry::<SignatureTag>();
+        //write_read_entry_symmetry::<SignatureEntry>();
+        //write_read_entry_symmetry::<Entry>();
     }
 }

@@ -2,9 +2,11 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::io::Error;
+use std::io::Read;
 use std::io::Write;
 
 use crate::rpm::EntryIo;
+use crate::rpm::RawEntry;
 use crate::rpm::ValueIo;
 use crate::rpm::ENTRY_LEN;
 
@@ -15,7 +17,6 @@ where
     <E as EntryIo>::Tag: Hash + Debug,
 {
     entries: HashMap<<E as EntryIo>::Tag, E>,
-    version: u8,
 }
 
 impl<E> Header<E>
@@ -24,10 +25,7 @@ where
     <E as EntryIo>::Tag: Hash + Debug + Eq,
 {
     pub fn new(entries: HashMap<<E as EntryIo>::Tag, E>) -> Self {
-        Self {
-            entries,
-            version: DEFAULT_HEADER_VERSION,
-        }
+        Self { entries }
     }
 
     pub fn to_vec(&self) -> Result<Vec<u8>, Error> {
@@ -39,7 +37,6 @@ where
     pub fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         let mut index = Vec::new();
         let mut store = Vec::new();
-        // TODO leader/trailer
         for (_tag, entry) in self.entries.iter() {
             let offset = store.len();
             if offset > u32::MAX as usize {
@@ -57,75 +54,88 @@ where
             leader.write(&mut leader_index, &mut store, offset as u32)?;
             index.splice(0..0, leader_index);
         }
-        let index_len = self.entries.len() + 1;
-        if index_len > u32::MAX as usize {
-            return Err(Error::other(format!("too many entries: {}", index_len)));
+        let num_entries = self.entries.len() + 1;
+        if num_entries > u32::MAX as usize {
+            return Err(Error::other(format!("too many entries: {}", num_entries)));
         }
         let store_len = store.len();
         if store_len > u32::MAX as usize {
             return Err(Error::other(format!("too large store: {}", store_len)));
         }
-        let index_len = index_len as u32;
+        let num_entries = num_entries as u32;
         let store_len = store_len as u32;
-        assert_eq!(0, (index_len * ENTRY_LEN as u32) % ALIGN);
+        assert_eq!(0, (num_entries * ENTRY_LEN as u32) % ALIGN);
         eprintln!("write {:?}", self.entries);
-        eprintln!("write index len {}", index_len);
+        eprintln!("write num entries {}", num_entries);
+        eprintln!("write index len {}", num_entries * ENTRY_LEN as u32);
         eprintln!("write store len {}", store_len);
         writer.write_all(&HEADER_MAGIC[..])?;
-        index_len.write(writer.by_ref())?;
+        num_entries.write(writer.by_ref())?;
         store_len.write(writer.by_ref())?;
         writer.write_all(&index)?;
         writer.write_all(&store)?;
         Ok(())
     }
 
-    pub fn read(input: &[u8]) -> Result<(Self, usize), Error> {
+    pub fn read<R: Read>(mut reader: R) -> Result<(Self, usize), Error> {
+        assert!(HEADER_MAGIC.len() + 7 <= MIN_HEADER_LEN);
+        let mut input = [0_u8; MIN_HEADER_LEN];
+        reader.read_exact(&mut input[..])?;
         let offset = input
             .windows(HEADER_MAGIC.len())
             .position(|bytes| bytes == &HEADER_MAGIC[..])
             .ok_or_else(|| Error::other("unable to find header magic"))?;
-        let input = &input[offset..];
-        if input.len() < MIN_HEADER_LEN {
-            return Err(Error::other(format!(
-                "header is too small: {} < {}",
-                input.len(),
-                MIN_HEADER_LEN
-            )));
-        }
-        let version = input[3];
+        input.rotate_left(offset);
+        let remaining = input.len() - offset;
+        reader.read_exact(&mut input[remaining..])?;
+        let _version = input[3];
         let num_entries: usize = get_u32(&input[8..12]) as usize;
-        eprintln!("read index len {}", num_entries);
+        eprintln!("read num entries {}", num_entries);
         let index_len = num_entries
             .checked_mul(ENTRY_LEN)
             .ok_or_else(|| Error::other("bogus no. of index entries"))?;
-        if input.len() - MIN_HEADER_LEN < index_len {
-            return Err(Error::other(format!(
-                "header is too small: {} < {}",
-                input.len(),
-                index_len + MIN_HEADER_LEN
-            )));
-        }
+        eprintln!("read index len {}", index_len);
         let store_len = get_u32(&input[12..16]) as usize;
         eprintln!("read store len {}", store_len);
-        if input.len() - MIN_HEADER_LEN - index_len < store_len {
-            return Err(Error::other("header is too small"));
+        let mut index = vec![0_u8; index_len]; // TODO set_len?
+        reader.read_exact(&mut index[..])?;
+        let mut store = vec![0_u8; store_len]; // TODO set_len?
+        reader.read_exact(&mut store[..])?;
+        let mut raw_entries = Vec::with_capacity(num_entries);
+        for offset in (0..index_len).step_by(ENTRY_LEN) {
+            let Ok(raw) = RawEntry::read(&index[offset..], &store[..]) else {
+                log::error!("ignoring invalid entry: {}", e);
+                continue;
+            };
+            raw_entries.push(raw);
         }
-        let store_offset = MIN_HEADER_LEN + index_len;
-        let store = &input[store_offset..(store_offset + store_len)];
+        raw_entries.sort_by(|a, b| a.offset.cmp(&b.offset));
         let mut entries = HashMap::with_capacity(num_entries);
-        let mut i = MIN_HEADER_LEN;
-        for _ in 0..num_entries {
-            let entry = E::read(&input[i..store_offset], store)?;
+        for i in 0..num_entries {
+            let raw = &raw_entries[i];
+            // offset of the current entry
+            let offset1 = raw.offset as usize;
+            // offset of the next entry
+            let offset2 = raw_entries
+                .get(i + 1)
+                .map(|e| e.offset as usize)
+                .unwrap_or(store_len);
+            eprintln!("entry {i} range [{offset1}; {offset2})");
+            let entry = E::read(
+                raw.tag,
+                raw.kind,
+                raw.count as usize,
+                &store[offset1..offset2],
+            )?;
             if let Some(entry) = entry {
                 entries.insert(entry.tag(), entry);
             }
-            i += ENTRY_LEN;
         }
-        assert_eq!(i, store_offset);
-        eprintln!("store offset = {}", store_offset);
-        eprintln!("store len = {}", store_len);
-        eprintln!("name offset global = {}", 11016 + store_offset);
-        Ok((Self { version, entries }, i + store_len))
+        entries.remove(&E::leader_tag());
+        Ok((
+            Self { entries },
+            offset + MIN_HEADER_LEN + index_len + store_len,
+        ))
     }
 
     pub(crate) fn insert(&mut self, entry: E) {
@@ -158,10 +168,9 @@ impl Lead {
         }
     }
 
-    pub fn read(input: &[u8]) -> Result<Self, Error> {
-        if input.len() < LEAD_LEN {
-            return Err(Error::other("rpm lead is too small"));
-        }
+    pub fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
+        let mut input = [0_u8; LEAD_LEN];
+        reader.read_exact(&mut input[..])?;
         if input[0..LEAD_MAGIC.len()] != LEAD_MAGIC[..] {
             return Err(not_an_rpm_file());
         }
@@ -250,10 +259,6 @@ fn not_an_rpm_file() -> Error {
     Error::other("not an rpm file")
 }
 
-fn not_a_header() -> Error {
-    Error::other("not an header")
-}
-
 fn other_error() -> Error {
     Error::other("i/o error")
 }
@@ -263,7 +268,6 @@ const HEADER_MAGIC: [u8; 8] = [0x8e, 0xad, 0xe8, 0x01, 0x00, 0x00, 0x00, 0x00];
 const MAX_NAME_LEN: usize = 66;
 const LEAD_LEN: usize = 96;
 const MIN_HEADER_LEN: usize = 16;
-const DEFAULT_HEADER_VERSION: u8 = 1;
 pub(crate) const ALIGN: u32 = 8;
 
 #[cfg(test)]
@@ -290,7 +294,7 @@ mod tests {
             let mut buf = Vec::new();
             expected.write(&mut buf).unwrap();
             assert_eq!(LEAD_LEN, buf.len());
-            let actual = Lead::read(&buf).unwrap();
+            let actual = Lead::read(&buf[..]).unwrap();
             assert_eq!(expected, actual);
             Ok(())
         });
@@ -302,7 +306,7 @@ mod tests {
             let expected: Header<Entry> = u.arbitrary()?;
             let mut buf = Vec::new();
             expected.write(&mut buf).unwrap();
-            let (actual, _offset) = Header::<Entry>::read(&buf).unwrap();
+            let (actual, _offset) = Header::<Entry>::read(&buf[..]).unwrap();
             assert_eq!(expected.entries, actual.entries);
             Ok(())
         });
@@ -314,7 +318,8 @@ mod tests {
             let expected: Header<SignatureEntry> = u.arbitrary()?;
             let mut buf = Vec::new();
             expected.write(&mut buf).unwrap();
-            let (actual, _offset) = Header::<SignatureEntry>::read(&buf).unwrap();
+            let (actual, offset) = Header::<SignatureEntry>::read(&buf[..]).unwrap();
+            assert_eq!(buf.len(), offset);
             assert_eq!(expected.entries, actual.entries);
             Ok(())
         });
@@ -366,29 +371,25 @@ mod tests {
 
     impl<'a> Arbitrary<'a> for Header<Entry> {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            // TODO fix zero bytes in strings
-            Ok(Self {
-                entries: u
-                    .arbitrary::<HashSet<Entry>>()?
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
-                version: 1,
-            })
+            let mut entries = u
+                .arbitrary::<HashSet<Entry>>()?
+                .into_iter()
+                .map(Into::into)
+                .collect::<HashMap<_, _>>();
+            entries.remove(&Entry::leader_tag());
+            Ok(Self { entries })
         }
     }
 
     impl<'a> Arbitrary<'a> for Header<SignatureEntry> {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            // TODO fix zero bytes in strings
-            Ok(Self {
-                entries: u
-                    .arbitrary::<HashSet<SignatureEntry>>()?
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
-                version: 1,
-            })
+            let mut entries = u
+                .arbitrary::<HashSet<SignatureEntry>>()?
+                .into_iter()
+                .map(Into::into)
+                .collect::<HashMap<_, _>>();
+            entries.remove(&SignatureEntry::leader_tag());
+            Ok(Self { entries })
         }
     }
 }

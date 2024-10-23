@@ -15,6 +15,7 @@ use crate::archive::ArchiveWrite;
 use crate::archive::CpioBuilder;
 use crate::hash::Hasher;
 use crate::hash::Sha256Hash;
+use crate::rpm::get_zeroes;
 use crate::rpm::pad;
 use crate::rpm::Entry;
 use crate::rpm::HashAlgorithm;
@@ -103,15 +104,15 @@ impl Package {
             }
         }
         let mut header2 = Header::new(self.into());
-        header2.insert(Entry::BaseNames(basenames));
-        header2.insert(Entry::DirNames(dirnames));
-        header2.insert(Entry::DirIndexes(dirindices));
-        header2.insert(Entry::FileUserName(usernames));
-        header2.insert(Entry::FileGroupName(groupnames));
+        header2.insert(Entry::BaseNames(basenames.try_into()?));
+        header2.insert(Entry::DirNames(dirnames.try_into()?));
+        header2.insert(Entry::DirIndexes(dirindices.try_into()?));
+        header2.insert(Entry::FileUserName(usernames.try_into()?));
+        header2.insert(Entry::FileGroupName(groupnames.try_into()?));
         header2.insert(Entry::FileDigestAlgo(HashAlgorithm::Sha256));
-        header2.insert(Entry::FileDigests(filedigests));
-        header2.insert(Entry::FileModes(filemodes));
-        header2.insert(Entry::FileSizes(filesizes));
+        header2.insert(Entry::FileDigests(filedigests.try_into()?));
+        header2.insert(Entry::FileModes(filemodes.try_into()?));
+        header2.insert(Entry::FileSizes(filesizes.try_into()?));
         let mut payload = Vec::new();
         CpioBuilder::from_directory(
             directory,
@@ -149,7 +150,7 @@ impl Package {
         let padding = pad(header1.len() as u32, ALIGN);
         assert_eq!(0, (header1.len() as u32 + padding) % ALIGN);
         if padding != 0 {
-            writer.write_all(&vec![0_u8; padding as usize])?;
+            writer.write_all(get_zeroes(padding as usize))?;
         }
         writer.write_all(&header2)?;
         Ok(())
@@ -184,15 +185,15 @@ pub struct Signatures {
 impl From<Signatures> for HashMap<SignatureTag, SignatureEntry> {
     fn from(other: Signatures) -> Self {
         [
-            SignatureEntry::Gpg(other.signature_v3).into(),
-            SignatureEntry::Dsa(other.signature_v4).into(),
-            SignatureEntry::Sha256(other.header_sha256).into(),
+            SignatureEntry::Gpg(other.signature_v3.try_into().unwrap()).into(),
+            SignatureEntry::Dsa(other.signature_v4.try_into().unwrap()).into(),
+            SignatureEntry::Sha256(other.header_sha256.try_into().unwrap()).into(),
         ]
         .into()
     }
 }
 
-const COMPRESSION_LEVEL: i32 = 22;
+const _COMPRESSION_LEVEL: i32 = 22;
 
 #[cfg(test)]
 mod tests {

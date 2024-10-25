@@ -14,11 +14,13 @@ filename="$(basename "$executable")"
 workdir="$(mktemp -d /dev/shm/.wolfpack-runner-XXXXXXXX)"
 cp -v "$executable" "$workdir"/"$filename"
 ldd "$executable" |
-    while read -r _lib _arrow path _rest; do
-        if test -z "$path"; then
-            continue
+    while read -r lib _arrow path _rest; do
+        if test -e "$path"; then
+            cp -v "$path" "$workdir"/
         fi
-        cp -v "$path" "$workdir"/
+        if test -e "$lib"; then
+            cp -v "$lib" "$workdir"/
+        fi
     done
 patchelf \
     --set-interpreter /wolfpack/ld-linux-x86-64.so.2 \

@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::fs::File;
+use std::io::Read;
 use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::path::PathBuf;
@@ -37,7 +40,7 @@ impl Repository {
                     .normalize(),
             );
             let mut reader = Sha256Reader::new(File::open(path)?);
-            let compact = Package::read_compact_manifest(&mut reader)?;
+            let compact = Package::read_compact_manifest(reader.by_ref())?;
             let (sha256, size) = reader.digest()?;
             let meta = PackageMeta {
                 compact,
@@ -176,11 +179,12 @@ impl RepoConf {
     }
 }
 
-impl ToString for RepoConf {
-    fn to_string(&self) -> String {
+impl Display for RepoConf {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         let mut wrapper = HashMap::new();
         wrapper.insert(self.name.clone(), self);
-        serde_json::to_string_pretty(&wrapper).unwrap()
+        let s = serde_json::to_string_pretty(&wrapper).map_err(|_| std::fmt::Error)?;
+        f.write_str(&s)
     }
 }
 
@@ -209,9 +213,10 @@ impl Default for MetaConf {
     }
 }
 
-impl ToString for MetaConf {
-    fn to_string(&self) -> String {
-        serde_json::to_string_pretty(self).unwrap()
+impl Display for MetaConf {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let s = serde_json::to_string_pretty(self).map_err(|_| std::fmt::Error)?;
+        f.write_str(&s)
     }
 }
 
@@ -370,7 +375,7 @@ mod tests {
                 format!("file://{}", workdir.path().display()),
                 verifying_key_file.clone(),
             );
-            std::fs::write("/etc/pkg/test.conf", format!("{}\n", repo_conf.to_string())).unwrap();
+            std::fs::write("/etc/pkg/test.conf", format!("{}\n", repo_conf)).unwrap();
             assert!(
                 Command::new("pkg")
                     .arg("--debug")

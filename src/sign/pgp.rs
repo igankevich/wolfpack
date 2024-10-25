@@ -1,6 +1,8 @@
+use std::io::Write;
 use std::time::SystemTime;
 
 use pgp::cleartext::CleartextSignedMessage;
+use pgp::composed::StandaloneSignature;
 use pgp::crypto::{hash::HashAlgorithm, public_key::PublicKeyAlgorithm};
 use pgp::packet::*;
 use pgp::types::public::PublicParams;
@@ -31,10 +33,8 @@ impl PgpSigner {
             hash_algorithm,
         }
     }
-}
 
-impl Signer for PgpSigner {
-    fn sign(&self, message: &[u8]) -> Result<Vec<u8>, Error> {
+    pub fn sign_v2(&self, message: &[u8]) -> Result<PgpSignature, Error> {
         let mut config = SignatureConfig::v4(
             self.signature_type,
             get_public_key_algorithm(&self.signing_key)?,
@@ -54,8 +54,17 @@ impl Signer for PgpSigner {
         let signature = config
             .sign(&self.signing_key, String::new, message)
             .map_err(|_| Error)?;
+        Ok(PgpSignature(signature))
+    }
+}
+
+impl Signer for PgpSigner {
+    fn sign(&self, message: &[u8]) -> Result<Vec<u8>, Error> {
+        let signature = self.sign_v2(message)?;
         let mut signature_bytes = Vec::with_capacity(1024);
-        write_packet(&mut signature_bytes, &signature).map_err(|_| Error)?;
+        signature
+            .write_binary(&mut signature_bytes)
+            .map_err(|_| Error)?;
         Ok(signature_bytes)
     }
 }
@@ -110,6 +119,27 @@ impl Verifier for PgpVerifier {
         } else {
             Err(Error)
         }
+    }
+}
+
+pub struct PgpSignature(Signature);
+
+impl PgpSignature {
+    pub fn to_binary(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut buf = Vec::new();
+        self.write_binary(&mut buf)?;
+        Ok(buf)
+    }
+
+    pub fn write_binary<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        write_packet(writer.by_ref(), &self.0).map_err(std::io::Error::other)
+    }
+
+    pub fn write_armored<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        let signature = StandaloneSignature::new(self.0.clone());
+        signature
+            .to_armored_writer(writer.by_ref(), Default::default())
+            .map_err(std::io::Error::other)
     }
 }
 

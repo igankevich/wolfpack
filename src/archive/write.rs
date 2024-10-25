@@ -48,13 +48,15 @@ pub trait ArchiveWrite<W: Write> {
         let mut archive = Self::new(writer);
         for entry in WalkDir::new(directory).into_iter() {
             let entry = entry?;
-            let relative_path = Path::new(".").join(
-                entry
-                    .path()
-                    .strip_prefix(directory)
-                    .map_err(std::io::Error::other)?
-                    .normalize(),
-            );
+            let entry_path = entry
+                .path()
+                .strip_prefix(directory)
+                .map_err(std::io::Error::other)?
+                .normalize();
+            if entry_path == Path::new("") {
+                continue;
+            }
+            let relative_path = Path::new(".").join(entry_path);
             let metadata = std::fs::metadata(entry.path())?;
             let data = if entry.file_type().is_dir() {
                 Vec::new()

@@ -38,5 +38,6 @@ test-rpm = [
     "--",
     "--nocapture",
     "--ignored",
-    "rpm",
+    #"rpm",
+    "dnf",
 ]

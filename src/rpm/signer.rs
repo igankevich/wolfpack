@@ -2,9 +2,9 @@ use pgp::crypto::hash::HashAlgorithm;
 use pgp::packet::SignatureType;
 
 use crate::sign::Error;
+use crate::sign::PgpSignature;
 use crate::sign::PgpSigner;
 use crate::sign::PgpVerifier;
-use crate::sign::Signer;
 use crate::sign::Verifier;
 
 pub struct PackageSigner {
@@ -22,8 +22,8 @@ impl PackageSigner {
         }
     }
 
-    pub fn sign(&self, message: &[u8]) -> Result<Vec<u8>, Error> {
-        self.inner.sign(message)
+    pub fn sign(&self, message: &[u8]) -> Result<PgpSignature, Error> {
+        self.inner.sign_v2(message)
     }
 }
 

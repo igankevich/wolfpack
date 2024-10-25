@@ -137,12 +137,14 @@ impl Package {
         // sign second header without the leading padding
         let signature_v4 = signer
             .sign(&header2)
-            .map_err(|_| Error::other("failed to sign rpm"))?;
+            .map_err(|_| Error::other("failed to sign rpm"))?
+            .to_binary()?;
         header2.extend(payload);
         // sign second header without the leading padding and the rest of the file
         let signature_v3 = signer
             .sign(&header2)
-            .map_err(|_| Error::other("failed to sign rpm"))?;
+            .map_err(|_| Error::other("failed to sign rpm"))?
+            .to_binary()?;
         eprintln!("header2 len {}", header2.len());
         let header1 = Header::new(
             Signatures {

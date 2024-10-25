@@ -19,8 +19,10 @@ use serde::Serialize;
 use serde::Serializer;
 use walkdir::WalkDir;
 
+use crate::hash::Hasher;
 use crate::hash::Sha256Hash;
 use crate::rpm::Package;
+use crate::rpm::PackageSigner;
 
 pub struct Repository {
     packages: HashMap<PathBuf, (Package, Sha256Hash, Vec<PathBuf>)>,
@@ -65,10 +67,10 @@ impl Repository {
         Ok(Self { packages })
     }
 
-    pub fn write<P: AsRef<Path>>(self, output_dir: P) -> Result<(), Error> {
+    pub fn write<P: AsRef<Path>>(self, output_dir: P, signer: &PackageSigner) -> Result<(), Error> {
         let output_dir = output_dir.as_ref();
-        create_dir_all(&output_dir)?;
-        create_dir_all(output_dir.join("repodata"))?;
+        let repodata = output_dir.join("repodata");
+        create_dir_all(&repodata)?;
         let mut packages = Vec::new();
         for (path, (package, sha256, files)) in self.packages.into_iter() {
             packages.push(package.into_xml(path, sha256, files));
@@ -77,8 +79,8 @@ impl Repository {
         // TODO hashing writer
         let mut primary_xml = Vec::<u8>::new();
         metadata.write(&mut primary_xml)?;
-        let primary_xml_sha256 = Sha256Hash::compute(&primary_xml);
-        std::fs::write("repodata/primary.xml", primary_xml)?;
+        let primary_xml_sha256 = sha2::Sha256::compute(&primary_xml);
+        std::fs::write(repodata.join("primary.xml"), primary_xml)?;
         let repo_md = RepoMd {
             revision: 0,
             data: vec![xml::Data {
@@ -86,26 +88,35 @@ impl Repository {
                 checksum: xml::Checksum {
                     kind: "sha256".into(),
                     value: primary_xml_sha256.to_string(),
+                    pkgid: None,
                 },
                 // TODO different for archives
                 open_checksum: xml::Checksum {
                     kind: "sha256".into(),
                     value: primary_xml_sha256.to_string(),
+                    pkgid: None,
                 },
                 location: xml::Location {
-                    href: "repodata/primary.xml",
+                    href: "repodata/primary.xml".into(),
                 },
                 timestamp: 0,
                 size: 0,
                 open_size: 0,
             }],
         };
-        repo_md.write(File::create("repomd.xml")?)?;
+        let mut repo_md_vec = Vec::new();
+        repo_md.write(&mut repo_md_vec)?;
+        std::fs::write(repodata.join("repomd.xml"), &repo_md_vec[..])?;
+        let signature = signer
+            .sign(&repo_md_vec)
+            .map_err(|_| Error::other("failed to sign"))?;
+        signature.write_armored(File::create(repodata.join("repomd.xml.asc"))?)?;
         Ok(())
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
+#[serde(rename = "repomd")]
 pub struct RepoMd {
     revision: u64,
     #[serde(rename = "data", default)]
@@ -127,7 +138,21 @@ impl RepoMd {
     }
 }
 
+impl Serialize for RepoMd {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("repomd", 2)?;
+        state.serialize_field("revision", &self.revision)?;
+        state.serialize_field("data", &self.data)?;
+        state.serialize_field("@xmlns", "http://linux.duke.edu/metadata/repo")?;
+        state.end()
+    }
+}
+
 #[derive(Deserialize, Debug)]
+#[serde(rename = "metadata")]
 pub struct Metadata {
     #[serde(rename = "package", default)]
     packages: Vec<xml::Package>,
@@ -154,6 +179,8 @@ impl Serialize for Metadata {
     {
         let mut state = serializer.serialize_struct("metadata", 2)?;
         state.serialize_field("package", &self.packages)?;
+        state.serialize_field("@xmlns", "http://linux.duke.edu/metadata/common")?;
+        state.serialize_field("@xmlns:rpm", "http://linux.duke.edu/metadata/rpm")?;
         state.serialize_field("@packages", &self.packages.len())?;
         state.end()
     }
@@ -232,7 +259,7 @@ pub mod xml {
         pub kind: String,
         #[serde(rename = "$value")]
         pub value: String,
-        #[serde(rename = "@pkgid")]
+        #[serde(rename = "@pkgid", skip_serializing_if="Option::is_none", default)]
         pub pkgid: Option<String>,
     }
 
@@ -290,16 +317,21 @@ pub mod xml {
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct Format {
+        #[serde(rename = "rpm:license")]
         pub license: String,
+        #[serde(rename = "rpm:vendor")]
         pub vendor: String,
+        #[serde(rename = "rpm:group")]
         pub group: String,
+        #[serde(rename = "rpm:buildhost")]
         pub buildhost: String,
+        #[serde(rename = "rpm:sourcerpm")]
         pub sourcerpm: String,
-        #[serde(rename = "header-range")]
+        #[serde(rename = "rpm:header-range")]
         pub header_range: HeaderRange,
-        #[serde(default, skip_serializing_if = "Provides::is_empty")]
+        #[serde(rename = "rpm:provides", default, skip_serializing_if = "Provides::is_empty")]
         pub provides: Provides,
-        #[serde(default, skip_serializing_if = "Requires::is_empty")]
+        #[serde(rename = "rpm:requires", default, skip_serializing_if = "Requires::is_empty")]
         pub requires: Requires,
         #[serde(rename = "file", default, skip_serializing_if = "Vec::is_empty")]
         pub files: Vec<PathBuf>,
@@ -402,7 +434,17 @@ pub mod xml {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
+    use std::process::Command;
+    use std::time::Duration;
+
+    use arbtest::arbtest;
+    use tempfile::TempDir;
+
     use super::*;
+    use crate::rpm::SigningKey;
+    use crate::test::prevent_concurrency;
+    use crate::test::DirectoryOfFiles;
 
     #[test]
     fn repo_md_read() {
@@ -435,5 +477,89 @@ mod tests {
         )
         .unwrap();
         let _otherdata = OtherData::from_str(&input).unwrap();
+    }
+
+    #[ignore]
+    #[test]
+    fn dnf_install() {
+        let _guard = prevent_concurrency("rpm");
+        arbtest(|u| {
+            let workdir = TempDir::new().unwrap();
+            let package_file = workdir.path().join("test.rpm");
+            let verifying_key_file = workdir.path().join("verifying-key");
+            let _signing_key_file = workdir.path().join("signing-key");
+            let (signing_key, verifying_key) = SigningKey::generate("wolfpack".into()).unwrap();
+            let signer = PackageSigner::new(signing_key);
+            verifying_key
+                .write_armored(File::create(verifying_key_file.as_path()).unwrap())
+                .unwrap();
+            let mut package: Package = u.arbitrary()?;
+            package.arch = "x86_64".into();
+            package.name = "test".into();
+            package.version = "1.0.0".into();
+            let directory: DirectoryOfFiles = u.arbitrary()?;
+            package
+                .clone()
+                .write(
+                    &mut File::create(package_file.as_path()).unwrap(),
+                    directory.path(),
+                    &signer,
+                )
+                .unwrap();
+            let repository = Repository::new([workdir.path()]).unwrap();
+            repository.write(workdir.path(), &signer).unwrap();
+            std::fs::write(
+                "/etc/yum.repos.d/test.repo",
+                format!(
+                    r#"[test]
+name=test
+baseurl=file://{}
+enabled=1
+repo_gpgcheck=1
+gpgcheck=1
+gpgkey=file://{}
+"#,
+                    workdir.path().display(),
+                    verifying_key_file.display(),
+                ),
+            )
+            .unwrap();
+            assert!(
+                Command::new("cat")
+                    .arg(workdir.path().join("repodata").join("repomd.xml"))
+                    .status()
+                    .unwrap()
+                    .success(),
+                "package:\n========{:?}========",
+                package
+            );
+            assert!(
+                Command::new("dnf")
+                    .arg("--verbose")
+                    .arg("--debuglevel=10")
+                    .arg("--repo=test")
+                    .arg("install")
+                    .arg("--assumeyes")
+                    .arg(package.name.to_string())
+                    .status()
+                    .unwrap()
+                    .success(),
+                "package:\n========{:?}========",
+                package
+            );
+            assert!(
+                Command::new("dnf")
+                    .arg("erase")
+                    .arg("--assumeyes")
+                    .arg(package.name.to_string())
+                    .status()
+                    .unwrap()
+                    .success(),
+                "package:\n========{:?}========",
+                package
+            );
+            Ok(())
+        })
+        .budget(Duration::from_secs(5));
     }
 }

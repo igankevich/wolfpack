@@ -1,5 +1,6 @@
 use std::fs::create_dir_all;
 use std::path::Path;
+use std::path::MAIN_SEPARATOR;
 
 use arbitrary::Arbitrary;
 use arbitrary::Unstructured;
@@ -8,9 +9,9 @@ use rand_mt::Mt64;
 use tempfile::TempDir;
 
 use crate::test::Chars;
-use crate::test::CONTROL;
 //use crate::test::UNICODE;
 use crate::test::ASCII_LOWERCASE;
+use crate::test::CONTROL;
 
 pub struct DirectoryOfFiles {
     #[allow(dead_code)]
@@ -30,7 +31,7 @@ impl<'a> Arbitrary<'a> for DirectoryOfFiles {
         let mut rng = Mt64::new(seed);
         let chars = Chars::from(ASCII_LOWERCASE)
             .difference(CONTROL)
-            .difference(['/']);
+            .difference([MAIN_SEPARATOR]);
         //let chars = valid_path_chars();
         let dir = TempDir::new().unwrap();
         let num_files: usize = rng.gen_range(1..=10);
@@ -50,6 +51,9 @@ impl<'a> Arbitrary<'a> for DirectoryOfFiles {
                 if path.as_os_str().len() > 100 {
                     path.pop();
                 }
+            }
+            if path.is_dir() {
+                continue;
             }
             create_dir_all(path.parent().unwrap()).unwrap();
             let mut contents: ByteArray = [0; 4096];

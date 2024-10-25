@@ -1,9 +1,13 @@
 use std::collections::HashMap;
+use std::ffi::CStr;
+use std::ffi::CString;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::io::Error;
 use std::io::Read;
 use std::io::Write;
+use std::mem::transmute;
+use std::mem::MaybeUninit;
 
 use crate::rpm::EntryIo;
 use crate::rpm::RawEntry;
@@ -64,11 +68,7 @@ where
         }
         let num_entries = num_entries as u32;
         let store_len = store_len as u32;
-        assert_eq!(0, (num_entries * ENTRY_LEN as u32) % ALIGN);
-        eprintln!("write {:?}", self.entries);
-        eprintln!("write num entries {}", num_entries);
-        eprintln!("write index len {}", num_entries * ENTRY_LEN as u32);
-        eprintln!("write store len {}", store_len);
+        debug_assert!(0 == (num_entries * ENTRY_LEN as u32) % ALIGN);
         writer.write_all(&HEADER_MAGIC[..])?;
         num_entries.write(writer.by_ref())?;
         store_len.write(writer.by_ref())?;
@@ -78,7 +78,7 @@ where
     }
 
     pub fn read<R: Read>(mut reader: R) -> Result<(Self, usize), Error> {
-        assert!(HEADER_MAGIC.len() + 7 <= MIN_HEADER_LEN);
+        debug_assert!(HEADER_MAGIC.len() + 7 <= MIN_HEADER_LEN);
         let mut input = [0_u8; MIN_HEADER_LEN];
         reader.read_exact(&mut input[..])?;
         let offset = input
@@ -90,26 +90,20 @@ where
         reader.read_exact(&mut input[remaining..])?;
         let _version = input[3];
         let num_entries: usize = get_u32(&input[8..12]) as usize;
-        eprintln!("read num entries {}", num_entries);
         let index_len = num_entries
             .checked_mul(ENTRY_LEN)
             .ok_or_else(|| Error::other("bogus no. of index entries"))?;
-        eprintln!("read index len {}", index_len);
         let store_len = get_u32(&input[12..16]) as usize;
-        eprintln!("read store len {}", store_len);
-        let mut index = vec![0_u8; index_len]; // TODO set_len?
-        reader.read_exact(&mut index[..])?;
-        let mut store = vec![0_u8; store_len]; // TODO set_len?
-        reader.read_exact(&mut store[..])?;
+        let index = read_vec(reader.by_ref(), index_len)?;
         let mut raw_entries = Vec::with_capacity(num_entries);
         for offset in (0..index_len).step_by(ENTRY_LEN) {
-            let Ok(raw) = RawEntry::read(&index[offset..], &store[..]) else {
-                log::error!("ignoring invalid entry: {}", e);
-                continue;
-            };
-            raw_entries.push(raw);
+            match RawEntry::read(&index[offset..], store_len) {
+                Ok(raw) => raw_entries.push(raw),
+                Err(e) => log::error!("ignoring invalid entry: {}", e),
+            }
         }
         raw_entries.sort_by(|a, b| a.offset.cmp(&b.offset));
+        let store = read_vec(reader.by_ref(), store_len)?;
         let mut entries = HashMap::with_capacity(num_entries);
         for i in 0..num_entries {
             let raw = &raw_entries[i];
@@ -120,15 +114,11 @@ where
                 .get(i + 1)
                 .map(|e| e.offset as usize)
                 .unwrap_or(store_len);
-            eprintln!("entry {i} range [{offset1}; {offset2})");
-            let entry = E::read(
-                raw.tag,
-                raw.kind,
-                raw.count as usize,
-                &store[offset1..offset2],
-            )?;
-            if let Some(entry) = entry {
-                entries.insert(entry.tag(), entry);
+            match E::read(raw.tag, raw.kind, raw.count, &store[offset1..offset2]) {
+                Ok(entry) => {
+                    entries.insert(entry.tag(), entry);
+                }
+                Err(e) => log::error!("failed to read tag {}: {}", raw.tag, e),
             }
         }
         entries.remove(&E::leader_tag());
@@ -141,12 +131,16 @@ where
     pub(crate) fn insert(&mut self, entry: E) {
         self.entries.insert(entry.tag(), entry);
     }
+
+    pub fn into_entries(self) -> HashMap<<E as EntryIo>::Tag, E> {
+        self.entries
+    }
 }
 
 #[derive(Debug)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 pub struct Lead {
-    pub name: String,
+    pub name: CString,
     pub kind: PackageKind,
     pub archnum: u16,
     pub osnum: u16,
@@ -156,7 +150,7 @@ pub struct Lead {
 }
 
 impl Lead {
-    pub fn new(name: String) -> Self {
+    pub fn new(name: CString) -> Self {
         Self {
             name,
             kind: PackageKind::Binary,
@@ -178,15 +172,8 @@ impl Lead {
         let minor: u8 = input[5];
         let kind: PackageKind = get_u16(&input[6..8]).try_into()?;
         let archnum: u16 = get_u16(&input[8..10]);
-        let name: [u8; MAX_NAME_LEN] = input[10..(10 + MAX_NAME_LEN)]
-            .try_into()
-            .map_err(|_| other_error())?;
-        let name_end = name
-            .iter()
-            .position(|ch| *ch == 0)
-            .ok_or_else(|| Error::other("invalid package name"))?;
-        let name = String::from_utf8(name[..name_end].to_vec())
-            .map_err(|_| Error::other("invalid package name"))?;
+        let name = CStr::from_bytes_until_nul(&input[10..(10 + MAX_NAME_LEN)])
+            .map_err(|_| Error::other("name is not terminated"))?;
         let offset = 10 + MAX_NAME_LEN;
         let osnum: u16 = get_u16(&input[offset..(offset + 2)]);
         let signature_kind: u16 = get_u16(&input[(offset + 2)..(offset + 4)]);
@@ -194,7 +181,7 @@ impl Lead {
             major,
             minor,
             kind,
-            name,
+            name: name.into(),
             archnum,
             osnum,
             signature_kind,
@@ -202,13 +189,11 @@ impl Lead {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        // -1 because of the zero byte
-        let name_len = self.name.len();
-        if name_len > MAX_NAME_LEN - 1 {
+        let name_len = self.name.as_bytes_with_nul().len();
+        if name_len > MAX_NAME_LEN {
             return Err(Error::other(format!(
-                "package name is too long: {} {}",
-                self.name,
-                self.name.len()
+                "package name is too long: {}",
+                self.name.as_bytes_with_nul().len()
             )));
         }
         writer.write_all(&LEAD_MAGIC[..])?;
@@ -216,7 +201,7 @@ impl Lead {
         writer.write_all(&(self.kind as u16).to_be_bytes()[..])?;
         writer.write_all(&self.archnum.to_be_bytes()[..])?;
         let mut name = [0_u8; MAX_NAME_LEN];
-        name[..name_len].copy_from_slice(self.name.as_bytes());
+        name[..name_len].copy_from_slice(self.name.as_bytes_with_nul());
         writer.write_all(&name[..])?;
         writer.write_all(&self.osnum.to_be_bytes()[..])?;
         writer.write_all(&self.signature_kind.to_be_bytes()[..])?;
@@ -246,12 +231,12 @@ impl TryFrom<u16> for PackageKind {
 }
 
 fn get_u16(input: &[u8]) -> u16 {
-    assert_eq!(2, input.len());
+    debug_assert!(2 == input.len());
     u16::from_be_bytes([input[0], input[1]])
 }
 
 fn get_u32(input: &[u8]) -> u32 {
-    assert_eq!(4, input.len());
+    debug_assert!(4 == input.len());
     u32::from_be_bytes([input[0], input[1], input[2], input[3]])
 }
 
@@ -259,8 +244,14 @@ fn not_an_rpm_file() -> Error {
     Error::other("not an rpm file")
 }
 
-fn other_error() -> Error {
-    Error::other("i/o error")
+fn read_vec<R: Read>(mut reader: R, len: usize) -> Result<Vec<u8>, Error> {
+    // TODO is it safe?
+    let mut vec = Vec::<u8>::with_capacity(len);
+    reader.read_exact(unsafe {
+        transmute::<&mut [MaybeUninit<u8>], &mut [u8]>(vec.spare_capacity_mut())
+    })?;
+    unsafe { vec.set_len(len) }
+    Ok(vec)
 }
 
 const LEAD_MAGIC: [u8; 4] = [0xed, 0xab, 0xee, 0xdb];
@@ -273,19 +264,15 @@ pub(crate) const ALIGN: u32 = 8;
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
+    use std::io::ErrorKind;
 
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use arbtest::arbtest;
-    use cpio::newc::Reader as CpioReader;
 
     use super::*;
-    use crate::compress::AnyDecoder;
     use crate::rpm::Entry;
     use crate::rpm::SignatureEntry;
-    use crate::test::Chars;
-    use crate::test::CONTROL;
-    use crate::test::UNICODE;
 
     #[test]
     fn lead_write_read() {
@@ -294,6 +281,14 @@ mod tests {
             let mut buf = Vec::new();
             expected.write(&mut buf).unwrap();
             assert_eq!(LEAD_LEN, buf.len());
+            for len in 0..buf.len() {
+                let result = Lead::read(&buf[..len]);
+                assert!(
+                    matches!(result, Err(ref e) if e.kind() == ErrorKind::UnexpectedEof),
+                    "expected UnexpectedEof, got {:?}",
+                    result
+                );
+            }
             let actual = Lead::read(&buf[..]).unwrap();
             assert_eq!(expected, actual);
             Ok(())
@@ -306,6 +301,14 @@ mod tests {
             let expected: Header<Entry> = u.arbitrary()?;
             let mut buf = Vec::new();
             expected.write(&mut buf).unwrap();
+            for len in 0..buf.len() {
+                let result = Header::<Entry>::read(&buf[..len]);
+                assert!(
+                    matches!(result, Err(ref e) if e.kind() == ErrorKind::UnexpectedEof),
+                    "expected partial read error, got {:?}",
+                    result
+                );
+            }
             let (actual, _offset) = Header::<Entry>::read(&buf[..]).unwrap();
             assert_eq!(expected.entries, actual.entries);
             Ok(())
@@ -318,55 +321,19 @@ mod tests {
             let expected: Header<SignatureEntry> = u.arbitrary()?;
             let mut buf = Vec::new();
             expected.write(&mut buf).unwrap();
+            for len in 0..buf.len() {
+                let result = Header::<SignatureEntry>::read(&buf[..len]);
+                assert!(
+                    matches!(result, Err(ref e) if e.kind() == ErrorKind::UnexpectedEof),
+                    "expected partial read error, got {:?}",
+                    result
+                );
+            }
             let (actual, offset) = Header::<SignatureEntry>::read(&buf[..]).unwrap();
             assert_eq!(buf.len(), offset);
             assert_eq!(expected.entries, actual.entries);
             Ok(())
         });
-    }
-
-    #[test]
-    fn lead_read() {
-        let rpm = std::fs::read("wg.rpm").unwrap();
-        let lead = Lead::read(&rpm[..]).unwrap();
-        eprintln!("lead {:?}", lead);
-        let (header, offset1) = Header::<SignatureEntry>::read(&rpm[LEAD_LEN..]).unwrap();
-        eprintln!("header {:?}", header);
-        eprintln!("store2 plus offset = {}", offset1);
-        let (header, offset2) = Header::<Entry>::read(&rpm[(LEAD_LEN + offset1)..]).unwrap();
-        eprintln!("header {:?}", header);
-        let archive = &rpm[(LEAD_LEN + offset1 + offset2)..];
-        eprintln!("archive {:02x?}", &archive[..10]);
-        let mut reader = AnyDecoder::new(archive);
-        loop {
-            let cpio = CpioReader::new(reader).unwrap();
-            if cpio.entry().is_trailer() {
-                break;
-            }
-            //eprintln!(
-            //    "{} ({} bytes)",
-            //    cpio.entry().name(),
-            //    cpio.entry().file_size()
-            //);
-            reader = cpio.finish().unwrap();
-        }
-    }
-
-    impl<'a> Arbitrary<'a> for Lead {
-        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            let valid_chars = Chars::from(UNICODE).difference(CONTROL);
-            let len: usize = u.int_in_range(0..=(MAX_NAME_LEN - 1))?;
-            let name: String = valid_chars.arbitrary_byte_string(u, len)?;
-            Ok(Self {
-                name,
-                kind: u.arbitrary()?,
-                archnum: u.arbitrary()?,
-                osnum: u.arbitrary()?,
-                signature_kind: u.arbitrary()?,
-                major: u.arbitrary()?,
-                minor: u.arbitrary()?,
-            })
-        }
     }
 
     impl<'a> Arbitrary<'a> for Header<Entry> {

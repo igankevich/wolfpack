@@ -36,6 +36,7 @@ impl<R: Read, H: Hasher> Read for HashingReader<R, H> {
         self.hasher.update(&buf[..n]);
         Ok(n)
     }
+    // TODO other methods
 }
 
 pub(crate) const BUFFER_LEN: usize = 4096;

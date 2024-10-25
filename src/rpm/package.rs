@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::io::Error;
+use std::io::Read;
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
+use std::path::PathBuf;
 
+use cpio::newc::Reader as CpioReader;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use normalize_path::NormalizePath;
@@ -13,11 +16,15 @@ use walkdir::WalkDir;
 //use zstd::stream::write::Encoder as ZstdEncoder;
 use crate::archive::ArchiveWrite;
 use crate::archive::CpioBuilder;
+use crate::compress::AnyDecoder;
 use crate::hash::Hasher;
 use crate::hash::Sha256Hash;
+use crate::hash::Sha256Reader;
 use crate::rpm::get_zeroes;
 use crate::rpm::pad;
+use crate::rpm::xml;
 use crate::rpm::Entry;
+use crate::rpm::EntryIo;
 use crate::rpm::HashAlgorithm;
 use crate::rpm::Header;
 use crate::rpm::Lead;
@@ -51,7 +58,7 @@ impl Package {
         W: Write,
         P: AsRef<Path>,
     {
-        let lead = Lead::new(self.name.clone());
+        let lead = Lead::new(CString::new(self.name.clone()).unwrap());
         eprintln!("write {lead:?}");
         lead.write(writer.by_ref())?;
         let mut basenames = Vec::<CString>::new();
@@ -155,26 +162,144 @@ impl Package {
         writer.write_all(&header2)?;
         Ok(())
     }
+
+    pub fn read<R: Read>(reader: R) -> Result<(Self, Sha256Hash, Vec<PathBuf>), Error> {
+        let mut reader = Sha256Reader::new(reader);
+        // TODO signatures/hashes
+        let _lead = Lead::read(reader.by_ref())?;
+        let _header1 = Header::<SignatureEntry>::read(reader.by_ref())?;
+        let (header2, _offset) = Header::<Entry>::read(reader.by_ref())?;
+        let mut decoder = AnyDecoder::new(reader.by_ref());
+        let mut files = Vec::new();
+        loop {
+            let cpio = CpioReader::new(decoder)?;
+            if cpio.entry().is_trailer() {
+                break;
+            }
+            files.push(cpio.entry().name().into());
+            //eprintln!(
+            //    "{} ({} bytes)",
+            //    cpio.entry().name(),
+            //    cpio.entry().file_size()
+            //);
+            decoder = cpio.finish()?;
+        }
+        let (sha256, _size) = reader.digest()?;
+        let package: Package = header2.try_into()?;
+        Ok((package, sha256, files))
+    }
+
+    pub fn into_xml(self, path: PathBuf, sha256: Sha256Hash, files: Vec<PathBuf>) -> xml::Package {
+        xml::Package {
+            kind: "rpm".into(),
+            name: self.name,
+            arch: self.arch,
+            version: xml::Version {
+                epoch: 0,
+                version: self.version,
+                release: "1".into(),
+            },
+            checksum: xml::Checksum {
+                kind: "sha256".into(),
+                value: sha256.to_string(),
+                pkgid: None,
+            },
+            summary: self.summary,
+            description: self.description,
+            packager: "wolfpack".into(),
+            url: self.url,
+            time: xml::Time { file: 0, build: 0 },
+            size: xml::Size {
+                package: 0,
+                installed: 0,
+                archive: 0,
+            },
+            location: xml::Location { href: path },
+            format: xml::Format {
+                license: self.license,
+                vendor: "wolfpack".into(),
+                group: "wolfpack".into(),
+                buildhost: "wolfpack".into(),
+                sourcerpm: "".into(),
+                // TODO
+                header_range: xml::HeaderRange { start: 0, end: 0 },
+                provides: Default::default(),
+                requires: Default::default(),
+                files,
+            },
+        }
+    }
 }
 
 impl From<Package> for HashMap<Tag, Entry> {
     fn from(other: Package) -> Self {
+        use Entry::*;
         [
-            Entry::Name(CString::new(other.name).unwrap()).into(),
-            Entry::Version(CString::new(other.version).unwrap()).into(),
-            Entry::Release(c"1".into()).into(),
-            Entry::Summary(CString::new(other.summary).unwrap()).into(),
-            Entry::Description(CString::new(other.description).unwrap()).into(),
-            Entry::License(CString::new(other.license).unwrap()).into(),
-            Entry::Url(CString::new(other.url).unwrap()).into(),
-            Entry::Os(c"linux".into()).into(),
-            Entry::Arch(CString::new(other.arch).unwrap()).into(),
-            Entry::PayloadFormat(c"cpio".into()).into(),
-            Entry::PayloadCompressor(c"gzip".into()).into(),
+            Name(CString::new(other.name).unwrap()).into(),
+            Version(CString::new(other.version).unwrap()).into(),
+            Release(c"1".into()).into(),
+            Summary(CString::new(other.summary).unwrap()).into(),
+            Description(CString::new(other.description).unwrap()).into(),
+            License(CString::new(other.license).unwrap()).into(),
+            Url(CString::new(other.url).unwrap()).into(),
+            Os(c"linux".into()).into(),
+            Arch(CString::new(other.arch).unwrap()).into(),
+            PayloadFormat(c"cpio".into()).into(),
+            PayloadCompressor(c"gzip".into()).into(),
         ]
         .into()
     }
 }
+
+impl TryFrom<Header<Entry>> for Package {
+    type Error = Error;
+    fn try_from(other: Header<Entry>) -> Result<Self, Self::Error> {
+        let mut entries = other.into_entries();
+        Ok(Self {
+            name: get_entry!(entries, Name)
+                .into_string()
+                .map_err(Error::other)?,
+            version: get_entry!(entries, Version)
+                .into_string()
+                .map_err(Error::other)?,
+            summary: get_entry!(entries, Summary)
+                .into_string()
+                .map_err(Error::other)?,
+            description: get_entry!(entries, Description)
+                .into_string()
+                .map_err(Error::other)?,
+            license: get_entry!(entries, License)
+                .into_string()
+                .map_err(Error::other)?,
+            url: get_entry!(entries, Url)
+                .into_string()
+                .map_err(Error::other)?,
+            arch: get_entry!(entries, Arch)
+                .into_string()
+                .map_err(Error::other)?,
+        })
+    }
+}
+
+macro_rules! get_entry {
+    ($entries:expr, $tag:ident) => {{
+        let entry = $entries
+            .remove(&Tag::$tag)
+            .ok_or_else(|| Error::other(format!("no {:?}", Tag::$tag)))?;
+        match entry {
+            Entry::$tag(value) => value,
+            _ => {
+                return Err(Error::other(format!(
+                    "expected {:?}, got {:?}",
+                    Tag::$tag,
+                    entry.tag()
+                )))
+            }
+        }
+    }};
+}
+
+use get_entry;
 
 pub struct Signatures {
     pub signature_v3: Vec<u8>,
@@ -184,10 +309,11 @@ pub struct Signatures {
 
 impl From<Signatures> for HashMap<SignatureTag, SignatureEntry> {
     fn from(other: Signatures) -> Self {
+        use SignatureEntry::*;
         [
-            SignatureEntry::Gpg(other.signature_v3.try_into().unwrap()).into(),
-            SignatureEntry::Dsa(other.signature_v4.try_into().unwrap()).into(),
-            SignatureEntry::Sha256(other.header_sha256.try_into().unwrap()).into(),
+            Gpg(other.signature_v3.try_into().unwrap()).into(),
+            Dsa(other.signature_v4.try_into().unwrap()).into(),
+            Sha256(other.header_sha256).into(),
         ]
         .into()
     }

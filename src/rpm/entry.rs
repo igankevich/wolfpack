@@ -1,5 +1,6 @@
 use std::ffi::CString;
 use std::io::Error;
+use std::io::ErrorKind;
 use std::io::Write;
 
 use crate::hash::Md5Hash;
@@ -124,14 +125,14 @@ pub struct RawEntry {
 }
 
 impl RawEntry {
-    pub fn read(index: &[u8], store: &[u8]) -> Result<Self, Error> {
+    pub fn read(index: &[u8], store_len: usize) -> Result<Self, Error> {
         if index.len() < ENTRY_LEN {
             return Err(Error::other("index entry is too small"));
         }
         let tag = u32::read(&index[0..4], 1)?;
         let kind = EntryKind::read(&index[4..8], 1)?;
         let offset = u32::read(&index[8..12], 1)?;
-        if offset as usize >= store.len() {
+        if offset as usize >= store_len {
             return Err(Error::other("invalid offset in index entry"));
         }
         let count: u32 = u32::read(&index[12..16], 1)?;
@@ -143,12 +144,21 @@ impl RawEntry {
             count,
         })
     }
+
+    pub fn write<W: Write>(&self, mut index: W) -> Result<(), Error> {
+        debug_assert!(self.count != 0, "zero count is illegal in rpm");
+        self.tag.write(index.by_ref())?;
+        self.kind.write(index.by_ref())?;
+        self.offset.write(index.by_ref())?;
+        self.count.write(index.by_ref())?;
+        Ok(())
+    }
 }
 
 pub trait EntryIo {
     type Tag;
 
-    fn read(tag: u32, kind: EntryKind, count: usize, store: &[u8]) -> Result<Option<Self>, Error>
+    fn read(tag: u32, kind: EntryKind, count: u32, store: &[u8]) -> Result<Self, Error>
     where
         Self: Sized;
 
@@ -587,14 +597,17 @@ macro_rules! define_entry_enums {
                 }
             }
 
-            fn tag_kind_count(&self) -> ($tag_enum, EntryKind, usize) {
-                match self {
-                    $( $entry_enum::$name(v) => (
-                        $tag_enum::$name,
-                        EntryKind::$entry_kind,
-                        ValueIo::count(v)
-                    ), )*
+            fn raw_entry(&self, mut offset: u32) -> Result<(RawEntry, u32), Error> {
+                let (tag, kind, count) = match self {
+                    $( $entry_enum::$name(v) => ($tag_enum::$name, EntryKind::$entry_kind, ValueIo::count(v)), )*
+                };
+                if count > u32::MAX as usize {
+                    return Err(Error::other("rpm index entry is too big"));
                 }
+                let padding = pad(offset, kind.align() as u32);
+                offset += padding;
+                let raw = RawEntry {tag: tag.into(), kind, offset, count: count as u32};
+                Ok((raw, padding))
             }
 
             fn do_write<W: Write>(&self, store: W) -> Result<(), Error> {
@@ -631,47 +644,34 @@ macro_rules! define_entry_enums {
             fn read(
                 tag: u32,
                 kind: EntryKind,
-                count: usize,
+                count: u32,
                 store: &[u8]
-            ) -> Result<Option<$entry_enum>, Error> {
+            ) -> Result<$entry_enum, Error> {
                 let tag: $tag_enum = tag.into();
                 match tag {
                     $( $tag_enum::$name => {
-                        if EntryKind::$entry_kind != kind {
-                            return Err(Error::other(format!(
-                                "{:?}: invalid entry type: expected {:?}, actual {:?}",
-                                tag,
-                                EntryKind::$entry_kind,
-                                kind,
-                            )));
-                        }
-                        let value = ValueIo::read(store, count)?;
-                        Ok(Some($entry_enum::$name(value)))
-                    },)*
-                    $tag_enum::Other(tag) => {
-                        eprintln!("unsupported tag: {}", tag);
-                        Ok(None)
-                    }
+                        debug_assert!(
+                            EntryKind::$entry_kind == kind,
+                            "{:?}: invalid entry type: expected {:?}, actual {:?}",
+                            tag,
+                            EntryKind::$entry_kind,
+                            kind
+                        );
+                        let value = ValueIo::read(store, count as usize)?;
+                        Ok($entry_enum::$name(value))
+                    }, )*
+                    $tag_enum::Other(_tag) => Err(Error::new(ErrorKind::InvalidData, "unsupported tag")),
                 }
             }
 
             fn write<W1: Write, W2: Write>(
                 &self,
-                mut index: W1,
+                index: W1,
                 mut store: W2,
-                mut offset: u32,
+                offset: u32,
             ) -> Result<(), Error> {
-                let (tag, kind, count) = self.tag_kind_count();
-                assert!(count != 0, "zero count is illegal in rpm");
-                let padding = pad(offset, kind.align() as u32);
-                offset += padding;
-                tag.as_u32().write(index.by_ref())?;
-                (kind as u32).write(index.by_ref())?;
-                offset.write(index.by_ref())?;
-                if count > u32::MAX as usize {
-                    return Err(Error::other("rpm index entry is too big"));
-                }
-                (count as u32).write(index.by_ref())?;
+                let (raw, padding) = self.raw_entry(offset)?;
+                raw.write(index)?;
                 if padding != 0 {
                     store.write_all(get_zeroes(padding as usize))?;
                 }
@@ -691,6 +691,7 @@ macro_rules! define_entry_enums {
 use define_entry_enums;
 
 pub(crate) fn get_zeroes(len: usize) -> &'static [u8] {
+    debug_assert!(len <= PADDING.len());
     &PADDING[..len]
 }
 
@@ -699,7 +700,7 @@ const PADDING: [u8; 7] = [0_u8; 7];
 #[cfg(test)]
 mod tests {
     use super::*;
-    //use crate::rpm::test::write_read_entry_symmetry;
+    use crate::rpm::test::write_read_entry_symmetry;
     use crate::rpm::test::write_read_symmetry;
 
     #[test]
@@ -708,7 +709,7 @@ mod tests {
         write_read_symmetry::<EntryKind>();
         write_read_symmetry::<Tag>();
         write_read_symmetry::<SignatureTag>();
-        //write_read_entry_symmetry::<SignatureEntry>();
-        //write_read_entry_symmetry::<Entry>();
+        write_read_entry_symmetry::<SignatureEntry>();
+        write_read_entry_symmetry::<Entry>();
     }
 }

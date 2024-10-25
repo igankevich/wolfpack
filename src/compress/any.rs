@@ -20,6 +20,7 @@ impl<'a, R: 'a + Read> AnyDecoder<'a, R> {
             decoder: Box::new(DummyDecoder),
         }
     }
+    // TODO into_inner? downcast?
 }
 
 impl<'a, R: 'a + Read> Read for AnyDecoder<'a, R> {
@@ -29,6 +30,7 @@ impl<'a, R: 'a + Read> Read for AnyDecoder<'a, R> {
         }
         self.decoder.read(buf)
     }
+    // TODO other methods
 }
 
 fn new_decoder<'a, R: 'a + Read + BufRead>(mut reader: R) -> Result<Box<dyn Read + 'a>, Error> {
@@ -42,6 +44,7 @@ fn new_decoder<'a, R: 'a + Read + BufRead>(mut reader: R) -> Result<Box<dyn Read
         [0x1f, 0x8b, 0x08, ..] => Ok(Box::new(GzDecoder::new(reader))),
         // https://en.wikipedia.org/wiki/Bzip2
         [b'B', b'Z', b'h', ..] => Ok(Box::new(BzDecoder::new(reader))),
+        // TODO detect tar/cpio to remove the warning
         // no compression
         magic => {
             log::warn!(

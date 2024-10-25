@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::fmt::Display;
 use std::fmt::Formatter;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -38,9 +39,10 @@ pub struct CompactManifest {
     pub annotations: HashMap<String, String>,
 }
 
-impl ToString for CompactManifest {
-    fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap()
+impl Display for CompactManifest {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let s = serde_json::to_string(self).map_err(|_| std::fmt::Error)?;
+        f.write_str(&s)
     }
 }
 
@@ -67,10 +69,10 @@ pub struct Manifest {
     pub(crate) directories: HashMap<PathBuf, String>,
 }
 
-impl ToString for Manifest {
-    fn to_string(&self) -> String {
-        // TODO
-        serde_json::to_string(self).unwrap()
+impl Display for Manifest {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let s = serde_json::to_string(self).map_err(|_| std::fmt::Error)?;
+        f.write_str(&s)
     }
 }
 
@@ -99,9 +101,10 @@ impl PackageMeta {
     }
 }
 
-impl ToString for PackageMeta {
-    fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap()
+impl Display for PackageMeta {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let s = serde_json::to_string(self).map_err(|_| std::fmt::Error)?;
+        f.write_str(&s)
     }
 }
 

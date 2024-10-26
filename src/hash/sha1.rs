@@ -2,8 +2,8 @@ use crate::hash::HashArray;
 use crate::hash::Hasher;
 use crate::hash::HashingReader;
 
-impl Hasher for Sha256 {
-    type Output = Sha256Hash;
+impl Hasher for Sha1 {
+    type Output = Sha1Hash;
 
     fn new() -> Self {
         sha2::Digest::new()
@@ -14,13 +14,13 @@ impl Hasher for Sha256 {
     }
 
     fn finalize(self) -> Self::Output {
-        Sha256Hash::new(sha2::Digest::finalize(self).into())
+        Sha1Hash::new(sha2::Digest::finalize(self).into())
     }
 }
 
-pub type Sha256 = sha2::Sha256;
-pub type Sha256Hash = HashArray<32>;
-pub type Sha256Reader<R> = HashingReader<R, Sha256>;
+pub type Sha1 = sha1::Sha1;
+pub type Sha1Hash = HashArray<20>;
+pub type Sha1Reader<R> = HashingReader<R, Sha1>;
 
 #[cfg(test)]
 mod tests {
@@ -28,8 +28,8 @@ mod tests {
     use crate::hash::tests::*;
 
     #[test]
-    fn sha256() {
-        same_as_computing_hash_of_the_whole_file::<Sha256>();
-        display_parse::<Sha256Hash>();
+    fn sha1() {
+        same_as_computing_hash_of_the_whole_file::<Sha1>();
+        display_parse::<Sha1Hash>();
     }
 }

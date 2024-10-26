@@ -1,9 +1,8 @@
-use sha1::Sha1;
-use sha2::Sha256;
-
-use crate::hash::HashArray;
 use crate::hash::Hasher;
 use crate::hash::HashingReader;
+use crate::hash::Sha1;
+use crate::hash::Sha1Hash;
+use crate::hash::Sha256;
 use crate::hash::Sha256Hash;
 
 pub struct MultiHasher {
@@ -45,7 +44,6 @@ impl Hasher for MultiHasher {
     }
 }
 
-pub type Sha1Hash = HashArray<20>;
 pub type MultiHashReader<R> = HashingReader<R, MultiHasher>;
 
 #[cfg(test)]

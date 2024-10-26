@@ -143,7 +143,7 @@ impl Serialize for RepoMd {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("repomd", 2)?;
+        let mut state = serializer.serialize_struct("repomd", 3)?;
         state.serialize_field("revision", &self.revision)?;
         state.serialize_field("data", &self.data)?;
         state.serialize_field("@xmlns", "http://linux.duke.edu/metadata/repo")?;

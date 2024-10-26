@@ -4,7 +4,11 @@ use std::fmt::Formatter;
 use std::ops::Deref;
 use std::str::FromStr;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
+use base16ct::lower::encode_string;
+use base16ct::mixed::decode;
+use constant_time_eq::constant_time_eq_n;
+
+#[derive(PartialOrd, Ord, Hash, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 pub struct HashArray<const N: usize>([u8; N]);
 
@@ -20,7 +24,18 @@ impl<const N: usize> HashArray<N> {
     pub const fn is_empty(&self) -> bool {
         N == 0
     }
+
+    pub const LEN: usize = N;
+    pub const HEX_LEN: usize = 2 * N;
 }
+
+impl<const N: usize> PartialEq for HashArray<N> {
+    fn eq(&self, other: &Self) -> bool {
+        constant_time_eq_n(&self.0, &other.0)
+    }
+}
+
+impl<const N: usize> Eq for HashArray<N> {}
 
 impl<const N: usize> From<[u8; N]> for HashArray<N> {
     fn from(data: [u8; N]) -> Self {
@@ -51,10 +66,8 @@ impl<const N: usize> Deref for HashArray<N> {
 
 impl<const N: usize> Display for HashArray<N> {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        for x in self.0.iter() {
-            write!(f, "{:02x}", x)?;
-        }
-        Ok(())
+        let s = encode_string(&self[..]);
+        f.write_str(&s)
     }
 }
 
@@ -68,14 +81,7 @@ impl<const N: usize> FromStr for HashArray<N> {
     type Err = HashParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut array = [0_u8; N];
-        let n = s.len();
-        if n != 2 * N {
-            return Err(HashParseError);
-        }
-        for (i, byte) in array.iter_mut().enumerate() {
-            let j = 2 * i;
-            *byte = u8::from_str_radix(&s[j..=(j + 1)], 16).map_err(|_| HashParseError)?;
-        }
+        decode(s.as_bytes(), &mut array[..]).map_err(|_| HashParseError)?;
         Ok(Self(array))
     }
 }

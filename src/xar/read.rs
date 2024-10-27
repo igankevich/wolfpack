@@ -1,17 +1,29 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::fs::FileType;
+use std::fs::Metadata;
 use std::io::Error;
 use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::io::Write;
 use std::iter::FusedIterator;
+use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::time::Duration;
+use std::time::UNIX_EPOCH;
 
+use chrono::format::SecondsFormat;
+use chrono::DateTime;
+use chrono::Utc;
 use flate2::read::ZlibDecoder;
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
+use serde::ser::SerializeStruct;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::Serializer;
 
 use crate::compress::AnyDecoder;
 use crate::hash::Hasher;
@@ -36,15 +48,12 @@ impl<R: Read + Seek> XarArchive<R> {
         let mut toc_bytes = vec![0_u8; header.toc_len_compressed as usize];
         reader.read_exact(&mut toc_bytes[..])?;
         let toc = xml::Xar::read(&toc_bytes[..])?.toc;
-        eprintln!("toc {:?}", toc);
         let heap_offset = reader.stream_position()?;
         reader.seek(SeekFrom::Start(heap_offset + toc.checksum.offset))?;
         let mut checksum = vec![0_u8; toc.checksum.size as usize];
         reader.read_exact(&mut checksum[..])?;
         let checksum = Checksum::new(toc.checksum.algo, &checksum[..])?;
-        eprintln!("checksum {:?}", checksum);
         let actual_checksum = checksum.compute(&toc_bytes[..]);
-        eprintln!("checksum actual {:?}", actual_checksum);
         if checksum != actual_checksum {
             return Err(Error::other("toc checksum mismatch"));
         }
@@ -74,6 +83,111 @@ impl<R: Read + Seek> XarArchive<R> {
         }
         self.reader.seek(SeekFrom::Start(offset))?;
         Ok(())
+    }
+}
+
+pub struct XarBuilder<W: Write> {
+    writer: W,
+    checksum_algo: ChecksumAlgorithm,
+    files: Vec<xml::File>,
+    contents: Vec<Vec<u8>>,
+    offset: u64,
+}
+
+impl<W: Write> XarBuilder<W> {
+    pub fn new(writer: W) -> Self {
+        let checksum_algo = ChecksumAlgorithm::Sha256;
+        Self {
+            offset: checksum_algo.size() as u64,
+            writer,
+            checksum_algo,
+            files: Default::default(),
+            contents: Default::default(),
+        }
+    }
+
+    pub fn files(&self) -> &[xml::File] {
+        &self.files[..]
+    }
+
+    pub fn add_file_by_path<P: AsRef<Path>>(
+        &mut self,
+        archive_path: PathBuf,
+        path: P,
+    ) -> Result<(), Error> {
+        let path = path.as_ref();
+        let metadata = path.metadata()?;
+        let contents = if metadata.is_dir() {
+            Vec::new()
+        } else {
+            std::fs::read(path)?
+        };
+        let mut status: FileStatus = metadata.into();
+        status.name = archive_path;
+        self.add_file(status, &contents)
+    }
+
+    pub fn add_file<C: AsRef<[u8]>>(
+        &mut self,
+        status: FileStatus,
+        contents: C,
+    ) -> Result<(), Error> {
+        let contents = contents.as_ref();
+        let extracted_checksum = Checksum::new_from_data(self.checksum_algo, contents);
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+        encoder.write_all(contents)?;
+        let archived = encoder.finish()?;
+        let archived_checksum = Checksum::new_from_data(self.checksum_algo, &archived);
+        let file = xml::File::new(
+            self.files.len() as u64,
+            status,
+            xml::Data {
+                archived_checksum: archived_checksum.into(),
+                extracted_checksum: extracted_checksum.into(),
+                // TODO add other encodings
+                encoding: xml::Encoding {
+                    style: "application/x-gzip".into(),
+                },
+                size: contents.len() as u64,
+                length: archived.len() as u64,
+                offset: self.offset,
+            },
+        );
+        self.offset += file.data.length;
+        self.files.push(file);
+        self.contents.push(archived);
+        Ok(())
+    }
+
+    pub fn finish(mut self) -> Result<W, Error> {
+        let xar = xml::Xar {
+            toc: xml::Toc {
+                checksum: xml::TocChecksum {
+                    algo: self.checksum_algo,
+                    offset: 0,
+                    size: self.checksum_algo.size() as u64,
+                },
+                files: self.files,
+                // TODO signatures
+                signatures: Default::default(),
+                x_signatures: Default::default(),
+                creation_time: xml::Timestamp(Utc::now()),
+            },
+        };
+        // write header and toc
+        xar.write(self.writer.by_ref(), self.checksum_algo)?;
+        for content in self.contents.into_iter() {
+            self.writer.write_all(&content)?;
+        }
+        Ok(self.writer)
+    }
+
+    pub fn get_mut(&mut self) -> &mut W {
+        self.writer.by_ref()
+    }
+
+    pub fn get(&self) -> &W {
+        &self.writer
     }
 }
 
@@ -212,16 +326,27 @@ pub enum ChecksumAlgorithm {
     Sha512 = 4,
 }
 
+impl ChecksumAlgorithm {
+    pub fn size(self) -> usize {
+        use ChecksumAlgorithm::*;
+        match self {
+            Sha1 => 20,
+            Sha256 => 32,
+            Sha512 => 64,
+        }
+    }
+}
+
 impl TryFrom<u32> for ChecksumAlgorithm {
     type Error = Error;
     fn try_from(other: u32) -> Result<Self, Self::Error> {
         match other {
-            0 => return Err(Error::other("no hashing algorithm")),
+            0 => Err(Error::other("no hashing algorithm")),
             1 => Ok(Self::Sha1),
-            2 => return Err(Error::other("unsafe md5 hashing algorithm")),
+            2 => Err(Error::other("unsafe md5 hashing algorithm")),
             3 => Ok(Self::Sha256),
             4 => Ok(Self::Sha512),
-            other => return Err(Error::other(format!("unknown hashing algorithm {}", other))),
+            other => Err(Error::other(format!("unknown hashing algorithm {}", other))),
         }
     }
 }
@@ -254,6 +379,14 @@ impl Checksum {
         })
     }
 
+    pub fn new_from_data(algo: ChecksumAlgorithm, data: &[u8]) -> Self {
+        match algo {
+            ChecksumAlgorithm::Sha1 => Self::Sha1(Sha1::compute(data)),
+            ChecksumAlgorithm::Sha256 => Self::Sha256(Sha256::compute(data)),
+            ChecksumAlgorithm::Sha512 => Self::Sha512(Sha512::compute(data)),
+        }
+    }
+
     pub fn compute(&self, data: &[u8]) -> Self {
         match self {
             Self::Sha1(..) => Self::Sha1(Sha1::compute(data)),
@@ -261,11 +394,20 @@ impl Checksum {
             Self::Sha512(..) => Self::Sha512(Sha512::compute(data)),
         }
     }
+
+    pub fn algo(&self) -> ChecksumAlgorithm {
+        match self {
+            Self::Sha1(..) => ChecksumAlgorithm::Sha1,
+            Self::Sha256(..) => ChecksumAlgorithm::Sha256,
+            Self::Sha512(..) => ChecksumAlgorithm::Sha512,
+        }
+    }
 }
 
 impl TryFrom<String> for Checksum {
     type Error = Error;
     fn try_from(other: String) -> Result<Self, Self::Error> {
+        let other = other.trim();
         match other.len() {
             Sha1Hash::HEX_LEN => Ok(Self::Sha1(
                 other
@@ -294,6 +436,16 @@ impl From<Checksum> for String {
             Sha1(hash) => hash.to_string(),
             Sha256(hash) => hash.to_string(),
             Sha512(hash) => hash.to_string(),
+        }
+    }
+}
+
+impl AsRef<[u8]> for Checksum {
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            Self::Sha1(h) => h.as_ref(),
+            Self::Sha256(h) => h.as_ref(),
+            Self::Sha512(h) => h.as_ref(),
         }
     }
 }
@@ -336,10 +488,107 @@ impl From<FileMode> for String {
     }
 }
 
+impl From<u32> for FileMode {
+    fn from(other: u32) -> Self {
+        // TODO mask?
+        Self(other)
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct FileStatus {
+    pub name: PathBuf,
+    #[serde(rename = "type", default)]
+    pub kind: FileKind,
+    #[serde(default)]
+    pub inode: u64,
+    #[serde(default)]
+    pub deviceno: u64,
+    #[serde(default)]
+    pub mode: FileMode,
+    #[serde(default)]
+    pub uid: u32,
+    #[serde(default)]
+    pub gid: u32,
+    #[serde(default)]
+    pub atime: xml::Timestamp,
+    #[serde(default)]
+    pub mtime: xml::Timestamp,
+    #[serde(default)]
+    pub ctime: xml::Timestamp,
+}
+
+impl From<Metadata> for FileStatus {
+    fn from(other: Metadata) -> Self {
+        use std::os::unix::fs::MetadataExt;
+        Self {
+            kind: other.file_type().into(),
+            inode: other.ino(),
+            deviceno: other.rdev(),
+            mode: other.mode().into(),
+            uid: other.uid(),
+            gid: other.gid(),
+            atime: (other.atime() as u64).try_into().unwrap_or_default(),
+            mtime: (other.mtime() as u64).try_into().unwrap_or_default(),
+            ctime: (other.ctime() as u64).try_into().unwrap_or_default(),
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(
+    Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default,
+)]
+pub enum FileKind {
+    #[default]
+    #[serde(rename = "file")]
+    File,
+    #[serde(rename = "hardlink")]
+    Hardlink,
+    #[serde(rename = "directory")]
+    Directory,
+    #[serde(rename = "symlink")]
+    Symlink,
+    #[serde(rename = "fifo")]
+    Fifo,
+    #[serde(rename = "character special")]
+    CharacterSpecial,
+    #[serde(rename = "block special")]
+    BlockSpecial,
+    #[serde(rename = "socket")]
+    Socket,
+    #[serde(rename = "whiteout")]
+    Whiteout,
+}
+
+impl From<FileType> for FileKind {
+    fn from(other: FileType) -> Self {
+        use std::os::unix::fs::FileTypeExt;
+        if other.is_dir() {
+            Self::Directory
+        } else if other.is_symlink() {
+            Self::Symlink
+        } else if other.is_block_device() {
+            Self::BlockSpecial
+        } else if other.is_char_device() {
+            Self::CharacterSpecial
+        } else if other.is_fifo() {
+            Self::Fifo
+        } else if other.is_socket() {
+            Self::Socket
+        } else if other.is_file() {
+            Self::File
+        } else {
+            Default::default()
+        }
+    }
+}
+
 pub mod xml {
     use std::io::BufReader;
 
     use quick_xml::de::from_reader;
+    use quick_xml::se::to_writer;
 
     use super::*;
 
@@ -355,13 +604,40 @@ pub mod xml {
             let reader = BufReader::new(reader);
             from_reader(reader).map_err(Error::other)
         }
+
+        pub fn write<W: Write>(
+            &self,
+            mut writer: W,
+            checksum_algo: ChecksumAlgorithm,
+        ) -> Result<(), Error> {
+            let mut toc_uncompressed = String::new();
+            to_writer(&mut toc_uncompressed, self).map_err(Error::other)?;
+            let toc_len_uncompressed = toc_uncompressed.as_bytes().len();
+            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+            encoder.write_all(toc_uncompressed.as_bytes())?;
+            let toc_compressed = encoder.finish()?;
+            let header = Header {
+                toc_len_compressed: toc_compressed.len() as u64,
+                toc_len_uncompressed: toc_len_uncompressed as u64,
+                checksum_algo,
+            };
+            eprintln!("write header {:?}", header);
+            header.write(writer.by_ref())?;
+            writer.write_all(&toc_compressed)?;
+            let checksum = Checksum::new_from_data(checksum_algo, &toc_compressed);
+            // heap starts
+            debug_assert!(checksum.as_ref().len() == checksum_algo.size());
+            writer.write_all(checksum.as_ref())?;
+            Ok(())
+        }
     }
 
     #[derive(Serialize, Deserialize, Debug)]
     #[serde(rename = "toc", rename_all = "kebab-case")]
     pub struct Toc {
         pub checksum: TocChecksum,
-        pub creation_time: Option<String>,
+        #[serde(default)]
+        pub creation_time: Timestamp,
         #[serde(rename = "file", default)]
         pub files: Vec<File>,
         #[serde(rename = "signature", default)]
@@ -379,14 +655,15 @@ pub mod xml {
         pub size: u64,
     }
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[cfg_attr(test, derive(PartialEq, Eq))]
     #[serde(rename = "file")]
     pub struct File {
         #[serde(rename = "@id")]
         pub id: u64,
         pub name: PathBuf,
         #[serde(rename = "type", default)]
-        pub kind: String,
+        pub kind: FileKind,
         #[serde(default)]
         pub inode: u64,
         #[serde(default)]
@@ -398,15 +675,35 @@ pub mod xml {
         #[serde(default)]
         pub gid: u32,
         #[serde(default)]
-        pub atime: String,
+        pub atime: xml::Timestamp,
         #[serde(default)]
-        pub mtime: String,
+        pub mtime: xml::Timestamp,
         #[serde(default)]
-        pub ctime: String,
+        pub ctime: xml::Timestamp,
         pub data: Data,
     }
 
-    #[derive(Serialize, Deserialize, Debug)]
+    impl File {
+        pub fn new(id: u64, status: FileStatus, data: Data) -> Self {
+            Self {
+                id,
+                name: status.name,
+                kind: status.kind,
+                inode: status.inode,
+                deviceno: status.deviceno,
+                mode: status.mode,
+                uid: status.uid,
+                gid: status.gid,
+                atime: status.atime,
+                mtime: status.mtime,
+                ctime: status.ctime,
+                data,
+            }
+        }
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[cfg_attr(test, derive(PartialEq, Eq))]
     #[serde(rename = "data", rename_all = "kebab-case")]
     pub struct Data {
         // ignore <contents>
@@ -418,19 +715,30 @@ pub mod xml {
         pub length: u64,
     }
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[cfg_attr(test, derive(PartialEq, Eq))]
     #[serde(rename = "encoding")]
     pub struct Encoding {
         #[serde(rename = "@style")]
         pub style: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[cfg_attr(test, derive(PartialEq, Eq))]
     pub struct FileChecksum {
         #[serde(rename = "@style")]
         pub algo: ChecksumAlgorithm,
         #[serde(rename = "$value")]
         pub value: Checksum,
+    }
+
+    impl From<Checksum> for FileChecksum {
+        fn from(other: Checksum) -> Self {
+            Self {
+                algo: other.algo(),
+                value: other,
+            }
+        }
     }
 
     #[derive(Serialize, Deserialize, Debug)]
@@ -476,6 +784,42 @@ pub mod xml {
         #[serde(rename = "$value")]
         pub data: String,
     }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[serde(try_from = "String", into = "String")]
+    pub struct Timestamp(pub DateTime<Utc>);
+
+    impl From<Timestamp> for String {
+        fn from(other: Timestamp) -> String {
+            other.0.to_rfc3339_opts(SecondsFormat::Secs, true)
+        }
+    }
+
+    impl TryFrom<String> for Timestamp {
+        type Error = Error;
+        fn try_from(other: String) -> Result<Self, Self::Error> {
+            let Ok(t) = DateTime::parse_from_rfc3339(&other) else {
+                return Ok(Default::default());
+            };
+            Ok(Self(t.to_utc()))
+        }
+    }
+
+    impl TryFrom<u64> for Timestamp {
+        type Error = Error;
+        fn try_from(other: u64) -> Result<Self, Self::Error> {
+            let t = UNIX_EPOCH
+                .checked_add(Duration::from_secs(other))
+                .ok_or_else(|| Error::other("invalid timestamp"))?;
+            Ok(Self(t.into()))
+        }
+    }
+
+    impl Default for Timestamp {
+        fn default() -> Self {
+            Self(UNIX_EPOCH.into())
+        }
+    }
 }
 
 fn u16_read(data: &[u8]) -> u16 {
@@ -499,7 +843,13 @@ const MAGIC: [u8; 4] = *b"xar!";
 mod tests {
     use std::fs::File;
 
+    use arbtest::arbtest;
+    use normalize_path::NormalizePath;
+    use tempfile::TempDir;
+    use walkdir::WalkDir;
+
     use super::*;
+    use crate::test::DirectoryOfFiles;
 
     #[test]
     fn xar_read() {
@@ -512,5 +862,46 @@ mod tests {
                 std::io::read_to_string(entry.reader().unwrap()).unwrap()
             );
         }
+    }
+
+    #[test]
+    fn xar_write_read() {
+        let workdir = TempDir::new().unwrap();
+        arbtest(|u| {
+            let directory: DirectoryOfFiles = u.arbitrary()?;
+            let xar_path = workdir.path().join("test.xar");
+            let mut xar = XarBuilder::new(File::create(&xar_path).unwrap());
+            for entry in WalkDir::new(directory.path()).into_iter() {
+                let entry = entry.unwrap();
+                let entry_path = entry
+                    .path()
+                    .strip_prefix(directory.path())
+                    .unwrap()
+                    .normalize();
+                if entry_path == Path::new("") {
+                    continue;
+                }
+                xar.add_file_by_path(entry_path, entry.path()).unwrap();
+            }
+            let expected_files = xar.files().to_vec();
+            xar.finish().unwrap();
+            let reader = File::open(&xar_path).unwrap();
+            let mut xar_archive = XarArchive::new(reader).unwrap();
+            let mut actual_files = Vec::new();
+            for mut entry in xar_archive.files() {
+                actual_files.push(entry.file().clone());
+                let mut buf = Vec::new();
+                entry.reader().unwrap().read_to_end(&mut buf).unwrap();
+                let actual_checksum = entry.file().data.extracted_checksum.value.compute(&buf);
+                assert_eq!(
+                    entry.file().data.extracted_checksum.value,
+                    actual_checksum,
+                    "file = {:?}",
+                    entry.file()
+                );
+            }
+            assert_eq!(expected_files, actual_files);
+            Ok(())
+        });
     }
 }

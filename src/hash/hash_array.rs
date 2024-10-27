@@ -1,6 +1,8 @@
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::ops::Deref;
 use std::str::FromStr;
 
@@ -8,7 +10,7 @@ use base16ct::lower::encode_string;
 use base16ct::mixed::decode;
 use constant_time_eq::constant_time_eq_n;
 
-#[derive(PartialOrd, Ord, Hash, Clone)]
+#[derive(PartialOrd, Ord, Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 pub struct HashArray<const N: usize>([u8; N]);
 
@@ -36,6 +38,15 @@ impl<const N: usize> PartialEq for HashArray<N> {
 }
 
 impl<const N: usize> Eq for HashArray<N> {}
+
+impl<const N: usize> Hash for HashArray<N> {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
+        self.0.hash(state);
+    }
+}
 
 impl<const N: usize> From<[u8; N]> for HashArray<N> {
     fn from(data: [u8; N]) -> Self {

@@ -4,6 +4,7 @@ pub mod deb;
 pub mod error;
 pub mod hash;
 pub mod ipk;
+pub mod macos;
 pub mod pkg;
 pub mod rpm;
 pub mod sign;

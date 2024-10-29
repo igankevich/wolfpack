@@ -12,6 +12,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
+use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use chrono::format::SecondsFormat;
@@ -169,9 +170,10 @@ impl<W: Write> XarBuilder<W> {
                 },
                 files: self.files,
                 // TODO signatures
+                // http://users.wfu.edu/cottrell/productsign/productsign_linux.html
                 signatures: Default::default(),
                 x_signatures: Default::default(),
-                creation_time: xml::Timestamp(Utc::now()),
+                creation_time: xml::Timestamp(SystemTime::now()),
             },
         };
         // write header and toc
@@ -490,8 +492,7 @@ impl From<FileMode> for String {
 
 impl From<u32> for FileMode {
     fn from(other: u32) -> Self {
-        // TODO mask?
-        Self(other)
+        Self(other & 0o7777)
     }
 }
 
@@ -611,6 +612,7 @@ pub mod xml {
             checksum_algo: ChecksumAlgorithm,
         ) -> Result<(), Error> {
             let mut toc_uncompressed = String::new();
+            toc_uncompressed.push_str(XML_DECLARATION);
             to_writer(&mut toc_uncompressed, self).map_err(Error::other)?;
             let toc_len_uncompressed = toc_uncompressed.as_bytes().len();
             let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
@@ -706,6 +708,7 @@ pub mod xml {
     #[cfg_attr(test, derive(PartialEq, Eq))]
     #[serde(rename = "data", rename_all = "kebab-case")]
     pub struct Data {
+        // TODO add custom properties here
         // ignore <contents>
         pub archived_checksum: FileChecksum,
         pub extracted_checksum: FileChecksum,
@@ -787,11 +790,12 @@ pub mod xml {
 
     #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     #[serde(try_from = "String", into = "String")]
-    pub struct Timestamp(pub DateTime<Utc>);
+    pub struct Timestamp(pub SystemTime);
 
     impl From<Timestamp> for String {
         fn from(other: Timestamp) -> String {
-            other.0.to_rfc3339_opts(SecondsFormat::Secs, true)
+            let date_time: DateTime<Utc> = other.0.into();
+            date_time.to_rfc3339_opts(SecondsFormat::Secs, true)
         }
     }
 
@@ -801,7 +805,7 @@ pub mod xml {
             let Ok(t) = DateTime::parse_from_rfc3339(&other) else {
                 return Ok(Default::default());
             };
-            Ok(Self(t.to_utc()))
+            Ok(Self(t.to_utc().into()))
         }
     }
 
@@ -811,13 +815,13 @@ pub mod xml {
             let t = UNIX_EPOCH
                 .checked_add(Duration::from_secs(other))
                 .ok_or_else(|| Error::other("invalid timestamp"))?;
-            Ok(Self(t.into()))
+            Ok(Self(t))
         }
     }
 
     impl Default for Timestamp {
         fn default() -> Self {
-            Self(UNIX_EPOCH.into())
+            Self(UNIX_EPOCH)
         }
     }
 }
@@ -838,6 +842,7 @@ fn u64_read(data: &[u8]) -> u64 {
 
 const HEADER_LEN: usize = 4 + 2 + 2 + 8 + 8 + 4;
 const MAGIC: [u8; 4] = *b"xar!";
+const XML_DECLARATION: &str = r#"<?xml version="1.0" encoding="UTF-8"?>"#;
 
 #[cfg(test)]
 mod tests {

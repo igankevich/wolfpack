@@ -29,6 +29,7 @@ impl Bom {
         // skip the header
         writer.seek(SeekFrom::Start(HEADER_LEN as u64))?;
         let bom_info = BomInfo {
+            // TODO
             num_paths: 0,
             entries: Default::default(),
         };
@@ -65,17 +66,49 @@ impl Bom {
         }
         // paths
         {
+            let edges = self.nodes.edges();
+            for (parent, children) in edges.iter() {
+                let mut indices = Vec::new();
+                for child in children.iter() {
+                    let node = self.nodes.nodes.get(child).unwrap();
+                    // node metadata
+                    let i = blocks
+                        .write_block(writer.by_ref(), |writer| node.metadata.write(writer))?;
+                    // node id -> index mapping
+                    let index0 = blocks.write_block(writer.by_ref(), |writer| {
+                        u32_write(writer.by_ref(), node.id)?;
+                        u32_write(writer.by_ref(), i)?;
+                        Ok(())
+                    })?;
+                    // parent + name
+                    let index1 = blocks.write_block(writer.by_ref(), |writer| {
+                        u32_write(writer.by_ref(), node.parent)?;
+                        writer.write_all(node.name.as_os_str().as_bytes())?;
+                        Ok(())
+                    })?;
+                    indices.push((index0, index1));
+                }
+                // if root
+                if *parent == 0 {
+                    let paths = Paths::from_indices(indices);
+                    let i = blocks.write_block(writer.by_ref(), |writer| paths.write(writer))?;
+                    let tree = Tree::new_v_index(i);
+                    let i = blocks.write_block(writer.by_ref(), |writer| tree.write(writer))?;
+                    vars.insert(PATHS.into(), i);
+                }
+            }
         }
-        // TODO vars
-        // TODO blocks
+        // vars
+        let vars_block = Block::from_write(writer.by_ref(), |writer| vars.write(writer))?;
+        let index_block = Block::from_write(writer.by_ref(), |writer| blocks.write(writer))?;
         // write the header
         writer.seek(SeekFrom::Start(0))?;
         let header = Header {
-            num_non_null_blocks: 0,
-            index_offset: HEADER_LEN as u32,
-            index_len: 0,
-            vars_offset: 0,
-            vars_len: 0,
+            num_non_null_blocks: blocks.num_non_null_blocks() as u32,
+            index_offset: index_block.offset,
+            index_len: index_block.len,
+            vars_offset: vars_block.offset,
+            vars_len: vars_block.len,
         };
         header.write(writer.by_ref())?;
         Ok(())
@@ -138,6 +171,12 @@ impl Bom {
                 //return Err(Error::other("loop"));
             }
             let path = Paths::read(blocks.slice(index, &file)?)?;
+            if !path.is_leaf {
+                eprintln!(
+                    "branch id {} forward {} backward {} indices {:?}",
+                    index, path.forward, path.backward, path.indices
+                );
+            }
             //eprintln!("paths {:?}", path);
             // is_leaf == 0 means count == 1?
             for (index0, index1) in path.indices.into_iter() {
@@ -148,26 +187,13 @@ impl Bom {
                 } else {
                     let block_bytes = blocks.slice(index0, &file)?;
                     let id = u32_read(&block_bytes[0..4]);
+                    eprintln!("id {}", id);
                     let index = u32_read(&block_bytes[4..8]);
                     let block_bytes = blocks.slice(index, &file)?;
-                    let kind: NodeKind = block_bytes[0].try_into()?;
-                    let _x0 = block_bytes[1];
-                    let _arch = u16_read(&block_bytes[2..4]);
-                    let mode = u16_read(&block_bytes[4..6]);
-                    let uid = u32_read(&block_bytes[6..10]);
-                    let gid = u32_read(&block_bytes[10..14]);
-                    let mtime = u32_read(&block_bytes[14..18]);
-                    let size = u32_read(&block_bytes[18..22]);
+                    let metadata = Metadata::read(&block_bytes[..])?;
                     let node = Node {
                         id,
-                        metadata: Metadata {
-                            kind,
-                            mode: mode & 0o7777,
-                            uid,
-                            gid,
-                            mtime,
-                            size,
-                        },
+                        metadata,
                         parent: 0,
                         name: Default::default(),
                     };
@@ -180,6 +206,9 @@ impl Bom {
                     let name =
                         CStr::from_bytes_with_nul(&block_bytes[4..]).map_err(Error::other)?;
                     let name = OsStr::from_bytes(name.to_bytes());
+                    if !path.is_leaf {
+                        eprintln!("parent {} name {:?}", parent, name.to_str());
+                    }
                     //eprintln!("file parent {} name {}", parent, name,);
                     if let Some(mut child) = child {
                         child.name = name.into();
@@ -375,6 +404,10 @@ impl Blocks {
         self.blocks.push(block);
     }
 
+    fn num_non_null_blocks(&self) -> usize {
+        self.blocks.len() - 1
+    }
+
     fn write_block<W: Write + Seek, F: FnOnce(&mut W) -> Result<(), Error>>(
         &mut self,
         writer: W,
@@ -427,6 +460,7 @@ impl Block {
     ) -> Result<Self, Error> {
         let offset = writer.stream_position()?;
         // TODO align to block size??
+        // TODO test files do not have any alignment
         {
             let remainder = (offset % ALIGN as u64) as usize;
             if remainder != 0 {
@@ -621,15 +655,20 @@ struct Paths {
     forward: u32,
     backward: u32,
     indices: Vec<(u32, u32)>,
+    // TODO is root?
     is_leaf: bool,
 }
 
 impl Paths {
     fn null() -> Self {
+        Self::from_indices(Default::default())
+    }
+
+    fn from_indices(indices: Vec<(u32, u32)>) -> Self {
         Self {
             forward: 0,
             backward: 0,
-            indices: Default::default(),
+            indices,
             is_leaf: true,
         }
     }
@@ -698,11 +737,19 @@ impl Nodes {
     fn to_paths(&self) -> Result<HashMap<PathBuf, Metadata>, Error> {
         let mut paths = HashMap::new();
         for (id, node) in self.nodes.iter() {
-            let mut path = self.path(*id)?;
-            path.push(&node.name);
+            let path = self.path(*id)?;
             paths.insert(path, node.metadata.clone());
         }
         Ok(paths)
+    }
+
+    // parent -> children
+    fn edges(&self) -> HashMap<u32, Vec<u32>> {
+        let mut edges: HashMap<u32, Vec<u32>> = HashMap::new();
+        for node in self.nodes.values() {
+            edges.entry(node.parent).or_default().push(node.id);
+        }
+        edges
     }
 
     fn from_directory<P: AsRef<Path>>(directory: P) -> Result<Self, Error> {
@@ -751,6 +798,46 @@ struct Metadata {
     gid: u32,
     mtime: u32,
     size: u32,
+}
+
+impl Metadata {
+    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
+        let kind: NodeKind = u8_read(reader.by_ref())?.try_into()?;
+        let _x0 = u8_read(reader.by_ref())?;
+        let _arch = u16_read_v2(reader.by_ref())?;
+        let mode = u16_read_v2(reader.by_ref())?;
+        let uid = u32_read_v2(reader.by_ref())?;
+        let gid = u32_read_v2(reader.by_ref())?;
+        let mtime = u32_read_v2(reader.by_ref())?;
+        let size = u32_read_v2(reader.by_ref())?;
+        let _x1 = u8_read(reader.by_ref())?;
+        let _checksum_or_dev_type = u32_read_v2(reader.by_ref())?;
+        let _link_name_len = u32_read_v2(reader.by_ref())?;
+        // TODO link name
+        Ok(Self {
+            kind,
+            mode: mode & 0o7777,
+            uid,
+            gid,
+            mtime,
+            size,
+        })
+    }
+
+    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+        u8_write(writer.by_ref(), self.kind as u8)?;
+        u8_write(writer.by_ref(), 1_u8)?;
+        u16_write(writer.by_ref(), 0_u16)?;
+        u16_write(writer.by_ref(), self.mode)?;
+        u32_write(writer.by_ref(), self.uid)?;
+        u32_write(writer.by_ref(), self.gid)?;
+        u32_write(writer.by_ref(), self.mtime)?;
+        u32_write(writer.by_ref(), self.size)?;
+        u8_write(writer.by_ref(), 1_u8)?;
+        u32_write(writer.by_ref(), 0_u32)?;
+        u32_write(writer.by_ref(), 0_u32)?;
+        Ok(())
+    }
 }
 
 impl TryFrom<std::fs::Metadata> for Metadata {
@@ -851,12 +938,20 @@ fn u32_write<W: Write>(mut writer: W, value: u32) -> Result<(), Error> {
     writer.write_all(value.to_be_bytes().as_slice())
 }
 
+//fn os_string_read<R: Read>(mut reader: R) -> Result<OsString, Error> {
+//    reader.read_to_end()?;
+//    let name =
+//        CStr::from_bytes_with_nul(&block_bytes[4..]).map_err(Error::other)?;
+//    let name = OsStr::from_bytes(name.to_bytes());
+//}
+
 const MAGIC: [u8; 8] = *b"BOMStore";
 const TREE_MAGIC: [u8; 4] = *b"tree";
 const V_INDEX: &CStr = c"VIndex";
 const HL_INDEX: &CStr = c"HLIndex";
 const SIZE_64: &CStr = c"Size64";
 const BOM_INFO: &CStr = c"BomInfo";
+const PATHS: &CStr = c"Paths";
 // TODO why 512?
 const HEADER_LEN: usize = 32;
 const VERSION: u32 = 1;

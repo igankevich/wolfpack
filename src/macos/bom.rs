@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -20,6 +21,7 @@ use std::path::PathBuf;
 use normalize_path::NormalizePath;
 use walkdir::WalkDir;
 
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Debug))]
 struct Bom {
     nodes: Nodes,
 }
@@ -28,24 +30,16 @@ impl Bom {
     fn write<W: Write + Seek>(&self, mut writer: W) -> Result<(), Error> {
         // skip the header
         writer.seek(SeekFrom::Start(HEADER_LEN as u64))?;
-        let bom_info = BomInfo {
-            // TODO
-            num_paths: 0,
-            entries: Default::default(),
-        };
         let mut blocks = Blocks::new();
         let mut vars = Vars::new();
-        // bom info
-        {
-            let i = blocks.write_block(writer.by_ref(), |writer| bom_info.write(writer))?;
-            vars.insert(BOM_INFO.into(), i);
-        }
         // v index
         {
             let paths = Paths::null();
             let i = blocks.write_block(writer.by_ref(), |writer| paths.write(writer))?;
             let tree = Tree::new_v_index(i);
             let i = blocks.write_block(writer.by_ref(), |writer| tree.write(writer))?;
+            let vindex = VIndex::new(i);
+            let i = blocks.write_block(writer.by_ref(), |writer| vindex.write(writer))?;
             vars.insert(V_INDEX.into(), i);
         }
         // hl index
@@ -65,8 +59,12 @@ impl Bom {
             vars.insert(SIZE_64.into(), i);
         }
         // paths
-        {
+        let num_paths = {
             let edges = self.nodes.edges();
+            eprintln!("write edges {:?}", edges);
+            let num_paths = edges.len() as u32;
+            let mut roots = Vec::new();
+            let mut all_paths = Vec::new();
             for (parent, children) in edges.iter() {
                 let mut indices = Vec::new();
                 for child in children.iter() {
@@ -84,19 +82,60 @@ impl Bom {
                     let index1 = blocks.write_block(writer.by_ref(), |writer| {
                         u32_write(writer.by_ref(), node.parent)?;
                         writer.write_all(node.name.as_os_str().as_bytes())?;
+                        writer.write_all(&[0_u8])?;
                         Ok(())
                     })?;
                     indices.push((index0, index1));
                 }
+                let last_index = indices.last().cloned().unwrap();
+                let paths = Paths::from_indices(indices);
+                all_paths.push((parent, last_index, paths));
+            }
+            let block_index = blocks.next_block_index();
+            let n = all_paths.len();
+            for (i, (_, _, paths)) in all_paths.iter_mut().enumerate() {
+                paths.backward = if i == 0 {
+                    0
+                } else {
+                    block_index + (i - 1) as u32
+                };
+                paths.forward = if i == n - 1 {
+                    0
+                } else {
+                    block_index + (i + 1) as u32
+                };
+            }
+            for (j, (parent, last_index, paths)) in all_paths.into_iter().enumerate() {
+                let i = blocks.write_block(writer.by_ref(), |writer| paths.write(writer))?;
+                debug_assert!(i == block_index + j as u32);
+                eprintln!("write index {} paths {:?}", i, paths);
                 // if root
                 if *parent == 0 {
-                    let paths = Paths::from_indices(indices);
-                    let i = blocks.write_block(writer.by_ref(), |writer| paths.write(writer))?;
-                    let tree = Tree::new_v_index(i);
-                    let i = blocks.write_block(writer.by_ref(), |writer| tree.write(writer))?;
-                    vars.insert(PATHS.into(), i);
+                    // take the last file (can be any file probably)
+                    let index1 = last_index.1;
+                    roots.push((i, index1));
                 }
             }
+            // paths (is_leaf == 0)
+            {
+                let num_paths = roots.len() as u32;
+                let mut paths = Paths::from_indices(roots);
+                paths.is_leaf = false;
+                let i = blocks.write_block(writer.by_ref(), |writer| paths.write(writer))?;
+                let tree = Tree::new(i, num_paths);
+                let i = blocks.write_block(writer.by_ref(), |writer| tree.write(writer))?;
+                vars.insert(PATHS.into(), i);
+            }
+            num_paths
+        };
+        // bom info
+        {
+            let bom_info = BomInfo {
+                num_paths,
+                entries: Default::default(),
+            };
+            let i = blocks.write_block(writer.by_ref(), |writer| bom_info.write(writer))?;
+            vars.insert(BOM_INFO.into(), i);
         }
         // vars
         let vars_block = Block::from_write(writer.by_ref(), |writer| vars.write(writer))?;
@@ -111,6 +150,10 @@ impl Bom {
             vars_len: vars_block.len,
         };
         header.write(writer.by_ref())?;
+        let paths = self.nodes.to_paths()?;
+        for (path, metadata) in paths.iter() {
+            eprintln!("write path {:?} metadata {:?}", path, metadata);
+        }
         Ok(())
     }
 
@@ -139,6 +182,7 @@ impl Bom {
             let index = vars
                 .remove(name)
                 .ok_or_else(|| Error::other(format!("{:?} is missing", name)))?;
+            eprintln!("read vindex index {}", index);
             let v_index = VIndex::read(blocks.slice(index, &file)?)?;
             eprintln!("v index {:?}", v_index);
             let name: CString = c"VIndex.index".into();
@@ -168,7 +212,6 @@ impl Bom {
             if !visited.insert(index) {
                 //eprintln!("loop {}", index);
                 continue;
-                //return Err(Error::other("loop"));
             }
             let path = Paths::read(blocks.slice(index, &file)?)?;
             if !path.is_leaf {
@@ -177,12 +220,13 @@ impl Bom {
                     index, path.forward, path.backward, path.indices
                 );
             }
-            //eprintln!("paths {:?}", path);
+            eprintln!("read index {} paths {:?}", index, path);
             // is_leaf == 0 means count == 1?
             for (index0, index1) in path.indices.into_iter() {
                 let child = if !path.is_leaf {
                     paths.push_back(index0);
-                    // TODO ???
+                    // index1 appears to be irrelevant here
+                    // (equals to index1 of the last file in the referenced Paths)
                     None
                 } else {
                     let block_bytes = blocks.slice(index0, &file)?;
@@ -190,7 +234,7 @@ impl Bom {
                     eprintln!("id {}", id);
                     let index = u32_read(&block_bytes[4..8]);
                     let block_bytes = blocks.slice(index, &file)?;
-                    let metadata = Metadata::read(&block_bytes[..])?;
+                    let metadata = Metadata::read(block_bytes)?;
                     let node = Node {
                         id,
                         metadata,
@@ -227,13 +271,14 @@ impl Bom {
         let nodes = Nodes { nodes };
         let paths = nodes.to_paths()?;
         for (path, metadata) in paths.iter() {
-            eprintln!("{:?} {:?}", path, metadata);
+            eprintln!("read path {:?} metadata {:?}", path, metadata);
         }
         Ok(Self { nodes })
     }
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 struct Header {
     num_non_null_blocks: u32,
     index_offset: u32,
@@ -242,11 +287,11 @@ struct Header {
     vars_len: u32,
 }
 
-impl Header {
+impl BigEndianIo for Header {
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mut file = [0_u8; HEADER_LEN];
         reader.read_exact(&mut file[..])?;
-        if file[..MAGIC.len()] != MAGIC[..] {
+        if file[..BOM_MAGIC.len()] != BOM_MAGIC[..] {
             return Err(Error::other("not a bom store"));
         }
         let version = u32_read(&file[8..12]);
@@ -274,6 +319,7 @@ impl Header {
     }
 
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+        writer.write_all(&BOM_MAGIC[..])?;
         u32_write(writer.by_ref(), VERSION)?;
         u32_write(writer.by_ref(), self.num_non_null_blocks)?;
         u32_write(writer.by_ref(), self.index_offset)?;
@@ -284,6 +330,7 @@ impl Header {
     }
 }
 
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Debug))]
 struct Vars {
     /// Variable name -> block index.
     vars: HashMap<CString, u32>,
@@ -295,7 +342,9 @@ impl Vars {
             vars: Default::default(),
         }
     }
+}
 
+impl BigEndianIo for Vars {
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let num_vars = u32_read_v2(reader.by_ref())? as usize;
         let mut vars = HashMap::with_capacity(num_vars);
@@ -304,10 +353,14 @@ impl Vars {
             let len = u8_read(reader.by_ref())? as usize;
             let mut name = vec![0_u8; len];
             reader.read_exact(&mut name[..])?;
+            // remove the null character if any
+            if let Some(i) = name.iter().position(|b| *b == 0) {
+                name.truncate(i);
+            };
             let name = CString::new(name).map_err(|_| Error::other("invalid variable name"))?;
             vars.insert(name, index);
         }
-        eprintln!("vars {:?}", vars);
+        //eprintln!("vars {:?}", vars);
         Ok(Self { vars })
     }
 
@@ -320,9 +373,9 @@ impl Vars {
             if len > u8::MAX as usize {
                 return Err(Error::other("variable name is too long"));
             }
+            u32_write(writer.by_ref(), *index)?;
             writer.write_all(&[len as u8])?;
             writer.write_all(name)?;
-            u32_write(writer.by_ref(), *index)?;
         }
         Ok(())
     }
@@ -342,6 +395,7 @@ impl DerefMut for Vars {
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 struct Blocks {
     blocks: Vec<Block>,
     free_blocks: Vec<Block>,
@@ -352,7 +406,8 @@ impl Blocks {
         Self {
             // start with the null block
             blocks: vec![Block::null()],
-            free_blocks: Default::default(),
+            // write two empty blocks at the end
+            free_blocks: vec![Block::null(), Block::null()],
         }
     }
 
@@ -361,9 +416,37 @@ impl Blocks {
             .blocks
             .get(index as usize)
             .ok_or_else(|| Error::other("invalid block index"))?;
+        //eprintln!("read block index {} block {:?}", index, block);
         Ok(block.slice(file))
     }
 
+    fn push(&mut self, block: Block) {
+        self.blocks.push(block);
+    }
+
+    fn num_non_null_blocks(&self) -> usize {
+        self.blocks.iter().filter(|b| !b.is_null()).count()
+    }
+
+    fn write_block<W: Write + Seek, F: FnOnce(&mut W) -> Result<(), Error>>(
+        &mut self,
+        writer: W,
+        f: F,
+    ) -> Result<u32, Error> {
+        let index = self.next_block_index();
+        let block = Block::from_write(writer, f)?;
+        //eprintln!("write block index {} block {:?}", index, block);
+        self.blocks.push(block);
+        Ok(index)
+    }
+
+    fn next_block_index(&self) -> u32 {
+        let index = self.blocks.len();
+        index as u32
+    }
+}
+
+impl BigEndianIo for Blocks {
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let num_blocks = u32_read_v2(reader.by_ref())? as usize;
         let mut blocks = Vec::with_capacity(num_blocks);
@@ -385,41 +468,21 @@ impl Blocks {
 
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         let num_blocks = self.blocks.len() as u32;
-        u32_write(writer.by_ref(), num_blocks + 1)?;
+        u32_write(writer.by_ref(), num_blocks)?;
         for block in self.blocks.iter() {
             block.write(writer.by_ref())?;
         }
         let num_free_blocks = self.free_blocks.len() as u32;
-        // write two empty blocks at the end
-        u32_write(writer.by_ref(), num_free_blocks + 2)?;
+        u32_write(writer.by_ref(), num_free_blocks)?;
         for block in self.free_blocks.iter() {
             block.write(writer.by_ref())?;
         }
-        Block::null().write(writer.by_ref())?;
-        Block::null().write(writer.by_ref())?;
         Ok(())
-    }
-
-    fn push(&mut self, block: Block) {
-        self.blocks.push(block);
-    }
-
-    fn num_non_null_blocks(&self) -> usize {
-        self.blocks.len() - 1
-    }
-
-    fn write_block<W: Write + Seek, F: FnOnce(&mut W) -> Result<(), Error>>(
-        &mut self,
-        writer: W,
-        f: F,
-    ) -> Result<u32, Error> {
-        let index = self.blocks.len();
-        self.blocks.push(Block::from_write(writer, f)?);
-        Ok(index as u32)
     }
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 struct Block {
     // Byte offset from the start of the file.
     offset: u32,
@@ -431,19 +494,8 @@ impl Block {
     fn slice<'a>(&self, file: &'a [u8]) -> &'a [u8] {
         let i = self.offset as usize;
         let j = i + self.len as usize;
+        //eprintln!("read block {:?}", &file[i..j]);
         &file[i..j]
-    }
-
-    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let offset = u32_read_v2(reader.by_ref())?;
-        let len = u32_read_v2(reader.by_ref())?;
-        Ok(Self { offset, len })
-    }
-
-    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
-        u32_write(writer.by_ref(), self.offset)?;
-        u32_write(writer.by_ref(), self.len)?;
-        Ok(())
     }
 
     fn is_null(&self) -> bool {
@@ -459,16 +511,30 @@ impl Block {
         f: F,
     ) -> Result<Self, Error> {
         let offset = writer.stream_position()?;
-        // TODO align to block size??
-        // TODO test files do not have any alignment
-        {
-            let remainder = (offset % ALIGN as u64) as usize;
-            if remainder != 0 {
-                let n = ALIGN - remainder;
-                writer.write_all(&PADDING[..n])?;
-            }
-        }
         f(writer.by_ref())?;
+        let len = writer.stream_position()? - offset;
+        if offset > u32::MAX as u64 {
+            return Err(Error::other("the file is too large"));
+        }
+        if len > u32::MAX as u64 {
+            return Err(Error::other("the block is too large"));
+        }
+        Ok(Self {
+            offset: offset as u32,
+            len: len as u32,
+        })
+    }
+
+    fn from_write_new<W: Write + Seek, F: FnOnce(&mut Vec<u8>) -> Result<(), Error>>(
+        mut writer: W,
+        f: F,
+    ) -> Result<Self, Error> {
+        let offset = writer.stream_position()?;
+        // TODO
+        let mut bytes = Vec::new();
+        f(&mut bytes)?;
+        eprintln!("write block {:?}", bytes);
+        writer.write_all(&bytes)?;
         let len = writer.stream_position()? - offset;
         if offset > u32::MAX as u64 {
             return Err(Error::other("the file is too large"));
@@ -483,30 +549,43 @@ impl Block {
     }
 }
 
+impl BigEndianIo for Block {
+    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
+        let offset = u32_read_v2(reader.by_ref())?;
+        let len = u32_read_v2(reader.by_ref())?;
+        Ok(Self { offset, len })
+    }
+
+    fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+        u32_write(writer.by_ref(), self.offset)?;
+        u32_write(writer.by_ref(), self.len)?;
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 struct BomInfo {
     num_paths: u32,
     entries: Vec<BomInfoEntry>,
 }
 
-impl BomInfo {
-    fn read(data: &[u8]) -> Result<Self, Error> {
-        let version = u32_read(&data[0..4]);
+impl BigEndianIo for BomInfo {
+    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
+        let version = u32_read_v2(reader.by_ref())?;
         if version != VERSION {
             return Err(Error::other(format!(
                 "unsupported BOMInfo version: {}",
                 version
             )));
         }
-        let num_paths = u32_read(&data[4..8]);
-        let num_entries = u32_read(&data[8..12]);
-        eprintln!("num paths {}", num_paths);
-        eprintln!("num entries {}", num_entries);
+        let num_paths = u32_read_v2(reader.by_ref())?;
+        let num_entries = u32_read_v2(reader.by_ref())?;
+        //eprintln!("num paths {}", num_paths);
+        //eprintln!("num entries {}", num_entries);
         let mut entries = Vec::new();
-        let mut data = &data[12..];
         for _ in 0..num_entries {
-            entries.push(BomInfoEntry::read(&data[..16])?);
-            data = &data[16..];
+            entries.push(BomInfoEntry::read(reader.by_ref())?);
         }
         Ok(Self { num_paths, entries })
     }
@@ -523,11 +602,12 @@ impl BomInfo {
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 struct BomInfoEntry {
     x: [u32; 4],
 }
 
-impl BomInfoEntry {
+impl BigEndianIo for BomInfoEntry {
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mut data = [0_u8; 16];
         reader.read_exact(&mut data[..])?;
@@ -551,14 +631,7 @@ impl BomInfoEntry {
 }
 
 #[derive(Debug)]
-struct Node {
-    id: u32,
-    parent: u32,
-    metadata: Metadata,
-    name: OsString,
-}
-
-#[derive(Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 struct VIndex {
     index: u32,
 }
@@ -567,7 +640,9 @@ impl VIndex {
     fn new(index: u32) -> Self {
         Self { index }
     }
+}
 
+impl BigEndianIo for VIndex {
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let version = u32_read_v2(reader.by_ref())?;
         if version != VERSION {
@@ -592,6 +667,7 @@ impl VIndex {
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 struct Tree {
     child: u32,
     block_size: u32,
@@ -615,6 +691,16 @@ impl Tree {
         }
     }
 
+    fn new(child: u32, num_paths: u32) -> Self {
+        Self {
+            child,
+            block_size: 4096,
+            num_paths,
+        }
+    }
+}
+
+impl BigEndianIo for Tree {
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mut magic = [0_u8; 4];
         reader.read_exact(&mut magic[..])?;
@@ -651,6 +737,7 @@ impl Tree {
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
 struct Paths {
     forward: u32,
     backward: u32,
@@ -672,7 +759,9 @@ impl Paths {
             is_leaf: true,
         }
     }
+}
 
+impl BigEndianIo for Paths {
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let is_leaf = u16_read_v2(reader.by_ref())? != 0;
         let count = u16_read_v2(reader.by_ref())?;
@@ -694,11 +783,11 @@ impl Paths {
 
     fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
         let is_leaf: u16 = if self.is_leaf { 1 } else { 0 };
-        u16_write(writer.by_ref(), is_leaf)?;
         let count = self.indices.len();
         if count > u16::MAX as usize {
             return Err(Error::other("too many path indices"));
         }
+        u16_write(writer.by_ref(), is_leaf)?;
         u16_write(writer.by_ref(), count as u16)?;
         u32_write(writer.by_ref(), self.forward)?;
         u32_write(writer.by_ref(), self.backward)?;
@@ -711,6 +800,7 @@ impl Paths {
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 struct Nodes {
     nodes: HashMap<u32, Node>,
 }
@@ -785,12 +875,22 @@ impl Nodes {
             nodes.insert(relative_path, node);
             id += 1;
         }
-        let nodes = nodes.into_iter().map(|(_, node)| (node.id, node)).collect();
+        let nodes = nodes.into_values().map(|node| (node.id, node)).collect();
         Ok(Self { nodes })
     }
 }
 
+#[derive(Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq))]
+struct Node {
+    id: u32,
+    parent: u32,
+    metadata: Metadata,
+    name: OsString,
+}
+
 #[derive(Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 struct Metadata {
     kind: NodeKind,
     mode: u16,
@@ -800,7 +900,7 @@ struct Metadata {
     size: u32,
 }
 
-impl Metadata {
+impl BigEndianIo for Metadata {
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let kind: NodeKind = u8_read(reader.by_ref())?.try_into()?;
         let _x0 = u8_read(reader.by_ref())?;
@@ -816,7 +916,7 @@ impl Metadata {
         // TODO link name
         Ok(Self {
             kind,
-            mode: mode & 0o7777,
+            mode: mode & MODE_MASK,
             uid,
             gid,
             mtime,
@@ -828,7 +928,7 @@ impl Metadata {
         u8_write(writer.by_ref(), self.kind as u8)?;
         u8_write(writer.by_ref(), 1_u8)?;
         u16_write(writer.by_ref(), 0_u16)?;
-        u16_write(writer.by_ref(), self.mode)?;
+        u16_write(writer.by_ref(), self.mode & MODE_MASK)?;
         u32_write(writer.by_ref(), self.uid)?;
         u32_write(writer.by_ref(), self.gid)?;
         u32_write(writer.by_ref(), self.mtime)?;
@@ -859,6 +959,7 @@ impl TryFrom<std::fs::Metadata> for Metadata {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[repr(u8)]
 enum NodeKind {
     #[default]
@@ -877,7 +978,7 @@ impl TryFrom<u8> for NodeKind {
             2 => Ok(Directory),
             3 => Ok(Symlink),
             4 => Ok(Device),
-            _ => return Err(Error::other("invalid node kind")),
+            _ => Err(Error::other("invalid node kind")),
         }
     }
 }
@@ -938,6 +1039,13 @@ fn u32_write<W: Write>(mut writer: W, value: u32) -> Result<(), Error> {
     writer.write_all(value.to_be_bytes().as_slice())
 }
 
+pub trait BigEndianIo {
+    fn read<R: Read>(reader: R) -> Result<Self, Error>
+    where
+        Self: Sized;
+    fn write<W: Write>(&self, writer: W) -> Result<(), Error>;
+}
+
 //fn os_string_read<R: Read>(mut reader: R) -> Result<OsString, Error> {
 //    reader.read_to_end()?;
 //    let name =
@@ -945,7 +1053,7 @@ fn u32_write<W: Write>(mut writer: W, value: u32) -> Result<(), Error> {
 //    let name = OsStr::from_bytes(name.to_bytes());
 //}
 
-const MAGIC: [u8; 8] = *b"BOMStore";
+const BOM_MAGIC: [u8; 8] = *b"BOMStore";
 const TREE_MAGIC: [u8; 4] = *b"tree";
 const V_INDEX: &CStr = c"VIndex";
 const HL_INDEX: &CStr = c"HLIndex";
@@ -957,16 +1065,97 @@ const HEADER_LEN: usize = 32;
 const VERSION: u32 = 1;
 const ALIGN: usize = 4;
 const PADDING: [u8; ALIGN] = [0_u8; ALIGN];
+const MODE_MASK: u16 = 0o7777;
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
     use std::fs::File;
+    use std::io::Cursor;
+
+    use arbitrary::Arbitrary;
+    use arbitrary::Unstructured;
+    use arbtest::arbtest;
 
     use super::*;
+    use crate::test::DirectoryOfFiles;
 
     #[test]
     fn bom_read() {
         Bom::read(File::open("macos/Bom").unwrap()).unwrap();
         //Header::read(File::open("macos/src.bom").unwrap()).unwrap();
+    }
+
+    #[test]
+    fn write_read() {
+        test_write_read::<Header>();
+        test_write_read::<Vars>();
+        test_write_read::<Blocks>();
+        test_write_read::<Block>();
+        test_write_read::<BomInfo>();
+        test_write_read::<BomInfoEntry>();
+        test_write_read::<VIndex>();
+        test_write_read::<Tree>();
+        test_write_read::<Paths>();
+        test_write_read::<Metadata>();
+    }
+
+    #[test]
+    fn bom_write_read() {
+        arbtest(|u| {
+            let expected: Bom = u.arbitrary()?;
+            let mut writer = Cursor::new(Vec::new());
+            expected.write(&mut writer).unwrap();
+            let bytes = writer.into_inner();
+            let actual = Bom::read(&bytes[..]).unwrap();
+            assert_eq!(expected, actual);
+            Ok(())
+        }); //.seed(0x15f0f38c0000003e);
+    }
+
+    fn test_write_read<T: for<'a> Arbitrary<'a> + Debug + Eq + BigEndianIo>() {
+        arbtest(|u| {
+            let expected: T = u.arbitrary()?;
+            let mut bytes = Vec::new();
+            expected.write(&mut bytes).unwrap();
+            let actual = T::read(&bytes[..]).unwrap();
+            assert_eq!(expected, actual);
+            Ok(())
+        });
+    }
+
+    impl<'a> Arbitrary<'a> for Metadata {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            Ok(Self {
+                kind: u.arbitrary()?,
+                mode: u.arbitrary::<u16>()? & MODE_MASK,
+                uid: u.arbitrary()?,
+                gid: u.arbitrary()?,
+                mtime: u.arbitrary()?,
+                size: u.arbitrary()?,
+            })
+        }
+    }
+
+    impl<'a> Arbitrary<'a> for Nodes {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let directory: DirectoryOfFiles = u.arbitrary()?;
+            let nodes = Nodes::from_directory(directory.path()).unwrap();
+            Ok(nodes)
+            /*
+            let mut nodes: Vec<Node> = u.arbitrary()?;
+            if !nodes.is_empty() {
+                nodes[0].parent = 0;
+            }
+            // generate parents
+            for i in 1..nodes.len() {
+                // until i-1 to prevent the loops
+                let j = u.int_in_range(0..=(i - 1))?;
+                nodes[i].parent = nodes[j].id;
+            }
+            let nodes = nodes.into_iter().map(|node| (node.id, node)).collect();
+            Ok(Self { nodes })
+                */
+        }
     }
 }

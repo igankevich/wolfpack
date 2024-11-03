@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -22,12 +21,21 @@ use normalize_path::NormalizePath;
 use walkdir::WalkDir;
 
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Debug))]
-struct Bom {
+pub struct Bom {
     nodes: Nodes,
 }
 
 impl Bom {
-    fn write<W: Write + Seek>(&self, mut writer: W) -> Result<(), Error> {
+    pub fn paths(&self) -> Result<HashMap<PathBuf, Metadata>, Error> {
+        self.nodes.to_paths()
+    }
+
+    pub fn from_directory<P: AsRef<Path>>(directory: P) -> Result<Self, Error> {
+        let nodes = Nodes::from_directory(directory)?;
+        Ok(Self { nodes })
+    }
+
+    pub fn write<W: Write + Seek>(&self, mut writer: W) -> Result<(), Error> {
         // skip the header
         writer.seek(SeekFrom::Start(HEADER_LEN as u64))?;
         let mut blocks = Blocks::new();
@@ -157,7 +165,7 @@ impl Bom {
         Ok(())
     }
 
-    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
+    pub fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let mut file = Vec::new();
         reader.read_to_end(&mut file)?;
         let header = Header::read(&file[..HEADER_LEN])?;
@@ -420,10 +428,6 @@ impl Blocks {
         Ok(block.slice(file))
     }
 
-    fn push(&mut self, block: Block) {
-        self.blocks.push(block);
-    }
-
     fn num_non_null_blocks(&self) -> usize {
         self.blocks.iter().filter(|b| !b.is_null()).count()
     }
@@ -512,29 +516,6 @@ impl Block {
     ) -> Result<Self, Error> {
         let offset = writer.stream_position()?;
         f(writer.by_ref())?;
-        let len = writer.stream_position()? - offset;
-        if offset > u32::MAX as u64 {
-            return Err(Error::other("the file is too large"));
-        }
-        if len > u32::MAX as u64 {
-            return Err(Error::other("the block is too large"));
-        }
-        Ok(Self {
-            offset: offset as u32,
-            len: len as u32,
-        })
-    }
-
-    fn from_write_new<W: Write + Seek, F: FnOnce(&mut Vec<u8>) -> Result<(), Error>>(
-        mut writer: W,
-        f: F,
-    ) -> Result<Self, Error> {
-        let offset = writer.stream_position()?;
-        // TODO
-        let mut bytes = Vec::new();
-        f(&mut bytes)?;
-        eprintln!("write block {:?}", bytes);
-        writer.write_all(&bytes)?;
         let len = writer.stream_position()? - offset;
         if offset > u32::MAX as u64 {
             return Err(Error::other("the file is too large"));
@@ -763,8 +744,8 @@ impl Paths {
 
 impl BigEndianIo for Paths {
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
-        let is_leaf = u16_read_v2(reader.by_ref())? != 0;
-        let count = u16_read_v2(reader.by_ref())?;
+        let is_leaf = u16_read(reader.by_ref())? != 0;
+        let count = u16_read(reader.by_ref())?;
         let forward = u32_read_v2(reader.by_ref())?;
         let backward = u32_read_v2(reader.by_ref())?;
         let mut indices = Vec::new();
@@ -891,21 +872,21 @@ struct Node {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-struct Metadata {
-    kind: NodeKind,
-    mode: u16,
-    uid: u32,
-    gid: u32,
-    mtime: u32,
-    size: u32,
+pub struct Metadata {
+    pub kind: NodeKind,
+    pub mode: u16,
+    pub uid: u32,
+    pub gid: u32,
+    pub mtime: u32,
+    pub size: u32,
 }
 
 impl BigEndianIo for Metadata {
     fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let kind: NodeKind = u8_read(reader.by_ref())?.try_into()?;
         let _x0 = u8_read(reader.by_ref())?;
-        let _arch = u16_read_v2(reader.by_ref())?;
-        let mode = u16_read_v2(reader.by_ref())?;
+        let _arch = u16_read(reader.by_ref())?;
+        let mode = u16_read(reader.by_ref())?;
         let uid = u32_read_v2(reader.by_ref())?;
         let gid = u32_read_v2(reader.by_ref())?;
         let mtime = u32_read_v2(reader.by_ref())?;
@@ -961,7 +942,7 @@ impl TryFrom<std::fs::Metadata> for Metadata {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[repr(u8)]
-enum NodeKind {
+pub enum NodeKind {
     #[default]
     File = 1,
     Directory = 2,
@@ -1007,11 +988,7 @@ fn u8_read<R: Read>(mut reader: R) -> Result<u8, Error> {
     Ok(data[0])
 }
 
-fn u16_read(data: &[u8]) -> u16 {
-    u16::from_be_bytes([data[0], data[1]])
-}
-
-fn u16_read_v2<R: Read>(mut reader: R) -> Result<u16, Error> {
+fn u16_read<R: Read>(mut reader: R) -> Result<u16, Error> {
     let mut data = [0_u8; 2];
     reader.read_exact(&mut data[..])?;
     Ok(u16::from_be_bytes([data[0], data[1]]))
@@ -1063,8 +1040,6 @@ const PATHS: &CStr = c"Paths";
 // TODO why 512?
 const HEADER_LEN: usize = 32;
 const VERSION: u32 = 1;
-const ALIGN: usize = 4;
-const PADDING: [u8; ALIGN] = [0_u8; ALIGN];
 const MODE_MASK: u16 = 0o7777;
 
 #[cfg(test)]

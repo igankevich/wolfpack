@@ -46,6 +46,7 @@ fn new_decoder<'a, R: 'a + Read + BufRead>(mut reader: R) -> Result<Box<dyn Read
         // https://en.wikipedia.org/wiki/Bzip2
         [b'B', b'Z', b'h', ..] => Ok(Box::new(BzDecoder::new(reader))),
         [0x78, 0xda, ..] => Ok(Box::new(ZlibDecoder::new(reader))),
+        // TODO pbzx
         // TODO detect tar/cpio to remove the warning
         // no compression
         magic => {

@@ -1,5 +1,8 @@
+use std::io::Write;
+use std::io::Error;
 use std::path::PathBuf;
 
+use quick_xml::se::to_writer;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -28,19 +31,28 @@ pub mod xml {
         #[serde(rename = "bundle", default)]
         pub bundles: Vec<Bundle>,
         #[serde(rename = "bundle-version", default)]
-        pub bundle_versions: BundleVersion,
+        pub bundle_version: BundleVersion,
         #[serde(rename = "upgrade-bundle", default)]
-        pub upgrade_bundles: UpgradeBundle,
+        pub upgrade_bundle: UpgradeBundle,
         #[serde(rename = "update-bundle", default)]
-        pub update_bundles: UpdateBundle,
+        pub update_bundle: UpdateBundle,
         #[serde(rename = "atomic-update-bundle", default)]
-        pub atomic_update_bundles: AtomicUpdateBundle,
+        pub atomic_update_bundle: AtomicUpdateBundle,
         #[serde(rename = "strict-identifier", default)]
         pub strict_identifier: StrictIdentifier,
         #[serde(rename = "relocate", default)]
         pub relocate: Relocate,
         #[serde(rename = "scripts", default)]
         pub scripts: Scripts,
+    }
+
+    impl PackageInfo {
+        pub fn write<W: Write>(&self, mut writer: W) -> Result<(), Error> {
+            let mut s = String::new();
+            to_writer(&mut s, self).map_err(Error::other)?;
+            writer.write_all(s.as_bytes())?;
+            Ok(())
+        }
     }
 
     #[derive(Serialize, Deserialize, Debug)]

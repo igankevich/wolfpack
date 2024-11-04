@@ -1,5 +1,6 @@
 use std::ffi::CStr;
 use std::ffi::OsStr;
+use std::fs::File;
 use std::fs::Metadata;
 use std::io::Error;
 use std::io::Read;
@@ -11,18 +12,19 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::str::from_utf8;
 
+use normalize_path::NormalizePath;
+use walkdir::WalkDir;
+
 pub struct CpioBuilder<W: Write> {
-    writer: W,
+    writer: Box<W>,
     max_inode: u32,
-    finished: bool,
 }
 
 impl<W: Write> CpioBuilder<W> {
     pub fn new(writer: W) -> Self {
         Self {
-            writer,
+            writer: Box::new(writer),
             max_inode: 0,
-            finished: false,
         }
     }
 
@@ -56,6 +58,28 @@ impl<W: Write> CpioBuilder<W> {
         Ok(header)
     }
 
+    pub fn from_directory<P: AsRef<Path>>(writer: W, directory: P) -> Result<W, Error> {
+        let directory = directory.as_ref();
+        let mut builder = Self::new(writer);
+        for entry in WalkDir::new(directory).into_iter() {
+            let entry = entry?;
+            let entry_path = entry
+                .path()
+                .strip_prefix(directory)
+                .map_err(Error::other)?
+                .normalize();
+            // TODO dirs
+            if entry_path == Path::new("") || entry.path().is_dir() {
+                continue;
+            }
+            let metadata = entry.path().metadata()?;
+            let header: OdcHeader = metadata.try_into()?;
+            builder.write_entry(header, entry_path, File::open(entry.path())?)?;
+        }
+        let writer = builder.finish()?;
+        Ok(writer)
+    }
+
     pub fn get_mut(&mut self) -> &mut W {
         self.writer.by_ref()
     }
@@ -64,11 +88,9 @@ impl<W: Write> CpioBuilder<W> {
         &self.writer
     }
 
-    pub fn finish(&mut self) -> Result<(), Error> {
-        if self.finished {
-            return Ok(());
-        }
-        self.write_trailer()
+    pub fn finish(mut self) -> Result<W, Error> {
+        self.write_trailer()?;
+        Ok(*self.writer)
     }
 
     fn write_trailer(&mut self) -> Result<(), Error> {
@@ -108,11 +130,13 @@ impl<W: Write> CpioBuilder<W> {
     }
 }
 
+/* TODO ????
 impl<W: Write> Drop for CpioBuilder<W> {
     fn drop(&mut self) {
         let _ = self.write_trailer();
     }
 }
+*/
 
 pub struct CpioArchive<R: Read> {
     reader: R,
@@ -355,14 +379,11 @@ const ODC_HEADER_LEN: usize = 6 * 9 + 2 * 11;
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
 
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use arbtest::arbtest;
-    use normalize_path::NormalizePath;
     use tempfile::TempDir;
-    use walkdir::WalkDir;
 
     use super::*;
     use crate::test::DirectoryOfFiles;

@@ -4,6 +4,7 @@ use pgp::composed::KeyType;
 use pgp::crypto::hash::HashAlgorithm;
 use pgp::packet::SignatureType;
 use pgp::types::SecretKeyTrait;
+use pgp::types::SignatureBytes;
 use pgp::SecretKeyParamsBuilder;
 use pgp::SignedPublicKey;
 use pgp::SignedSecretKey;
@@ -14,6 +15,7 @@ use crate::sign::PgpSignature;
 use crate::sign::PgpSigner;
 use crate::sign::PgpVerifier;
 use crate::sign::Verifier;
+use crate::xar::XarSigner;
 
 pub struct PackageSigner {
     inner: PgpSigner,
@@ -32,6 +34,27 @@ impl PackageSigner {
 
     pub fn sign(&self, message: &[u8]) -> Result<PgpSignature, Error> {
         self.inner.sign_v2(message)
+    }
+}
+
+impl XarSigner for PackageSigner {
+    fn sign(&self, data: &[u8]) -> Result<Vec<u8>, std::io::Error> {
+        let s =
+            PackageSigner::sign(self, data).map_err(|_| std::io::Error::other("signing failed"))?;
+        let bytes = match s.into_inner().signature {
+            SignatureBytes::Mpis(x) => x.into_iter().flat_map(|x| x.to_vec()).collect::<Vec<u8>>(),
+            SignatureBytes::Native(x) => x,
+        };
+        debug_assert!(self.signature_len() == bytes.len());
+        Ok(bytes)
+    }
+
+    fn signature_style(&self) -> &str {
+        "RSA"
+    }
+
+    fn signature_len(&self) -> usize {
+        256
     }
 }
 

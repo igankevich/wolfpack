@@ -97,9 +97,17 @@ pub struct XarBuilder<W: Write> {
 
 impl<W: Write> XarBuilder<W> {
     pub fn new(writer: W) -> Self {
+        Self::do_new::<NoSigner>(writer, None)
+    }
+
+    pub fn new_signed<S: XarSigner>(writer: W, signer: &S) -> Self {
+        Self::do_new(writer, Some(signer))
+    }
+
+    fn do_new<S: XarSigner>(writer: W, signer: Option<&S>) -> Self {
         let checksum_algo = ChecksumAlgorithm::Sha256;
         Self {
-            offset: checksum_algo.size() as u64,
+            offset: (checksum_algo.size() + signer.map(|s| s.signature_len()).unwrap_or(0)) as u64,
             writer,
             checksum_algo,
             files: Default::default(),
@@ -161,24 +169,43 @@ impl<W: Write> XarBuilder<W> {
         Ok(())
     }
 
-    pub fn finish(mut self) -> Result<W, Error> {
+    pub fn finish(self) -> Result<W, Error> {
+        self.do_finish::<NoSigner>(None)
+    }
+
+    pub fn sign<S: XarSigner>(self, signer: &S) -> Result<W, Error> {
+        self.do_finish(Some(signer))
+    }
+
+    fn do_finish<S: XarSigner>(mut self, signer: Option<&S>) -> Result<W, Error> {
+        let checksum_len = self.checksum_algo.size() as u64;
         let xar = xml::Xar {
             toc: xml::Toc {
                 checksum: xml::TocChecksum {
                     algo: self.checksum_algo,
                     offset: 0,
-                    size: self.checksum_algo.size() as u64,
+                    size: checksum_len,
                 },
                 files: self.files,
-                // TODO signatures
                 // http://users.wfu.edu/cottrell/productsign/productsign_linux.html
-                signatures: Default::default(),
-                x_signatures: Default::default(),
+                signatures: signer.map(|signer| {
+                    xml::Signature {
+                        style: signer.signature_style().into(),
+                        offset: checksum_len,
+                        size: signer.signature_len() as u64,
+                        key_info: xml::KeyInfo {
+                            data: xml::X509Data {
+                                // TODO certs
+                                certificates: Default::default(),
+                            },
+                        },
+                    }
+                }),
                 creation_time: xml::Timestamp(SystemTime::now()),
             },
         };
         // write header and toc
-        xar.write(self.writer.by_ref(), self.checksum_algo)?;
+        xar.write(self.writer.by_ref(), self.checksum_algo, signer)?;
         for content in self.contents.into_iter() {
             self.writer.write_all(&content)?;
         }
@@ -646,6 +673,26 @@ impl<W: Write> Write for XarEncoder<W> {
     }
 }
 
+pub trait XarSigner {
+    fn sign(&self, data: &[u8]) -> Result<Vec<u8>, Error>;
+    fn signature_style(&self) -> &str;
+    fn signature_len(&self) -> usize;
+}
+
+struct NoSigner;
+
+impl XarSigner for NoSigner {
+    fn sign(&self, _data: &[u8]) -> Result<Vec<u8>, Error> {
+        Ok(Vec::new())
+    }
+    fn signature_style(&self) -> &str {
+        ""
+    }
+    fn signature_len(&self) -> usize {
+        0
+    }
+}
+
 pub mod xml {
     use std::io::BufReader;
 
@@ -667,15 +714,17 @@ pub mod xml {
             from_reader(reader).map_err(Error::other)
         }
 
-        pub fn write<W: Write>(
+        pub fn write<W: Write, S: XarSigner>(
             &self,
             mut writer: W,
             checksum_algo: ChecksumAlgorithm,
+            signer: Option<&S>,
         ) -> Result<(), Error> {
             let mut toc_uncompressed = String::new();
             toc_uncompressed.push_str(XML_DECLARATION);
             to_writer(&mut toc_uncompressed, self).map_err(Error::other)?;
             let toc_len_uncompressed = toc_uncompressed.as_bytes().len();
+            eprintln!("toc {}", toc_uncompressed);
             let mut encoder = ZlibEncoder::new(Vec::new(), flate2::Compression::best());
             encoder.write_all(toc_uncompressed.as_bytes())?;
             let toc_compressed = encoder.finish()?;
@@ -691,6 +740,12 @@ pub mod xml {
             // heap starts
             debug_assert!(checksum.as_ref().len() == checksum_algo.size());
             writer.write_all(checksum.as_ref())?;
+            if let Some(signer) = signer {
+                let signature = signer
+                    .sign(checksum.as_ref())
+                    .map_err(|_| Error::other("failed to sign"))?;
+                writer.write_all(&signature)?;
+            }
             Ok(())
         }
     }
@@ -704,9 +759,7 @@ pub mod xml {
         #[serde(rename = "file", default)]
         pub files: Vec<File>,
         #[serde(rename = "signature", default)]
-        pub signatures: Vec<Signature>,
-        #[serde(rename = "x-signature", default)]
-        pub x_signatures: Vec<Signature>,
+        pub signatures: Option<Signature>,
     }
 
     #[derive(Serialize, Deserialize, Debug)]
@@ -947,7 +1000,8 @@ mod tests {
                 if entry_path == Path::new("") {
                     continue;
                 }
-                xar.add_file_by_path(entry_path, entry.path()).unwrap();
+                xar.add_file_by_path(entry_path, entry.path(), XarCompression::Gzip)
+                    .unwrap();
             }
             let expected_files = xar.files().to_vec();
             xar.finish().unwrap();

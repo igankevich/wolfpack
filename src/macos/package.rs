@@ -25,7 +25,7 @@ impl Package {
         &self,
         writer: W,
         directory: P,
-        _signer: &PackageSigner,
+        signer: &PackageSigner,
     ) -> Result<(), Error> {
         let info = xml::PackageInfo {
             format_version: 2,
@@ -61,7 +61,7 @@ impl Package {
             directory,
         )?
         .finish()?;
-        let mut xar = XarBuilder::new(writer);
+        let mut xar = XarBuilder::new_signed(writer, signer);
         xar.add_file_by_path(
             "PackageInfo".into(),
             &package_info_file,
@@ -69,8 +69,7 @@ impl Package {
         )?;
         xar.add_file_by_path("Bom".into(), &bom_file, XarCompression::Gzip)?;
         xar.add_file_by_path("Payload".into(), &payload_file, XarCompression::None)?;
-        xar.finish()?;
-        // TODO sign
+        xar.sign(signer)?;
         Ok(())
     }
 }
@@ -85,6 +84,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::macos::PackageSigner;
+    use crate::macos::SigningKey;
     use crate::test::prevent_concurrency;
     use crate::test::DirectoryOfFiles;
 
@@ -100,8 +101,8 @@ mod tests {
             .unwrap()
             .success());
         let _guard = prevent_concurrency("macos");
-        //let (signing_key, verifying_key) = SigningKey::generate("wolfpack".into()).unwrap();
-        //let signer = PackageSigner::new(signing_key);
+        let (signing_key, _verifying_key) = SigningKey::generate("wolfpack".into()).unwrap();
+        let signer = PackageSigner::new(signing_key);
         let workdir = TempDir::new().unwrap();
         let package_file = workdir.path().join("test.pkg");
         //let verifying_key_file = workdir.path().join("verifying-key");
@@ -109,14 +110,14 @@ mod tests {
         //    .write_armored(File::create(verifying_key_file.as_path()).unwrap())
         //    .unwrap();
         arbtest(|u| {
-            let mut package: Package = u.arbitrary()?;
+            let package: Package = u.arbitrary()?;
             let directory: DirectoryOfFiles = u.arbitrary()?;
             package
                 .clone()
                 .write(
                     &mut File::create(package_file.as_path()).unwrap(),
                     directory.path(),
-                    //&signer,
+                    &signer,
                 )
                 .unwrap();
             assert!(

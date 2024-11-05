@@ -141,6 +141,10 @@ impl PgpSignature {
             .to_armored_writer(writer.by_ref(), Default::default())
             .map_err(std::io::Error::other)
     }
+
+    pub fn into_inner(self) -> Signature {
+        self.0
+    }
 }
 
 pub struct PgpCleartextSigner {

@@ -3,22 +3,29 @@ use std::io::Error;
 use std::io::Write;
 use std::path::Path;
 
-use flate2::write::GzEncoder;
-use flate2::Compression;
+//use flate2::write::GzEncoder;
+//use flate2::Compression;
 use tempfile::TempDir;
 
 use crate::cpio::CpioBuilder;
 use crate::macos::xml;
 use crate::macos::Bom;
+use crate::macos::PackageSigner;
 use crate::xar::XarBuilder;
 
+#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Clone, Debug))]
 pub struct Package {
     pub identifier: String,
     pub version: String,
 }
 
 impl Package {
-    pub fn write<W: Write, P: AsRef<Path>>(&self, directory: P, writer: W) -> Result<(), Error> {
+    pub fn write<W: Write, P: AsRef<Path>>(
+        &self,
+        writer: W,
+        directory: P,
+        _signer: &PackageSigner,
+    ) -> Result<(), Error> {
         let info = xml::PackageInfo {
             format_version: 2,
             install_location: Some("/".into()),
@@ -49,10 +56,12 @@ impl Package {
         bom.write(File::create(&bom_file)?)?;
         let payload_file = workdir.path().join("Payload");
         CpioBuilder::from_directory(
-            GzEncoder::new(File::create(&payload_file)?, Compression::best()),
+            //GzEncoder::new(File::create(&payload_file)?, Compression::best()),
+            File::create(&payload_file)?,
             directory,
-        )?
-        .finish()?;
+        )?;
+        //.finish()?;
+        //Command::new("file").arg(&payload_file).status().unwrap();
         let mut xar = XarBuilder::new(writer);
         xar.add_file_by_path("PackageInfo".into(), &package_info_file)?;
         xar.add_file_by_path("Bom".into(), &bom_file)?;
@@ -60,5 +69,82 @@ impl Package {
         xar.finish()?;
         // TODO sign
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+    use std::process::Command;
+    use std::time::Duration;
+
+    use arbtest::arbtest;
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::test::prevent_concurrency;
+    use crate::test::DirectoryOfFiles;
+
+    #[ignore]
+    #[test]
+    fn macos_installer_installs_random_package() {
+        assert!(Command::new("mount")
+            .arg("-t")
+            .arg("tmpfs")
+            .arg("tmpfs")
+            .arg("/root")
+            .status()
+            .unwrap()
+            .success());
+        let _guard = prevent_concurrency("macos");
+        //let (signing_key, verifying_key) = SigningKey::generate("wolfpack".into()).unwrap();
+        //let signer = PackageSigner::new(signing_key);
+        let workdir = TempDir::new().unwrap();
+        let package_file = workdir.path().join("test.pkg");
+        //let verifying_key_file = workdir.path().join("verifying-key");
+        //verifying_key
+        //    .write_armored(File::create(verifying_key_file.as_path()).unwrap())
+        //    .unwrap();
+        arbtest(|u| {
+            let mut package: Package = u.arbitrary()?;
+            let directory: DirectoryOfFiles = u.arbitrary()?;
+            package
+                .clone()
+                .write(
+                    &mut File::create(package_file.as_path()).unwrap(),
+                    directory.path(),
+                    //&signer,
+                )
+                .unwrap();
+            assert!(
+                Command::new("darling")
+                    .arg("shell")
+                    .arg("xar")
+                    .arg("-tf")
+                    .arg(format!("/Volumes/SystemRoot{}", package_file.display()))
+                    .status()
+                    .unwrap()
+                    .success(),
+                "manifest:\n========{:?}========",
+                package
+            );
+            assert!(
+                Command::new("darling")
+                    .arg("shell")
+                    .arg("installer")
+                    .arg("-verbose")
+                    .arg("-target")
+                    .arg("/")
+                    .arg("-pkg")
+                    .arg(format!("/Volumes/SystemRoot{}", package_file.display()))
+                    .status()
+                    .unwrap()
+                    .success(),
+                "manifest:\n========{:?}========",
+                package
+            );
+            Ok(())
+        })
+        .budget(Duration::from_secs(5));
     }
 }

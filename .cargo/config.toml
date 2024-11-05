@@ -41,3 +41,13 @@ test-rpm = [
     "rpm",
     "dnf",
 ]
+test-macos = [
+    "test",
+    "--lib",
+    "--config",
+    "target.'cfg(target_os = \"linux\")'.runner=\"./ci/runner.sh ghcr.io/igankevich/wolfpack-ci-darling:latest\"",
+    "--",
+    "--nocapture",
+    "--ignored",
+    "macos",
+]

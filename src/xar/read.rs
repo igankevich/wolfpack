@@ -15,6 +15,7 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use bzip2::read::BzDecoder;
 use bzip2::write::BzEncoder;
 use chrono::format::SecondsFormat;
 use chrono::DateTime;
@@ -26,7 +27,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde::Serializer;
 
-use crate::compress::AnyDecoder;
 use crate::hash::Hasher;
 use crate::hash::Sha1;
 use crate::hash::Sha1Hash;
@@ -188,7 +188,7 @@ impl<W: Write> XarBuilder<W> {
                 },
                 files: self.files,
                 // http://users.wfu.edu/cottrell/productsign/productsign_linux.html
-                signatures: signer.map(|signer| {
+                signature: signer.map(|signer| {
                     xml::Signature {
                         style: signer.signature_style().into(),
                         offset: checksum_len,
@@ -227,9 +227,17 @@ pub struct Entry<'a, R: Read + Seek> {
 }
 
 impl<'a, R: Read + Seek> Entry<'a, R> {
-    pub fn reader(&mut self) -> Result<AnyDecoder<&mut R>, Error> {
+    pub fn reader(&mut self) -> Result<XarDecoder<&mut R>, Error> {
         self.archive.seek_to_file(self.i)?;
-        Ok(AnyDecoder::new(self.archive.reader.by_ref()))
+        // we need decoder based on compression, otherwise we can accidentally decompress the
+        // file with octet-stream compression
+        let compression: XarCompression = self.archive.files[self.i]
+            .data
+            .encoding
+            .style
+            .as_str()
+            .into();
+        Ok(compression.decoder(self.archive.reader.by_ref()))
     }
 
     pub fn file(&self) -> &xml::File {
@@ -630,11 +638,29 @@ impl XarCompression {
         }
     }
 
-    fn encoder<W: Write + 'static>(self, writer: W) -> XarEncoder<W> {
+    fn encoder<W: Write>(self, writer: W) -> XarEncoder<W> {
         match self {
             Self::None => XarEncoder::OctetStream(writer),
             Self::Gzip => XarEncoder::Gzip(ZlibEncoder::new(writer, flate2::Compression::best())),
             Self::Bzip2 => XarEncoder::Bzip2(BzEncoder::new(writer, bzip2::Compression::best())),
+        }
+    }
+
+    fn decoder<R: Read>(self, reader: R) -> XarDecoder<R> {
+        match self {
+            Self::None => XarDecoder::OctetStream(reader),
+            Self::Gzip => XarDecoder::Gzip(ZlibDecoder::new(reader)),
+            Self::Bzip2 => XarDecoder::Bzip2(BzDecoder::new(reader)),
+        }
+    }
+}
+
+impl From<&str> for XarCompression {
+    fn from(s: &str) -> Self {
+        match s {
+            "application/x-gzip" => Self::Gzip,
+            "application/x-bzip2" => Self::Bzip2,
+            _ => Self::None,
         }
     }
 }
@@ -669,6 +695,22 @@ impl<W: Write> Write for XarEncoder<W> {
             Self::OctetStream(w) => w.flush(),
             Self::Gzip(w) => w.flush(),
             Self::Bzip2(w) => w.flush(),
+        }
+    }
+}
+
+pub enum XarDecoder<R: Read> {
+    OctetStream(R),
+    Gzip(ZlibDecoder<R>),
+    Bzip2(BzDecoder<R>),
+}
+
+impl<R: Read> Read for XarDecoder<R> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
+        match self {
+            Self::OctetStream(r) => r.read(buf),
+            Self::Gzip(r) => r.read(buf),
+            Self::Bzip2(r) => r.read(buf),
         }
     }
 }
@@ -724,7 +766,6 @@ pub mod xml {
             toc_uncompressed.push_str(XML_DECLARATION);
             to_writer(&mut toc_uncompressed, self).map_err(Error::other)?;
             let toc_len_uncompressed = toc_uncompressed.as_bytes().len();
-            eprintln!("toc {}", toc_uncompressed);
             let mut encoder = ZlibEncoder::new(Vec::new(), flate2::Compression::best());
             encoder.write_all(toc_uncompressed.as_bytes())?;
             let toc_compressed = encoder.finish()?;
@@ -756,10 +797,10 @@ pub mod xml {
         pub checksum: TocChecksum,
         #[serde(default)]
         pub creation_time: Timestamp,
-        #[serde(rename = "file", default)]
+        #[serde(rename = "file", default, skip_serializing_if = "Vec::is_empty")]
         pub files: Vec<File>,
-        #[serde(rename = "signature", default)]
-        pub signatures: Option<Signature>,
+        #[serde(rename = "signature", default, skip_serializing_if = "Option::is_none")]
+        pub signature: Option<Signature>,
     }
 
     #[derive(Serialize, Deserialize, Debug)]

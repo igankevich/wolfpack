@@ -3,8 +3,8 @@ use std::io::Error;
 use std::io::Write;
 use std::path::Path;
 
-//use flate2::write::GzEncoder;
-//use flate2::Compression;
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
 use tempfile::TempDir;
 
 use crate::cpio::CpioBuilder;
@@ -12,6 +12,7 @@ use crate::macos::xml;
 use crate::macos::Bom;
 use crate::macos::PackageSigner;
 use crate::xar::XarBuilder;
+use crate::xar::XarCompression;
 
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Clone, Debug))]
 pub struct Package {
@@ -56,16 +57,18 @@ impl Package {
         bom.write(File::create(&bom_file)?)?;
         let payload_file = workdir.path().join("Payload");
         CpioBuilder::from_directory(
-            //GzEncoder::new(File::create(&payload_file)?, Compression::best()),
-            File::create(&payload_file)?,
+            ZlibEncoder::new(File::create(&payload_file)?, Compression::best()),
             directory,
-        )?;
-        //.finish()?;
-        //Command::new("file").arg(&payload_file).status().unwrap();
+        )?
+        .finish()?;
         let mut xar = XarBuilder::new(writer);
-        xar.add_file_by_path("PackageInfo".into(), &package_info_file)?;
-        xar.add_file_by_path("Bom".into(), &bom_file)?;
-        xar.add_file_by_path("Payload".into(), &payload_file)?;
+        xar.add_file_by_path(
+            "PackageInfo".into(),
+            &package_info_file,
+            XarCompression::Gzip,
+        )?;
+        xar.add_file_by_path("Bom".into(), &bom_file, XarCompression::Gzip)?;
+        xar.add_file_by_path("Payload".into(), &payload_file, XarCompression::None)?;
         xar.finish()?;
         // TODO sign
         Ok(())

@@ -15,12 +15,12 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use bzip2::write::BzEncoder;
 use chrono::format::SecondsFormat;
 use chrono::DateTime;
 use chrono::Utc;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
-use flate2::Compression;
 use serde::ser::SerializeStruct;
 use serde::Deserialize;
 use serde::Serialize;
@@ -115,6 +115,7 @@ impl<W: Write> XarBuilder<W> {
         &mut self,
         archive_path: PathBuf,
         path: P,
+        compression: XarCompression,
     ) -> Result<(), Error> {
         let path = path.as_ref();
         let metadata = path.metadata()?;
@@ -125,17 +126,18 @@ impl<W: Write> XarBuilder<W> {
         };
         let mut status: FileStatus = metadata.into();
         status.name = archive_path;
-        self.add_file(status, &contents)
+        self.add_file(status, &contents, compression)
     }
 
     pub fn add_file<C: AsRef<[u8]>>(
         &mut self,
         status: FileStatus,
         contents: C,
+        compression: XarCompression,
     ) -> Result<(), Error> {
         let contents = contents.as_ref();
         let extracted_checksum = Checksum::new_from_data(self.checksum_algo, contents);
-        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+        let mut encoder = compression.encoder(Vec::new());
         encoder.write_all(contents)?;
         let archived = encoder.finish()?;
         let archived_checksum = Checksum::new_from_data(self.checksum_algo, &archived);
@@ -145,9 +147,8 @@ impl<W: Write> XarBuilder<W> {
             xml::Data {
                 archived_checksum: archived_checksum.into(),
                 extracted_checksum: extracted_checksum.into(),
-                // TODO add other encodings
                 encoding: xml::Encoding {
-                    style: "application/x-gzip".into(),
+                    style: compression.as_str().into(),
                 },
                 size: contents.len() as u64,
                 length: archived.len() as u64,
@@ -585,6 +586,66 @@ impl From<FileType> for FileKind {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+pub enum XarCompression {
+    None,
+    #[default]
+    Gzip,
+    Bzip2,
+}
+
+impl XarCompression {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "application/octet-stream",
+            Self::Gzip => "application/x-gzip",
+            Self::Bzip2 => "application/x-bzip2",
+        }
+    }
+
+    fn encoder<W: Write + 'static>(self, writer: W) -> XarEncoder<W> {
+        match self {
+            Self::None => XarEncoder::OctetStream(writer),
+            Self::Gzip => XarEncoder::Gzip(ZlibEncoder::new(writer, flate2::Compression::best())),
+            Self::Bzip2 => XarEncoder::Bzip2(BzEncoder::new(writer, bzip2::Compression::best())),
+        }
+    }
+}
+
+enum XarEncoder<W: Write> {
+    OctetStream(W),
+    Gzip(ZlibEncoder<W>),
+    Bzip2(BzEncoder<W>),
+}
+
+impl<W: Write> XarEncoder<W> {
+    fn finish(self) -> Result<W, Error> {
+        match self {
+            Self::OctetStream(w) => Ok(w),
+            Self::Gzip(w) => w.finish(),
+            Self::Bzip2(w) => w.finish(),
+        }
+    }
+}
+
+impl<W: Write> Write for XarEncoder<W> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Error> {
+        match self {
+            Self::OctetStream(w) => w.write(buf),
+            Self::Gzip(w) => w.write(buf),
+            Self::Bzip2(w) => w.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> Result<(), Error> {
+        match self {
+            Self::OctetStream(w) => w.flush(),
+            Self::Gzip(w) => w.flush(),
+            Self::Bzip2(w) => w.flush(),
+        }
+    }
+}
+
 pub mod xml {
     use std::io::BufReader;
 
@@ -615,7 +676,7 @@ pub mod xml {
             toc_uncompressed.push_str(XML_DECLARATION);
             to_writer(&mut toc_uncompressed, self).map_err(Error::other)?;
             let toc_len_uncompressed = toc_uncompressed.as_bytes().len();
-            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+            let mut encoder = ZlibEncoder::new(Vec::new(), flate2::Compression::best());
             encoder.write_all(toc_uncompressed.as_bytes())?;
             let toc_compressed = encoder.finish()?;
             let header = Header {

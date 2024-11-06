@@ -1,4 +1,6 @@
 use std::fmt::Display;
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::fmt::Formatter;
 use std::fs::FileType;
 use std::fs::Metadata;
@@ -100,10 +102,6 @@ impl<W: Write> XarBuilder<W> {
         Self::do_new::<NoSigner>(writer, None)
     }
 
-    pub fn new_signed<S: XarSigner>(writer: W, signer: &S) -> Self {
-        Self::do_new(writer, Some(signer))
-    }
-
     fn do_new<S: XarSigner>(writer: W, signer: Option<&S>) -> Self {
         let checksum_algo = ChecksumAlgorithm::Sha256;
         Self {
@@ -173,10 +171,6 @@ impl<W: Write> XarBuilder<W> {
         self.do_finish::<NoSigner>(None)
     }
 
-    pub fn sign<S: XarSigner>(self, signer: &S) -> Result<W, Error> {
-        self.do_finish(Some(signer))
-    }
-
     fn do_finish<S: XarSigner>(mut self, signer: Option<&S>) -> Result<W, Error> {
         let checksum_len = self.checksum_algo.size() as u64;
         let xar = xml::Xar {
@@ -218,6 +212,31 @@ impl<W: Write> XarBuilder<W> {
 
     pub fn get(&self) -> &W {
         &self.writer
+    }
+}
+
+pub struct SignedXarBuilder<W: Write>(XarBuilder<W>);
+
+impl<W: Write> SignedXarBuilder<W> {
+    pub fn new<S: XarSigner>(writer: W, signer: &S) -> Self {
+        Self(XarBuilder::<W>::do_new(writer, Some(signer)))
+    }
+
+    pub fn sign<S: XarSigner>(self, signer: &S) -> Result<W, Error> {
+        self.0.do_finish(Some(signer))
+    }
+}
+
+impl<W: Write> Deref for SignedXarBuilder<W> {
+    type Target = XarBuilder<W>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<W: Write> DerefMut for SignedXarBuilder<W> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

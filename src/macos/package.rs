@@ -11,7 +11,7 @@ use crate::cpio::CpioBuilder;
 use crate::macos::xml;
 use crate::macos::Bom;
 use crate::macos::PackageSigner;
-use crate::xar::XarBuilder;
+use crate::xar::SignedXarBuilder;
 use crate::xar::XarCompression;
 
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Clone, Debug))]
@@ -61,7 +61,7 @@ impl Package {
             directory,
         )?
         .finish()?;
-        let mut xar = XarBuilder::new_signed(writer, signer);
+        let mut xar = SignedXarBuilder::new(writer, signer);
         xar.add_file_by_path(
             "PackageInfo".into(),
             &package_info_file,

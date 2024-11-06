@@ -469,8 +469,8 @@ mod tests {
         .budget(Duration::from_secs(5));
     }
 
-    const RPM: &str = "/home/igankevich/workspace/etd/rpm/tmp/tools/rpm";
-    const RPMKEYS: &str = "/home/igankevich/workspace/etd/rpm/tmp/tools/rpmkeys";
-    //const RPM: &str = "rpm";
-    //const RPMKEYS: &str = "rpmkeys";
+    //const RPM: &str = "/home/igankevich/workspace/etd/rpm/tmp/tools/rpm";
+    //const RPMKEYS: &str = "/home/igankevich/workspace/etd/rpm/tmp/tools/rpmkeys";
+    const RPM: &str = "rpm";
+    const RPMKEYS: &str = "rpmkeys";
 }

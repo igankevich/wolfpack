@@ -143,7 +143,7 @@ impl Serialize for RepoMd {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("repomd", 2)?;
+        let mut state = serializer.serialize_struct("repomd", 3)?;
         state.serialize_field("revision", &self.revision)?;
         state.serialize_field("data", &self.data)?;
         state.serialize_field("@xmlns", "http://linux.duke.edu/metadata/repo")?;
@@ -259,7 +259,7 @@ pub mod xml {
         pub kind: String,
         #[serde(rename = "$value")]
         pub value: String,
-        #[serde(rename = "@pkgid", skip_serializing_if="Option::is_none", default)]
+        #[serde(rename = "@pkgid", skip_serializing_if = "Option::is_none", default)]
         pub pkgid: Option<String>,
     }
 
@@ -329,9 +329,17 @@ pub mod xml {
         pub sourcerpm: String,
         #[serde(rename = "rpm:header-range")]
         pub header_range: HeaderRange,
-        #[serde(rename = "rpm:provides", default, skip_serializing_if = "Provides::is_empty")]
+        #[serde(
+            rename = "rpm:provides",
+            default,
+            skip_serializing_if = "Provides::is_empty"
+        )]
         pub provides: Provides,
-        #[serde(rename = "rpm:requires", default, skip_serializing_if = "Requires::is_empty")]
+        #[serde(
+            rename = "rpm:requires",
+            default,
+            skip_serializing_if = "Requires::is_empty"
+        )]
         pub requires: Requires,
         #[serde(rename = "file", default, skip_serializing_if = "Vec::is_empty")]
         pub files: Vec<PathBuf>,
@@ -540,7 +548,7 @@ gpgkey=file://{}
                     .arg("--repo=test")
                     .arg("install")
                     .arg("--assumeyes")
-                    .arg(package.name.to_string())
+                    .arg(&package.name)
                     .status()
                     .unwrap()
                     .success(),
@@ -551,7 +559,7 @@ gpgkey=file://{}
                 Command::new("dnf")
                     .arg("erase")
                     .arg("--assumeyes")
-                    .arg(package.name.to_string())
+                    .arg(&package.name)
                     .status()
                     .unwrap()
                     .success(),

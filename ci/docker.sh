@@ -17,7 +17,8 @@ EOF
 }
 
 build_other() {
-    for suffix in '' '-debian' '-freebsd'; do
+    #for suffix in '' '-debian' '-freebsd' '-darling'; do
+    for suffix in '-darling'; do
         image=ghcr.io/igankevich/wolfpack-ci"$suffix":latest
         docker build --tag "$image" - <ci/Dockerfile"$suffix"
         #docker push $image

@@ -5,6 +5,7 @@ use std::io::Read;
 
 use bzip2::read::BzDecoder;
 use flate2::read::GzDecoder;
+use flate2::read::ZlibDecoder;
 use xz::read::XzDecoder;
 use zstd::stream::read::Decoder as ZstdDecoder;
 
@@ -44,6 +45,8 @@ fn new_decoder<'a, R: 'a + Read + BufRead>(mut reader: R) -> Result<Box<dyn Read
         [0x1f, 0x8b, 0x08, ..] => Ok(Box::new(GzDecoder::new(reader))),
         // https://en.wikipedia.org/wiki/Bzip2
         [b'B', b'Z', b'h', ..] => Ok(Box::new(BzDecoder::new(reader))),
+        [0x78, 0xda, ..] => Ok(Box::new(ZlibDecoder::new(reader))),
+        // TODO pbzx
         // TODO detect tar/cpio to remove the warning
         // no compression
         magic => {

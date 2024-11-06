@@ -20,7 +20,7 @@ test-ipk = [
     "--ignored",
     "opkg",
 ]
-test-pkg = [
+test-bsd-pkg = [
     "test",
     "--lib",
     "--config",
@@ -28,7 +28,7 @@ test-pkg = [
     "--",
     "--nocapture",
     "--ignored",
-    "freebsd_pkg",
+    "bsd_pkg",
 ]
 test-rpm = [
     "test",
@@ -38,6 +38,16 @@ test-rpm = [
     "--",
     "--nocapture",
     "--ignored",
-    #"rpm",
+    "rpm",
     "dnf",
+]
+test-macos = [
+    "test",
+    "--lib",
+    "--config",
+    "target.'cfg(target_os = \"linux\")'.runner=\"./ci/runner.sh ghcr.io/igankevich/wolfpack-ci-darling:latest\"",
+    "--",
+    "--nocapture",
+    "--ignored",
+    "macos",
 ]

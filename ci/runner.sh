@@ -27,6 +27,6 @@ patchelf \
     --set-rpath '$ORIGIN' \
     --force-rpath \
     "$workdir"/"$filename"
-docker run --rm --volume "$workdir":/wolfpack --volume "$PWD":/src \
+docker run --rm --volume "$workdir":/wolfpack --volume "$PWD":/src --privileged \
     "$image" \
     /wolfpack/"$filename" "$@"

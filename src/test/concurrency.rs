@@ -12,5 +12,10 @@ pub fn prevent_concurrency(bucket: &str) -> MutexGuard<()> {
     panic!("no such concurrency bucket: {:?}", bucket);
 }
 
-static BUCKETS: LazyLock<Vec<(&'static str, Mutex<()>)>> =
-    LazyLock::new(|| vec![("freebsd-pkg", Mutex::new(())), ("rpm", Mutex::new(()))]);
+static BUCKETS: LazyLock<Vec<(&'static str, Mutex<()>)>> = LazyLock::new(|| {
+    vec![
+        ("freebsd-pkg", Mutex::new(())),
+        ("rpm", Mutex::new(())),
+        ("macos", Mutex::new(())),
+    ]
+});

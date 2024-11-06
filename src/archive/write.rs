@@ -44,6 +44,8 @@ pub trait ArchiveWrite<W: Write> {
         P: AsRef<Path>,
         Self: Sized,
     {
+        // TODO symlinks
+        // TODO hardlinks
         let directory = directory.as_ref();
         let mut archive = Self::new(writer);
         for entry in WalkDir::new(directory).into_iter() {

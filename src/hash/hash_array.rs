@@ -8,6 +8,8 @@ use std::str::FromStr;
 
 use base16ct::lower::encode_string;
 use base16ct::mixed::decode;
+use base64ct::Base64;
+use base64ct::Encoding;
 use constant_time_eq::constant_time_eq_n;
 
 #[derive(PartialOrd, Ord, Clone)]
@@ -25,6 +27,10 @@ impl<const N: usize> HashArray<N> {
 
     pub const fn is_empty(&self) -> bool {
         N == 0
+    }
+
+    pub fn to_base64(&self) -> String {
+        Base64::encode_string(&self[..])
     }
 
     pub const LEN: usize = N;

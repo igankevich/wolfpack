@@ -1,4 +1,8 @@
 mod block_map;
+mod content_types;
 mod package;
 
-pub use self::block_map::*;
+pub mod xml {
+    pub use super::block_map::*;
+    pub use super::content_types::*;
+}

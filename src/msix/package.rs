@@ -74,9 +74,19 @@ impl Package {
             hash_method: "http://www.w3.org/2001/04/xmlenc#sha256".into(),
             files,
         };
+        let content_types = xml::Types {
+            overrides: vec![xml::Override {
+                content_type: "application/vnd.ms-appx.blockmap+xml".into(),
+                part_name: "/AppxBlockMap.xml".into(),
+            }],
+            defaults: vec![],
+        };
         let mut writer = ZipWriter::new(file);
         writer.start_file_from_path("AppxBlockMap.xml", SimpleFileOptions::default())?;
         block_map.write(writer.by_ref())?;
+        writer.start_file_from_path("[Content_Types].xml", SimpleFileOptions::default())?;
+        content_types.write(writer.by_ref())?;
+        // TODO manifest
         writer.finish()?;
         Ok(())
     }

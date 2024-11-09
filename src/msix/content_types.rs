@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::io::Error;
 use std::io::Write;
 
@@ -50,7 +49,7 @@ pub struct Override {
     #[serde(rename = "@ContentType")]
     pub content_type: String,
     #[serde(rename = "@Partname")]
-    pub part_name: OsString,
+    pub part_name: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -59,5 +58,5 @@ pub struct DefaultType {
     #[serde(rename = "@ContentType")]
     pub content_type: String,
     #[serde(rename = "@Extension")]
-    pub extension: OsString,
+    pub extension: String,
 }

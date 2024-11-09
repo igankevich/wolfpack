@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::io::Error;
 use std::io::Write;
 
@@ -45,7 +44,7 @@ impl Serialize for BlockMap {
 #[serde(rename = "File")]
 pub struct File {
     #[serde(rename = "@Name")]
-    pub name: OsString,
+    pub name: String,
     #[serde(rename = "@Size")]
     pub size: u64,
     #[serde(rename = "@LfhSize")]

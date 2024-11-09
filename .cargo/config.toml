@@ -51,3 +51,13 @@ test-macos = [
     "--ignored",
     "macos",
 ]
+test-wine = [
+    "test",
+    "--lib",
+    "--config",
+    "target.'cfg(target_os = \"linux\")'.runner=\"./ci/runner.sh ghcr.io/igankevich/wolfpack-ci-wine:latest\"",
+    "--",
+    "--nocapture",
+    "--ignored",
+    "msixmgr",
+]

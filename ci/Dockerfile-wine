@@ -1,0 +1,16 @@
+FROM fedora:41
+
+RUN dnf install -y wine
+
+# init wine on the first start
+RUN wine cmd.exe /c exit
+
+# install msixmgr
+RUN curl -L https://github.com/microsoft/msix-packaging/releases/download/MSIX-Core-1.2-release/msixmgr.zip -o /tmp/msixmgr.zip \
+    && cd /tmp \
+    && (unzip -q msixmgr.zip || true) \
+    && mv -v x86/* /root/.wine/drive_c/windows/ \
+    && cd / \
+    && rm -rf /tmp/*
+
+CMD ["/bin/bash"]

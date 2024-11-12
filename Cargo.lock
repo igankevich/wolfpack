@@ -643,6 +643,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da692b8d1080ea3045efaab14434d40468c3d8657e42abddfffca87b428f4c1b"
 
 [[package]]
+name = "deko"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "223a82f31424d7cce5343e2aa74aa73df39a39618b16b8debb67e80528d5302f"
+dependencies = [
+ "bzip2",
+ "flate2",
+ "xz",
+ "zstd",
+]
+
+[[package]]
 name = "der"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2433,6 +2445,7 @@ dependencies = [
  "constant_time_eq",
  "cpio",
  "crc",
+ "deko",
  "der",
  "flate2",
  "gcollections",

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::CString;
+use std::io::BufReader;
 use std::io::Error;
 use std::io::Read;
 use std::io::Write;
@@ -8,6 +9,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use cpio::newc::Reader as CpioReader;
+use deko::bufread::AnyDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use normalize_path::NormalizePath;
@@ -16,7 +18,6 @@ use walkdir::WalkDir;
 //use zstd::stream::write::Encoder as ZstdEncoder;
 use crate::archive::ArchiveWrite;
 use crate::archive::CpioBuilder;
-use crate::compress::AnyDecoder;
 use crate::hash::Hasher;
 use crate::hash::Sha256Hash;
 use crate::hash::Sha256Reader;
@@ -171,7 +172,8 @@ impl Package {
         let _lead = Lead::read(reader.by_ref())?;
         let _header1 = Header::<SignatureEntry>::read(reader.by_ref())?;
         let (header2, _offset) = Header::<Entry>::read(reader.by_ref())?;
-        let mut decoder = AnyDecoder::new(reader.by_ref());
+        // TODO remove BufReader when deko supports that
+        let mut decoder = AnyDecoder::new(BufReader::new(reader.by_ref()));
         let mut files = Vec::new();
         loop {
             let cpio = CpioReader::new(decoder)?;

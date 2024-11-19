@@ -58,7 +58,7 @@ impl Package {
         {
             let writer = ZlibEncoder::new(File::create(&payload_file)?, Compression::best());
             let mut archive = cpio::Builder::new(writer);
-            archive.set_format(cpio::Format::Newc);
+            archive.set_format(cpio::Format::Odc);
             archive.append_dir_all(directory)?;
             archive.finish()?.finish()?;
         }

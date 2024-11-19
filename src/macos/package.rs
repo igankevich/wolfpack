@@ -7,7 +7,6 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use tempfile::TempDir;
 
-use crate::cpio::CpioBuilder;
 use crate::macos::xml;
 use crate::macos::Bom;
 use crate::macos::PackageSigner;
@@ -56,11 +55,13 @@ impl Package {
         let bom_file = workdir.path().join("Bom");
         bom.write(File::create(&bom_file)?)?;
         let payload_file = workdir.path().join("Payload");
-        CpioBuilder::from_directory(
-            ZlibEncoder::new(File::create(&payload_file)?, Compression::best()),
-            directory,
-        )?
-        .finish()?;
+        {
+            let writer = ZlibEncoder::new(File::create(&payload_file)?, Compression::best());
+            let mut archive = cpio::Builder::new(writer);
+            archive.set_format(cpio::Format::Newc);
+            archive.append_dir_all(directory)?;
+            archive.finish()?.finish()?;
+        }
         let mut xar = SignedXarBuilder::new(writer, signer);
         xar.add_file_by_path(
             "PackageInfo".into(),

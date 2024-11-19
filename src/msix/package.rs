@@ -33,7 +33,7 @@ impl Package {
     ) -> Result<(), Error> {
         let file = file.as_ref();
         let directory = directory.as_ref();
-        let mut writer = ZipWriter::new(File::create(&file)?);
+        let mut writer = ZipWriter::new(File::create(file)?);
         for entry in WalkDir::new(directory).into_iter() {
             let entry = entry?;
             let entry_path = entry
@@ -54,7 +54,7 @@ impl Package {
             }
         }
         writer.finish()?;
-        let mut archive = ZipArchive::new(File::open(&file)?)?;
+        let mut archive = ZipArchive::new(File::open(file)?)?;
         let mut files = Vec::with_capacity(archive.len());
         for i in 0..archive.len() {
             // TODO raw affects size or not ???
@@ -126,7 +126,7 @@ impl Package {
             },
         };
         let mut writer =
-            ZipWriter::new_append(OpenOptions::new().read(true).write(true).open(&file)?)?;
+            ZipWriter::new_append(OpenOptions::new().read(true).write(true).open(file)?)?;
         writer.start_file_from_path("AppxBlockMap.xml", SimpleFileOptions::default())?;
         block_map.write(writer.by_ref())?;
         writer.start_file_from_path("[Content_Types].xml", SimpleFileOptions::default())?;

@@ -483,12 +483,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
-name = "cpio"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80e3adec7390c7643049466136117057188edf5f23efc5c8b4fc8079c8dc34a6"
-
-[[package]]
 name = "cpufeatures"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1198,6 +1192,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "kpea"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8626a6f72a7c634b04c303082b0db0b1fec21d9ea8dd30ae6f5fe3b546f3562"
+dependencies = [
+ "libc",
+ "normalize-path",
+]
+
+[[package]]
 name = "ksign"
 version = "0.2.0"
 dependencies = [
@@ -1231,9 +1235,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.161"
+version = "0.2.164"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e9489c2807c139ffd9c1794f4af0ebe86a828db53ecdc7fea2111d0fed085d1"
+checksum = "433bfe06b8c75da9b2e3fbea6e5329ff87748f0b144ef75306e674c3f6f7c13f"
 
 [[package]]
 name = "libm"
@@ -2443,7 +2447,6 @@ dependencies = [
  "chrono",
  "clap",
  "constant_time_eq",
- "cpio",
  "crc",
  "deko",
  "der",
@@ -2451,6 +2454,7 @@ dependencies = [
  "gcollections",
  "hex",
  "intervallum",
+ "kpea",
  "ksign",
  "lddtree",
  "log",

@@ -1,5 +1,4 @@
 pub mod archive;
-pub mod cpio;
 pub mod deb;
 pub mod error;
 pub mod hash;

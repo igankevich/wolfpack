@@ -13,7 +13,7 @@ bzip2 = "0.4.4"
 chrono = { version = "0.4.38", features = ["std"], default-features = false }
 clap = { version = "4.5.20", features = ["derive"], default-features = true }
 constant_time_eq = "0.3.1"
-cpio = "0.4.0"
+cpio = { version = "0.2.0", package = "kpea" }
 crc = "3.2.1"
 deko = "0.1.0"
 der = { version = "0.7.9", features = ["std", "zeroize"], default-features = false }

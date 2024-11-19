@@ -71,7 +71,7 @@ fn do_main() -> Result<ExitCode, Error> {
 }
 
 fn print_bom(path: &Path) -> Result<(), Error> {
-    let file = File::open(&path)?;
+    let file = File::open(path)?;
     let bom = Bom::read(file)?;
     for (path, _metadata) in bom.paths()? {
         println!("{}", path.display());

@@ -6,13 +6,13 @@ use std::io::Write;
 use std::path::Path;
 use std::str::FromStr;
 
+use deko::bufread::AnyDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use normalize_path::NormalizePath;
 
 use crate::archive::ArchiveRead;
 use crate::archive::ArchiveWrite;
-use crate::compress::AnyDecoder;
 use crate::deb::Error;
 use crate::deb::FieldName;
 use crate::deb::MultilineValue;

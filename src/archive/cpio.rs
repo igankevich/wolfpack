@@ -1,22 +1,16 @@
+/*
 use std::fs::Metadata;
 use std::io::Error;
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
-use cpio::newc::trailer;
-use cpio::newc::ModeFileType;
-use cpio::NewcBuilder as Entry;
+use cpio::Builder;
 use normalize_path::NormalizePath;
 
 use crate::archive::ArchiveWrite;
 
-pub struct CpioBuilder<W: Write> {
-    writer: W,
-    ino: u32,
-}
-
-impl<W: Write> ArchiveWrite<W> for CpioBuilder<W> {
+impl<W: Write> ArchiveWrite<W> for Builder<W> {
     fn new(writer: W) -> Self {
         Self { writer, ino: 0 }
     }
@@ -36,10 +30,10 @@ impl<W: Write> ArchiveWrite<W> for CpioBuilder<W> {
             )));
         }
         eprintln!("cpio add {:?}", path.to_str().unwrap());
-        let mut entry_writer = Entry::new(
+        self.append_entry(cpio::Metadata {
+        },
             path.to_str()
                 .ok_or_else(|| Error::other(format!("non utf-8 path: {}", path.display())))?,
-        )
         .mode(0o644)
         .set_mode_file_type(ModeFileType::Regular)
         .ino(self.ino)
@@ -102,3 +96,4 @@ fn metadata_to_file_type(metadata: &Metadata) -> Result<ModeFileType, Error> {
         )))
     }
 }
+*/

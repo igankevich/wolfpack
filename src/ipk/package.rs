@@ -2,11 +2,13 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fs::File;
 use std::io::Read;
+use std::io::BufReader;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::path::Path;
 use std::path::PathBuf;
 
+use deko::bufread::AnyDecoder;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -14,7 +16,6 @@ use normalize_path::NormalizePath;
 
 use crate::archive::ArchiveRead;
 use crate::archive::ArchiveWrite;
-use crate::compress::AnyDecoder;
 use crate::deb;
 use crate::deb::DEBIAN_BINARY_CONTENTS;
 use crate::deb::DEBIAN_BINARY_FILE_NAME;
@@ -69,7 +70,8 @@ impl Package {
             .find(|entry| {
                 let path = entry.normalized_path()?;
                 if matches!(path.to_str(), Some(path) if path.starts_with("control.tar")) {
-                    let mut tar_archive = tar::Archive::new(AnyDecoder::new(entry));
+                    // TODO remove `BufReader` when deko supports it
+                    let mut tar_archive = tar::Archive::new(AnyDecoder::new(BufReader::new(entry)));
                     for entry in tar_archive.entries()? {
                         let mut entry = entry?;
                         let path = entry.path()?.normalize();

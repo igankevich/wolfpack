@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::CString;
+use std::io::BufReader;
 use std::io::Error;
 use std::io::Read;
 use std::io::Write;
@@ -7,16 +8,13 @@ use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::path::PathBuf;
 
-use cpio::newc::Reader as CpioReader;
+use deko::bufread::AnyDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use normalize_path::NormalizePath;
 use walkdir::WalkDir;
 
 //use zstd::stream::write::Encoder as ZstdEncoder;
-use crate::archive::ArchiveWrite;
-use crate::archive::CpioBuilder;
-use crate::compress::AnyDecoder;
 use crate::hash::Hasher;
 use crate::hash::Sha256Hash;
 use crate::hash::Sha256Reader;
@@ -121,13 +119,15 @@ impl Package {
         header2.insert(Entry::FileModes(filemodes.try_into()?));
         header2.insert(Entry::FileSizes(filesizes.try_into()?));
         let mut payload = Vec::new();
-        CpioBuilder::from_directory(
-            directory,
-            GzEncoder::new(&mut payload, Compression::best()),
+        {
+            let writer = GzEncoder::new(&mut payload, Compression::best());
             // TODO
             //ZstdEncoder::new(&mut payload, COMPRESSION_LEVEL)?,
-        )?
-        .finish()?;
+            let mut archive = cpio::Builder::new(writer);
+            archive.set_format(cpio::Format::Newc);
+            archive.append_dir_all(directory)?;
+            archive.finish()?.finish()?;
+        }
         let payload_sha256 = sha2::Sha256::compute(&payload);
         header2.insert(Entry::PayloadDigestAlgo(HashAlgorithm::Sha256));
         header2.insert(Entry::PayloadDigest(payload_sha256.clone()));
@@ -171,20 +171,17 @@ impl Package {
         let _lead = Lead::read(reader.by_ref())?;
         let _header1 = Header::<SignatureEntry>::read(reader.by_ref())?;
         let (header2, _offset) = Header::<Entry>::read(reader.by_ref())?;
-        let mut decoder = AnyDecoder::new(reader.by_ref());
+        // TODO remove BufReader when deko supports that
+        let decoder = AnyDecoder::new(BufReader::new(reader.by_ref()));
         let mut files = Vec::new();
-        loop {
-            let cpio = CpioReader::new(decoder)?;
-            if cpio.entry().is_trailer() {
-                break;
-            }
-            files.push(cpio.entry().name().into());
+        let mut cpio = cpio::Archive::new(decoder);
+        while let Some(entry) = cpio.read_entry()? {
+            files.push(entry.path.clone());
             //eprintln!(
             //    "{} ({} bytes)",
             //    cpio.entry().name(),
             //    cpio.entry().file_size()
             //);
-            decoder = cpio.finish()?;
         }
         let (sha256, _size) = reader.digest()?;
         let package: Package = header2.try_into()?;

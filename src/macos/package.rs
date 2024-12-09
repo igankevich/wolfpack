@@ -6,9 +6,9 @@ use std::path::Path;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use tempfile::TempDir;
+use stuckliste::receipt::ReceiptBuilder;
 
 use crate::macos::xml;
-use crate::macos::Bom;
 use crate::macos::PackageSigner;
 use crate::xar::SignedXarBuilder;
 use crate::xar::XarCompression;
@@ -51,7 +51,7 @@ impl Package {
         let package_info_file = workdir.path().join("PackageInfo");
         info.write(File::create(&package_info_file)?)?;
         let directory = directory.as_ref();
-        let bom = Bom::from_directory(directory)?;
+        let bom = ReceiptBuilder::new().create(directory)?;
         let bom_file = workdir.path().join("Bom");
         bom.write(File::create(&bom_file)?)?;
         let payload_file = workdir.path().join("Payload");

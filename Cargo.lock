@@ -2092,6 +2092,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
+name = "stuckliste"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9506d9facc561bb4e3f59b51c330dc3d1eac1c6ddbfb0dee3857ce268151a2f"
+dependencies = [
+ "libc",
+ "normalize-path",
+ "walkdir",
+]
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2474,6 +2485,7 @@ dependencies = [
  "sha2",
  "spki",
  "static_assertions",
+ "stuckliste",
  "tar",
  "tempfile",
  "thiserror",

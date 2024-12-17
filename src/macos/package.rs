@@ -5,13 +5,11 @@ use std::path::Path;
 
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
-use tempfile::TempDir;
 use stuckliste::receipt::ReceiptBuilder;
+use tempfile::TempDir;
+pub use zar::RsaSigner as PackageSigner;
 
 use crate::macos::xml;
-use crate::macos::PackageSigner;
-use crate::xar::SignedXarBuilder;
-use crate::xar::XarCompression;
 
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Clone, Debug))]
 pub struct Package {
@@ -62,15 +60,14 @@ impl Package {
             archive.append_dir_all(directory)?;
             archive.finish()?.finish()?;
         }
-        let mut xar = SignedXarBuilder::new(writer, signer);
-        xar.add_file_by_path(
-            "PackageInfo".into(),
-            &package_info_file,
-            XarCompression::Gzip,
+        let mut xar = zar::Builder::new(writer, Some(signer));
+        xar.append_dir_all(
+            workdir.path(),
+            zar::Compression::Gzip,
+            zar::no_extra_contents,
         )?;
-        xar.add_file_by_path("Bom".into(), &bom_file, XarCompression::Gzip)?;
-        xar.add_file_by_path("Payload".into(), &payload_file, XarCompression::None)?;
-        xar.sign(signer)?;
+        // TODO payload without compression
+        xar.finish()?;
         Ok(())
     }
 }

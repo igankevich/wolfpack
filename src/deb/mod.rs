@@ -1,6 +1,7 @@
 mod constants;
 mod error;
 mod field_name;
+mod fields;
 mod folded_value;
 mod md5_sums;
 mod multiline_value;
@@ -16,6 +17,7 @@ mod value;
 pub use self::constants::*;
 pub use self::error::*;
 pub use self::field_name::*;
+pub(crate) use self::fields::*;
 pub use self::folded_value::*;
 pub use self::md5_sums::*;
 pub use self::multiline_value::*;

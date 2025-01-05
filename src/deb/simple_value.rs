@@ -1,6 +1,10 @@
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::str::FromStr;
+
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::deb::Error;
 use crate::deb::FoldedValue;
@@ -8,7 +12,8 @@ use crate::deb::MultilineValue;
 use crate::deb::PackageName;
 use crate::deb::Value;
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct SimpleValue(String);
 
 impl SimpleValue {
@@ -38,6 +43,16 @@ impl FromStr for SimpleValue {
 impl From<SimpleValue> for String {
     fn from(other: SimpleValue) -> String {
         other.0
+    }
+}
+
+impl From<SimpleValue> for HashSet<SimpleValue> {
+    fn from(other: SimpleValue) -> HashSet<SimpleValue> {
+        other
+            .0
+            .split_whitespace()
+            .map(|x| SimpleValue(x.to_string()))
+            .collect()
     }
 }
 

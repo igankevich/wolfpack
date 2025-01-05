@@ -1,3 +1,4 @@
+mod any;
 mod hash_array;
 mod hasher;
 mod hashing_reader;
@@ -9,6 +10,7 @@ mod sha512;
 #[cfg(test)]
 mod tests;
 
+pub use self::any::*;
 pub use self::hash_array::*;
 pub use self::hasher::*;
 pub use self::hashing_reader::*;

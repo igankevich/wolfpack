@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::io::Read;
@@ -14,14 +13,13 @@ use normalize_path::NormalizePath;
 use crate::archive::ArchiveRead;
 use crate::archive::ArchiveWrite;
 use crate::deb::Error;
-use crate::deb::FieldName;
+use crate::deb::Fields;
 use crate::deb::MultilineValue;
 use crate::deb::PackageName;
 use crate::deb::PackageSigner;
 use crate::deb::PackageVerifier;
 use crate::deb::PackageVersion;
 use crate::deb::SimpleValue;
-use crate::deb::Value;
 use crate::deb::DEBIAN_BINARY_CONTENTS;
 use crate::deb::DEBIAN_BINARY_FILE_NAME;
 use crate::sign::Signer;
@@ -144,7 +142,7 @@ impl Display for Package {
         if let Some(installed_size) = self.installed_size.as_ref() {
             writeln!(f, "Installed-Size: {}", installed_size)?;
         }
-        for (name, value) in self.other.fields.iter() {
+        for (name, value) in self.other.iter() {
             writeln!(f, "{}: {}", name, value)?;
         }
         writeln!(f, "Description: {}", self.description)?;
@@ -155,18 +153,7 @@ impl Display for Package {
 impl FromStr for Package {
     type Err = Error;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let mut state = ParserStatus::Initial;
-        let mut fields = Fields::new();
-        for line in value.lines() {
-            if line.starts_with('#') {
-                continue;
-            }
-            if line.chars().all(char::is_whitespace) {
-                return Err(Error::Package("empty line".into()));
-            }
-            state = state.advance(Some(line), &mut fields)?;
-        }
-        state.advance(None, &mut fields)?;
+        let mut fields: Fields = value.parse()?;
         let control = Package {
             name: fields.remove("package")?.try_into()?,
             version: fields.remove("version")?.try_into()?,
@@ -187,95 +174,6 @@ impl FromStr for Package {
             other: fields,
         };
         Ok(control)
-    }
-}
-
-enum ParserStatus {
-    Initial,
-    Reading(FieldName, String, usize, bool),
-}
-
-impl ParserStatus {
-    fn advance(self, line: Option<&str>, fields: &mut Fields) -> Result<Self, Error> {
-        let state = match (self, line) {
-            (ParserStatus::Initial, Some(line)) => {
-                let mut iter = line.splitn(2, ':');
-                let name = iter.next().ok_or_else(|| Error::Package(line.into()))?;
-                let value = iter.next().ok_or_else(|| Error::Package(line.into()))?;
-                let value = value.trim_start();
-                let name: FieldName = name.parse()?;
-                if !value.is_empty() {
-                    ParserStatus::Reading(name, value.into(), 1, false)
-                } else {
-                    ParserStatus::Initial
-                }
-            }
-            (ParserStatus::Reading(name, mut value, num_lines, has_empty_lines), Some(line))
-                if line.starts_with([' ', '\t']) =>
-            {
-                let has_empty_lines = has_empty_lines || line == " ." || line == "\t.";
-                value.push('\n');
-                value.push_str(line);
-                ParserStatus::Reading(name, value, num_lines + 1, has_empty_lines)
-            }
-            (ParserStatus::Reading(name, value, num_lines, has_empty_lines), line) => {
-                let value = if num_lines == 1 {
-                    Value::Simple(value.parse()?)
-                } else if has_empty_lines || is_multiline(&name) {
-                    Value::Multiline(value.into())
-                } else {
-                    Value::Folded(value.try_into()?)
-                };
-                use std::collections::hash_map::Entry;
-                match fields.fields.entry(name) {
-                    Entry::Occupied(o) => return Err(Error::DuplicateField(o.key().to_string())),
-                    Entry::Vacant(v) => {
-                        v.insert(value);
-                    }
-                }
-                if line.is_some() {
-                    ParserStatus::Initial.advance(line, fields)?
-                } else {
-                    ParserStatus::Initial
-                }
-            }
-            (state @ ParserStatus::Initial, None) => state,
-        };
-        Ok(state)
-    }
-}
-
-fn is_multiline(name: &FieldName) -> bool {
-    name == "description"
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
-pub struct Fields {
-    fields: HashMap<FieldName, Value>,
-}
-
-impl Fields {
-    pub fn new() -> Self {
-        Self {
-            fields: Default::default(),
-        }
-    }
-
-    pub fn remove(&mut self, name: &'static str) -> Result<Value, Error> {
-        self.fields
-            .remove(&FieldName::new_unchecked(name))
-            .ok_or_else(|| Error::MissingField(name))
-    }
-
-    pub fn clear(&mut self) {
-        self.fields.clear();
-    }
-}
-
-impl Default for Fields {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

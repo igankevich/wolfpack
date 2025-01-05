@@ -143,7 +143,7 @@ pub struct ExtendedControlData {
     pub control: Package,
     hash: Sha256Hash,
     filename: PathBuf,
-    size: usize,
+    size: u64,
 }
 
 impl Display for ExtendedControlData {

@@ -1,5 +1,7 @@
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::io::Error;
 
 use crate::deb::FoldedValue;
 use crate::deb::MultilineValue;
@@ -37,6 +39,16 @@ impl Display for Value {
             Value::Simple(value) => write!(f, "{}", value),
             Value::Folded(value) => write!(f, "{}", value),
             Value::Multiline(value) => write!(f, "{}", value),
+        }
+    }
+}
+
+impl TryFrom<Value> for HashSet<SimpleValue> {
+    type Error = Error;
+    fn try_from(other: Value) -> Result<Self, Self::Error> {
+        match other {
+            Value::Simple(v) => Ok(v.into()),
+            _ => Err(Error::other("wrong value type")),
         }
     }
 }

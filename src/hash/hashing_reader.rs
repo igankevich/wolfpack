@@ -5,7 +5,7 @@ use crate::hash::Hasher;
 pub struct HashingReader<R: Read, H: Hasher> {
     reader: R,
     hasher: H,
-    nread: usize,
+    nread: u64,
 }
 
 impl<R: Read, H: Hasher> HashingReader<R, H> {
@@ -23,7 +23,7 @@ impl<R: Read, H: Hasher> HashingReader<R, H> {
         Ok(())
     }
 
-    pub fn digest(mut self) -> Result<(H::Output, usize), std::io::Error> {
+    pub fn digest(mut self) -> Result<(H::Output, u64), std::io::Error> {
         self.consume()?;
         Ok((self.hasher.finalize(), self.nread))
     }
@@ -32,7 +32,7 @@ impl<R: Read, H: Hasher> HashingReader<R, H> {
 impl<R: Read, H: Hasher> Read for HashingReader<R, H> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, std::io::Error> {
         let n = self.reader.read(buf)?;
-        self.nread += n;
+        self.nread += n as u64;
         self.hasher.update(&buf[..n]);
         Ok(n)
     }

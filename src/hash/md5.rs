@@ -20,6 +20,13 @@ impl Hasher for md5::Context {
 
 pub type Md5Hash = HashArray<16>;
 pub type Md5Reader<R> = HashingReader<R, md5::Context>;
+pub type Md5Hasher = md5::Context;
+
+impl From<md5::Digest> for Md5Hash {
+    fn from(other: md5::Digest) -> Self {
+        other.0.into()
+    }
+}
 
 #[cfg(test)]
 mod tests {

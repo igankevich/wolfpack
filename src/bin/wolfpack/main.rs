@@ -44,7 +44,7 @@ fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
 
 fn install(
     config: Config,
-    install_args: InstallArgs,
+    _install_args: InstallArgs,
 ) -> Result<ExitCode, Box<dyn std::error::Error>> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

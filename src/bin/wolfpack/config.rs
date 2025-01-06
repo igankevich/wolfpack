@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
+use std::fs::File;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::path::Path;
@@ -14,13 +15,16 @@ use uname_rs::Uname;
 use wolfpack::deb;
 use wolfpack::hash::AnyHash;
 use wolfpack::hash::Hasher;
+use wolfpack::sign::VerifierV2;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(default)]
     pub store_dir: PathBuf,
+    #[serde(default)]
     pub cache_dir: PathBuf,
-    #[serde(rename = "repo")]
+    #[serde(rename = "repo", default)]
     pub repos: BTreeMap<String, RepoConfig>,
 }
 
@@ -57,7 +61,21 @@ pub struct DebConfig {
     pub base_urls: Vec<String>,
     pub suites: Vec<String>,
     pub components: HashSet<deb::SimpleValue>,
-    pub public_key: String,
+    pub public_key_file: PathBuf,
+    #[serde(default)]
+    pub verify: bool,
+}
+
+impl Default for DebConfig {
+    fn default() -> Self {
+        Self {
+            base_urls: Default::default(),
+            suites: Default::default(),
+            components: Default::default(),
+            public_key_file: Default::default(),
+            verify: true,
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -103,12 +121,30 @@ impl Repo for DebRepo {
                 create_dir_all(&suite_dir).await?;
                 let release_file = suite_dir.join("Release");
                 download_file(&format!("{}/Release", suite_url), &release_file, None).await?;
-                maybe_download_file(
-                    &format!("{}/Release.gpg", suite_url),
-                    suite_dir.join("Release.gpg"),
-                    None,
-                )
-                .await;
+                if self.config.verify {
+                    let release_gpg_file = suite_dir.join("Release.gpg");
+                    download_file(
+                        &format!("{}/Release.gpg", suite_url),
+                        &release_gpg_file,
+                        None,
+                    )
+                    .await?;
+                    let message = std::fs::read(&release_file)?;
+                    let signature =
+                        deb::Signature::read_armored_one(File::open(&release_gpg_file)?)?;
+                    let verifying_keys = deb::VerifyingKey::read_binary_all(File::open(
+                        &self.config.public_key_file,
+                    )?)?;
+                    deb::VerifyingKey::verify_against_any(
+                        verifying_keys.iter(),
+                        &message,
+                        &signature,
+                    )
+                    .map_err(|_| {
+                        Error::other(format!("Failed to verify {}", release_gpg_file.display()))
+                    })?;
+                    log::info!("Verified {} against {}", release_file.display(), release_gpg_file.display());
+                }
                 let release: deb::Release = tokio::fs::read_to_string(&release_file)
                     .await?
                     .parse()
@@ -142,7 +178,7 @@ impl Repo for DebRepo {
     }
 }
 
-async fn maybe_download_file<P: AsRef<Path>>(url: &str, path: P, hash: Option<AnyHash>) {
+async fn _maybe_download_file<P: AsRef<Path>>(url: &str, path: P, hash: Option<AnyHash>) {
     let _ = download_file(url, path, hash).await;
 }
 
@@ -203,6 +239,7 @@ mod tests {
     fn config_gen() {
         let config = Config {
             store_dir: "/wolfpack".into(),
+            cache_dir: "/tmp/wolfpack".into(),
             repos: [
                 (
                     "debian".into(),
@@ -210,7 +247,8 @@ mod tests {
                         base_urls: vec!["https://deb.debian.org/debian".into()],
                         suites: vec!["bookworm".into(), "bookworm-updates".into()],
                         components: ["main".try_into().unwrap()].into(),
-                        public_key: "".into(), // TODO
+                        public_key_file: "".into(), // TODO
+                        verify: true,
                     }),
                 ),
                 (
@@ -219,7 +257,8 @@ mod tests {
                         base_urls: vec!["https://deb.debian.org/debian-security".into()],
                         suites: vec!["bookworm-security".into()],
                         components: ["main".try_into().unwrap()].into(),
-                        public_key: "".into(), // TODO
+                        public_key_file: "".into(), // TODO
+                        verify: true,
                     }),
                 ),
             ]

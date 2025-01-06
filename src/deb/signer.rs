@@ -1,12 +1,8 @@
-use std::io::Write;
-use std::ops::Deref;
-
 use pgp::composed::KeyType;
 use pgp::crypto::hash::HashAlgorithm;
 use pgp::packet::SignatureType;
 use pgp::types::SecretKeyTrait;
 use pgp::SecretKeyParamsBuilder;
-use pgp::SignedPublicKey;
 use pgp::SignedSecretKey;
 use rand::rngs::OsRng;
 
@@ -15,6 +11,9 @@ use crate::sign::PgpSigner;
 use crate::sign::PgpVerifier;
 use crate::sign::Signer;
 use crate::sign::Verifier;
+
+pub use crate::sign::PgpSignature as Signature;
+pub use crate::sign::PgpVerifyingKey as VerifyingKey;
 
 pub struct PackageSigner {
     inner: PgpSigner,
@@ -90,33 +89,6 @@ impl SigningKey {
             .public_key()
             .sign(OsRng, &signed_secret_key, String::new)
             .map_err(|_| Error)?;
-        Ok((
-            SigningKey(signed_secret_key),
-            VerifyingKey(signed_public_key),
-        ))
-    }
-}
-
-#[derive(Clone)]
-pub struct VerifyingKey(SignedPublicKey);
-
-impl VerifyingKey {
-    pub fn write_armored<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
-        self.0
-            .to_armored_writer(writer.by_ref(), Default::default())
-            .map_err(std::io::Error::other)
-    }
-}
-
-impl From<VerifyingKey> for SignedPublicKey {
-    fn from(other: VerifyingKey) -> Self {
-        other.0
-    }
-}
-
-impl Deref for VerifyingKey {
-    type Target = SignedPublicKey;
-    fn deref(&self) -> &Self::Target {
-        &self.0
+        Ok((SigningKey(signed_secret_key), signed_public_key.into()))
     }
 }

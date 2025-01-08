@@ -155,22 +155,13 @@ impl FromStr for Package {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let mut fields: Fields = value.parse()?;
         let control = Package {
-            name: fields.remove("package")?.try_into()?,
-            version: fields.remove("version")?.try_into()?,
-            license: fields.remove("license")?.try_into()?,
-            architecture: fields.remove("architecture")?.try_into()?,
-            description: fields.remove("description")?.try_into()?,
-            maintainer: fields.remove("maintainer")?.try_into()?,
-            installed_size: {
-                let option = fields.remove("installed-size").ok().map(|x| {
-                    let value: String = x.to_string();
-                    value.parse::<u64>().map_err(|_| Error::FieldValue(value))
-                });
-                match option {
-                    Some(result) => Some(result?),
-                    None => None,
-                }
-            },
+            name: fields.remove_any("package")?.try_into()?,
+            version: fields.remove_any("version")?.try_into()?,
+            license: fields.remove_any("license")?.try_into()?,
+            architecture: fields.remove_any("architecture")?.try_into()?,
+            description: fields.remove_any("description")?.try_into()?,
+            maintainer: fields.remove_any("maintainer")?.try_into()?,
+            installed_size: fields.remove_some("installed-size")?,
             other: fields,
         };
         Ok(control)

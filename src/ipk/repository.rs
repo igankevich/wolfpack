@@ -50,7 +50,7 @@ impl Repository {
             filename.push(path.file_name().unwrap());
             let new_path = output_dir.as_ref().join(&filename);
             std::fs::rename(path, new_path)?;
-            let control = ExtendedControlData {
+            let control = ExtendedPackage {
                 control,
                 size,
                 hash,
@@ -127,7 +127,7 @@ impl Display for Repository {
 }
 
 pub struct PerArchPackages {
-    packages: Vec<ExtendedControlData>,
+    packages: Vec<ExtendedPackage>,
 }
 
 impl Display for PerArchPackages {
@@ -139,14 +139,14 @@ impl Display for PerArchPackages {
     }
 }
 
-pub struct ExtendedControlData {
+pub struct ExtendedPackage {
     pub control: Package,
     hash: Sha256Hash,
     filename: PathBuf,
     size: u64,
 }
 
-impl Display for ExtendedControlData {
+impl Display for ExtendedPackage {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "{}", self.control)?;
         writeln!(f, "Filename: {}", self.filename.display())?;

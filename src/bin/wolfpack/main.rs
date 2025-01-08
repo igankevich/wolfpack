@@ -21,6 +21,8 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Sync repository metadata.
+    Pull,
     Install(InstallArgs),
 }
 
@@ -38,14 +40,12 @@ fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let args = Args::parse();
     let config = Config::open(&args.config_dir)?;
     match args.command {
+        Command::Pull => pull(config),
         Command::Install(more_args) => install(config, more_args),
     }
 }
 
-fn install(
-    config: Config,
-    _install_args: InstallArgs,
-) -> Result<ExitCode, Box<dyn std::error::Error>> {
+fn pull(config: Config) -> Result<ExitCode, Box<dyn std::error::Error>> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -59,7 +59,13 @@ fn install(
         for (name, repo) in repos.iter_mut() {
             repo.pull(config.store_dir.as_path(), name.as_str()).await?;
         }
-        println!("Hello world");
         Ok(ExitCode::SUCCESS)
     })
+}
+
+fn install(
+    _config: Config,
+    _install_args: InstallArgs,
+) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    Ok(ExitCode::SUCCESS)
 }

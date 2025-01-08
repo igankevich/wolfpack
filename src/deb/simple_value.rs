@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use serde::Deserialize;
@@ -43,6 +44,12 @@ impl FromStr for SimpleValue {
 impl From<SimpleValue> for String {
     fn from(other: SimpleValue) -> String {
         other.0
+    }
+}
+
+impl From<SimpleValue> for PathBuf {
+    fn from(other: SimpleValue) -> PathBuf {
+        other.0.into()
     }
 }
 

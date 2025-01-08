@@ -8,6 +8,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use walkdir::WalkDir;
 
@@ -16,8 +17,10 @@ use crate::deb::Package;
 use crate::deb::PackageVerifier;
 use crate::deb::Release;
 use crate::deb::SimpleValue;
-use crate::hash::MultiHash;
+use crate::hash::Md5Hash;
 use crate::hash::MultiHashReader;
+use crate::hash::Sha1Hash;
+use crate::hash::Sha256Hash;
 use crate::sign::PgpCleartextSigner;
 
 pub struct Repository {
@@ -39,7 +42,7 @@ impl Repository {
         let mut push_package = |path: &Path| -> Result<(), Error> {
             eprintln!("reading {}", path.display());
             let mut reader = MultiHashReader::new(File::open(path)?);
-            let control = Package::read_control(reader.by_ref(), verifier)?;
+            let package = Package::read_control(reader.by_ref(), verifier)?;
             let (hash, size) = reader.digest()?;
             let mut filename = PathBuf::new();
             filename.push("data");
@@ -48,19 +51,21 @@ impl Repository {
             filename.push(path.file_name().unwrap());
             let new_path = output_dir.as_ref().join(&filename);
             std::fs::rename(path, new_path)?;
-            let control = ExtendedControlData {
-                control,
+            let package = ExtendedPackage {
+                inner: package,
                 size,
-                hash,
+                md5: Some(hash.md5.into()),
+                sha1: Some(hash.sha1),
+                sha256: Some(hash.sha2),
                 filename,
             };
             packages
-                .entry(control.control.architecture.clone())
+                .entry(package.inner.architecture.clone())
                 .or_insert_with(|| PerArchPackages {
                     packages: Vec::new(),
                 })
                 .packages
-                .push(control);
+                .push(package);
             Ok(())
         };
         for path in paths.into_iter() {
@@ -137,34 +142,69 @@ impl Display for Repository {
 }
 
 pub struct PerArchPackages {
-    packages: Vec<ExtendedControlData>,
+    packages: Vec<ExtendedPackage>,
 }
 
 impl Display for PerArchPackages {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        for control in self.packages.iter() {
-            writeln!(f, "{}", control)?;
+        for package in self.packages.iter() {
+            writeln!(f, "{}", package)?;
         }
         Ok(())
     }
 }
 
-pub struct ExtendedControlData {
-    pub control: Package,
-    hash: MultiHash,
+impl FromStr for PerArchPackages {
+    type Err = Error;
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
+        let mut packages = Vec::new();
+        for chunk in string.split("\n\n") {
+            packages.push(chunk.parse()?);
+        }
+        Ok(Self { packages })
+    }
+}
+
+pub struct ExtendedPackage {
+    pub inner: Package,
+    md5: Option<Md5Hash>,
+    sha1: Option<Sha1Hash>,
+    sha256: Option<Sha256Hash>,
     filename: PathBuf,
     size: u64,
 }
 
-impl Display for ExtendedControlData {
+impl Display for ExtendedPackage {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.control)?;
+        write!(f, "{}", self.inner)?;
         writeln!(f, "Filename: {}", self.filename.display())?;
         writeln!(f, "Size: {}", self.size)?;
-        writeln!(f, "MD5sum: {:x}", self.hash.md5)?;
-        writeln!(f, "SHA1: {}", self.hash.sha1)?;
-        writeln!(f, "SHA256: {}", self.hash.sha2)?;
+        if let Some(md5) = self.md5.as_ref() {
+            writeln!(f, "MD5sum: {}", md5)?;
+        }
+        if let Some(sha1) = self.sha1.as_ref() {
+            writeln!(f, "SHA1: {}", sha1)?;
+        }
+        if let Some(sha256) = self.sha256.as_ref() {
+            writeln!(f, "SHA256: {}", sha256)?;
+        }
         Ok(())
+    }
+}
+
+impl FromStr for ExtendedPackage {
+    type Err = Error;
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
+        let mut inner: Package = string.parse()?;
+        let extended = Self {
+            md5: inner.other.remove_some("md5sum")?,
+            sha1: inner.other.remove_some("sha1")?,
+            sha256: inner.other.remove_some("sha256")?,
+            filename: inner.other.remove_any("filename")?.try_into()?,
+            size: inner.other.remove("size")?,
+            inner,
+        };
+        Ok(extended)
     }
 }
 
@@ -200,13 +240,13 @@ mod tests {
             )
             .unwrap();
         arbtest(|u| {
-            let mut control: Package = u.arbitrary()?;
-            control.architecture = "amd64".parse().unwrap();
+            let mut package: Package = u.arbitrary()?;
+            package.architecture = "amd64".parse().unwrap();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let deb_path = workdir.path().join("test.deb");
             let _ = remove_dir_all(root.as_path());
-            let package_name = control.name();
-            control
+            let package_name = package.name();
+            package
                 .write(
                     directory.path(),
                     File::create(deb_path.as_path()).unwrap(),

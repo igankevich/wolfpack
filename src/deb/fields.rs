@@ -23,17 +23,41 @@ impl Fields {
         }
     }
 
-    pub fn remove(&mut self, name: &'static str) -> Result<Value, Error> {
+    pub fn remove_any(&mut self, name: &'static str) -> Result<Value, Error> {
         self.fields
             .remove(&FieldName::new_unchecked(name))
             .ok_or_else(|| Error::MissingField(name))
     }
 
+    pub fn remove<T: FromStr>(&mut self, name: &'static str) -> Result<T, Error> {
+        self.fields
+            .remove(&FieldName::new_unchecked(name))
+            .ok_or_else(|| Error::MissingField(name))?
+            .as_str()
+            .parse()
+            .map_err(|_| Error::FieldValue(name.into()))
+    }
+
+    pub fn remove_some<T: FromStr>(&mut self, name: &'static str) -> Result<Option<T>, Error> {
+        self.fields
+            .remove(&FieldName::new_unchecked(name))
+            .map(|value| {
+                value
+                    .as_str()
+                    .parse::<T>()
+                    .map_err(|_| Error::FieldValue(name.into()))
+            })
+            .transpose()
+    }
+
     pub fn remove_system_time(&mut self, name: &'static str) -> Result<Option<SystemTime>, Error> {
-        match self.remove(name).ok().map(|value| {
-            let value = value.as_str().replace("UTC", "+0000");
-            (DateTime::parse_from_rfc2822(&value), value)
-        }) {
+        match self
+            .fields
+            .remove(&FieldName::new_unchecked(name))
+            .map(|value| {
+                let value = value.as_str().replace("UTC", "+0000");
+                (DateTime::parse_from_rfc2822(&value), value)
+            }) {
             Some((result, date_str)) => match result {
                 Ok(date) => Ok(Some(date.into())),
                 Err(e) => {
@@ -50,7 +74,7 @@ impl Fields {
         name: &'static str,
     ) -> Result<HashMap<PathBuf, (H, u64)>, Error> {
         let mut hashes = HashMap::new();
-        let Some(value) = self.remove(name).ok() else {
+        let Some(value) = self.fields.remove(&FieldName::new_unchecked(name)) else {
             return Ok(hashes);
         };
         for line in value.as_str().lines() {

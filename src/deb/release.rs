@@ -144,9 +144,9 @@ impl FromStr for Release {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let mut fields: Fields = value.parse()?;
         let control = Release {
-            suite: fields.remove("suite")?.try_into()?,
-            architectures: fields.remove("architectures")?.try_into()?,
-            components: fields.remove("components")?.try_into()?,
+            suite: fields.remove_any("suite")?.try_into()?,
+            architectures: fields.remove_any("architectures")?.try_into()?,
+            components: fields.remove_any("components")?.try_into()?,
             date: fields.remove_system_time("date")?,
             valid_until: fields.remove_system_time("valid-until")?,
             md5: fields.remove_hashes("md5sum")?,

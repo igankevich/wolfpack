@@ -1,4 +1,7 @@
 use futures_util::StreamExt;
+use reqwest::header::HeaderValue;
+use reqwest::header::IF_MATCH;
+use reqwest::header::USER_AGENT;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
@@ -143,7 +146,11 @@ impl Repo for DebRepo {
                     .map_err(|_| {
                         Error::other(format!("Failed to verify {}", release_gpg_file.display()))
                     })?;
-                    log::info!("Verified {} against {}", release_file.display(), release_gpg_file.display());
+                    log::info!(
+                        "Verified {} against {}",
+                        release_file.display(),
+                        release_gpg_file.display()
+                    );
                 }
                 let release: deb::Release = tokio::fs::read_to_string(&release_file)
                     .await?
@@ -151,10 +158,11 @@ impl Repo for DebRepo {
                     .map_err(Error::other)?;
                 for component in release.components().intersection(&self.config.components) {
                     let component_dir = suite_dir.join(component.as_str());
-                    create_dir_all(&component_dir).await?;
                     for arch in [arch.as_str(), "all"] {
                         let packages_prefix = format!("{}/binary-{}", component, arch);
                         let files = release.get_files(&packages_prefix, "Packages");
+                        let arch_dir = component_dir.join(format!("binary-{}", arch));
+                        create_dir_all(&arch_dir).await?;
                         for (candidate, hash, _file_size) in files.into_iter() {
                             let file_name = candidate.file_name().unwrap();
                             let packages_url = format!(
@@ -163,7 +171,7 @@ impl Repo for DebRepo {
                                 packages_prefix,
                                 file_name.to_str().unwrap()
                             );
-                            let packages_file = component_dir.join(file_name);
+                            let packages_file = arch_dir.join(file_name);
                             match download_file(&packages_url, &packages_file, Some(hash)).await {
                                 Ok(..) => break,
                                 Err(ref e) if e.kind() == ErrorKind::NotFound => continue,
@@ -178,16 +186,11 @@ impl Repo for DebRepo {
     }
 }
 
-async fn _maybe_download_file<P: AsRef<Path>>(url: &str, path: P, hash: Option<AnyHash>) {
-    let _ = download_file(url, path, hash).await;
-}
-
 async fn download_file<P: AsRef<Path>>(
     url: &str,
     path: P,
     hash: Option<AnyHash>,
 ) -> Result<(), Error> {
-    log::info!("Downloading {} to {}", url, path.as_ref().display());
     do_download_file(url, path, hash)
         .await
         .inspect_err(|e| log::error!("Failed to download {}: {}", url, e))
@@ -198,10 +201,40 @@ async fn do_download_file<P: AsRef<Path>>(
     path: P,
     hash: Option<AnyHash>,
 ) -> Result<(), Error> {
-    // TODO etag, if-match
     // TODO last-modified, If-Modified-Since
-    // TODO user-agent
-    let response = reqwest::get(url)
+    let path = path.as_ref();
+    let etag_path = path.parent().unwrap().join(format!(
+        ".{}.etag",
+        path.file_name().unwrap().to_str().unwrap()
+    ));
+    let etag = match std::fs::read(&etag_path) {
+        Ok(etag) => etag,
+        Err(e) if e.kind() == ErrorKind::NotFound => Default::default(),
+        Err(e) => return Err(e),
+    };
+    let client = reqwest::Client::builder().build().map_err(Error::other)?;
+    if !etag.is_empty() && path.exists() {
+        let response = client
+            .head(url)
+            .header(USER_AGENT, &WOLFPACK_UA)
+            .header(
+                IF_MATCH,
+                HeaderValue::from_bytes(&etag).map_err(Error::other)?,
+            )
+            .send()
+            .await
+            .map_err(Error::other)?;
+        if response.status() != StatusCode::PRECONDITION_FAILED {
+            log::info!("Up-to-date {}", url);
+            // Up-to-date.
+            return Ok(());
+        }
+    }
+    log::info!("Downloading {} to {}", url, path.display());
+    let response = client
+        .get(url)
+        .header(USER_AGENT, &WOLFPACK_UA)
+        .send()
         .await
         .map_err(Error::other)?
         .error_for_status()
@@ -212,6 +245,9 @@ async fn do_download_file<P: AsRef<Path>>(
                 Error::other(e)
             }
         })?;
+    if let Some(etag) = response.headers().get("ETag") {
+        std::fs::write(&etag_path, etag.as_bytes())?;
+    }
     let mut stream = response.bytes_stream();
     let mut file = tokio::fs::File::create(path).await?;
     let mut hasher = hash.as_ref().map(|h| h.hasher());
@@ -230,6 +266,9 @@ async fn do_download_file<P: AsRef<Path>>(
     }
     Ok(())
 }
+
+const WOLFPACK_UA: HeaderValue =
+    HeaderValue::from_static(concat!("Wolfpack/", env!("CARGO_PKG_VERSION")));
 
 #[cfg(test)]
 mod tests {

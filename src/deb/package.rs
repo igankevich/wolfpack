@@ -130,6 +130,11 @@ impl Package {
         }
         Err(Error::MissingFile("control.tar*".into()))
     }
+
+    pub fn find(&self, keyword: &str) -> bool {
+        self.name.as_str().to_lowercase().contains(keyword)
+            || self.description.as_str().to_lowercase().contains(keyword)
+    }
 }
 
 impl Display for Package {
@@ -157,7 +162,7 @@ impl FromStr for Package {
         let control = Package {
             name: fields.remove_any("package")?.try_into()?,
             version: fields.remove_any("version")?.try_into()?,
-            license: fields.remove_any("license")?.try_into()?,
+            license: fields.remove_some("license")?.unwrap_or_default(),
             architecture: fields.remove_any("architecture")?.try_into()?,
             description: fields.remove_any("description")?.try_into()?,
             maintainer: fields.remove_any("maintainer")?.try_into()?,

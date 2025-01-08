@@ -145,6 +145,18 @@ pub struct PerArchPackages {
     packages: Vec<ExtendedPackage>,
 }
 
+impl PerArchPackages {
+    pub fn find(&self, keyword: &str) -> Vec<ExtendedPackage> {
+        let mut matches = Vec::new();
+        for package in self.packages.iter() {
+            if package.inner.find(keyword) {
+                matches.push(package.clone());
+            }
+        }
+        matches
+    }
+}
+
 impl Display for PerArchPackages {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         for package in self.packages.iter() {
@@ -159,19 +171,25 @@ impl FromStr for PerArchPackages {
     fn from_str(string: &str) -> Result<Self, Self::Err> {
         let mut packages = Vec::new();
         for chunk in string.split("\n\n") {
+            // Normalize the chunk.
+            let chunk = chunk.trim();
+            if chunk.is_empty() {
+                continue;
+            }
             packages.push(chunk.parse()?);
         }
         Ok(Self { packages })
     }
 }
 
+#[derive(Clone)]
 pub struct ExtendedPackage {
     pub inner: Package,
-    md5: Option<Md5Hash>,
-    sha1: Option<Sha1Hash>,
-    sha256: Option<Sha256Hash>,
-    filename: PathBuf,
-    size: u64,
+    pub md5: Option<Md5Hash>,
+    pub sha1: Option<Sha1Hash>,
+    pub sha256: Option<Sha256Hash>,
+    pub filename: PathBuf,
+    pub size: u64,
 }
 
 impl Display for ExtendedPackage {

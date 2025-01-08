@@ -11,7 +11,7 @@ use crate::deb::Error;
 use crate::deb::SimpleValue;
 use crate::deb::Value;
 
-pub type Epoch = u16;
+pub type Epoch = u64;
 
 /// https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]

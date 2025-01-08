@@ -23,12 +23,21 @@ struct Args {
 enum Command {
     /// Sync repository metadata.
     Pull,
+    /// Find packages.
+    Search(SearchArgs),
     Install(InstallArgs),
 }
 
 #[derive(clap::Args)]
 struct InstallArgs {
     name: String,
+}
+
+#[derive(clap::Args)]
+struct SearchArgs {
+    /// Search keyword.
+    #[clap(value_name = "KEYWORD")]
+    keyword: String,
 }
 
 fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
@@ -41,6 +50,7 @@ fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let config = Config::open(&args.config_dir)?;
     match args.command {
         Command::Pull => pull(config),
+        Command::Search(more_args) => search(config, more_args),
         Command::Install(more_args) => install(config, more_args),
     }
 }
@@ -61,6 +71,19 @@ fn pull(config: Config) -> Result<ExitCode, Box<dyn std::error::Error>> {
         }
         Ok(ExitCode::SUCCESS)
     })
+}
+
+fn search(config: Config, args: SearchArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    let mut repos = config
+        .repos
+        .into_iter()
+        .map(|(name, repo_config)| (name, <dyn Repo>::new(repo_config)))
+        .collect::<BTreeMap<_, _>>();
+    let keyword = args.keyword.to_lowercase();
+    for (name, repo) in repos.iter_mut() {
+        repo.search(config.store_dir.as_path(), name.as_str(), &keyword)?;
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn install(

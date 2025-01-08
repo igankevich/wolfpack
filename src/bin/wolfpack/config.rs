@@ -1,3 +1,4 @@
+use deko::bufread::AnyDecoder;
 use futures_util::StreamExt;
 use reqwest::header::HeaderValue;
 use reqwest::header::IF_MATCH;
@@ -8,8 +9,10 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fs::File;
+use std::io::BufReader;
 use std::io::Error;
 use std::io::ErrorKind;
+use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::fs::create_dir_all;
@@ -84,6 +87,7 @@ impl Default for DebConfig {
 #[async_trait::async_trait]
 pub trait Repo {
     async fn pull(&mut self, prefix: &Path, name: &str) -> Result<(), Error>;
+    fn search(&mut self, prefix: &Path, name: &str, keyword: &str) -> Result<(), Error>;
 }
 
 impl dyn Repo {
@@ -178,6 +182,60 @@ impl Repo for DebRepo {
                                 Err(e) => return Err(e),
                             }
                         }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn search(&mut self, prefix: &Path, name: &str, keyword: &str) -> Result<(), Error> {
+        let arch = Self::native_arch()?;
+        for suite in self.config.suites.iter() {
+            let suite_dir = prefix.join(name).join(suite);
+            let release_file = suite_dir.join("Release");
+            let release: deb::Release = std::fs::read_to_string(&release_file)?
+                .parse()
+                .map_err(Error::other)?;
+            for component in release.components().intersection(&self.config.components) {
+                let component_dir = suite_dir.join(component.as_str());
+                for arch in [arch.as_str(), "all"] {
+                    let arch_dir = component_dir.join(format!("binary-{}", arch));
+                    let packages_prefix = format!("{}/binary-{}", component, arch);
+                    let files = release.get_files(&packages_prefix, "Packages");
+                    for (candidate, _hash, _file_size) in files.into_iter() {
+                        let file_name = candidate.file_name().unwrap();
+                        let packages_file = arch_dir.join(file_name);
+                        let mut packages_str = String::new();
+                        let file = match File::open(&packages_file) {
+                            Ok(file) => file,
+                            Err(ref e) if e.kind() == ErrorKind::NotFound => continue,
+                            Err(e) => return Err(e),
+                        };
+                        let mut file = AnyDecoder::new(BufReader::new(file));
+                        file.read_to_string(&mut packages_str)?;
+                        let packages: deb::PerArchPackages =
+                            packages_str.parse().map_err(Error::other)?;
+                        let matches = packages.find(keyword);
+                        if !matches.is_empty() {
+                            println!("Source {} / {} / {} / {:?}", name, suite, component, packages_file);
+                        }
+                        for package in matches {
+                            println!(
+                                "{}  -  {}  -  {}  -  {}",
+                                package.inner.name,
+                                package.inner.version,
+                                package.sha256.unwrap(),
+                                package
+                                    .inner
+                                    .description
+                                    .as_str()
+                                    .lines()
+                                    .next()
+                                    .unwrap_or_default()
+                            );
+                        }
+                        break;
                     }
                 }
             }

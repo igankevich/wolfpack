@@ -6,7 +6,7 @@ use elf::endian::AnyEndian;
 use futures_util::StreamExt;
 use reqwest::header::HeaderValue;
 use reqwest::header::ETAG;
-use reqwest::header::IF_MATCH;
+use reqwest::header::IF_NONE_MATCH;
 use reqwest::header::USER_AGENT;
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -487,7 +487,6 @@ async fn do_download_file<P: AsRef<Path>>(
     hash: Option<AnyHash>,
 ) -> Result<(), Error> {
     // TODO last-modified, If-Modified-Since
-    // TODO if-none-match
     let path = path.as_ref();
     let etag_path = path.parent().ok_or(InvalidData)?.join(format!(
         ".{}.etag",
@@ -502,43 +501,34 @@ async fn do_download_file<P: AsRef<Path>>(
         Err(e) => return Err(e),
     };
     let client = reqwest::Client::builder().build().map_err(Error::other)?;
-    if !etag.is_empty() && path.exists() {
-        let response = client
-            .head(url)
-            .header(USER_AGENT, &WOLFPACK_UA)
-            .header(
-                IF_MATCH,
-                HeaderValue::from_bytes(&etag).map_err(Error::other)?,
-            )
-            .send()
-            .await
-            .map_err(Error::other)?;
-        if response.status() != StatusCode::PRECONDITION_FAILED {
-            log::info!("Up-to-date {}", url);
-            // Up-to-date.
-            return Ok(());
-        }
-    }
     log::info!("Downloading {} to {}", url, path.display());
-    let response = client
-        .get(url)
-        .header(USER_AGENT, &WOLFPACK_UA)
-        .send()
-        .await
-        .map_err(Error::other)?
-        .error_for_status()
-        .map_err(|e| {
-            if e.status() == Some(StatusCode::NOT_FOUND) {
-                ErrorKind::NotFound.into()
-            } else {
-                Error::other(e)
-            }
-        })?;
+    let builder = client.get(url).header(USER_AGENT, &WOLFPACK_UA);
+    let builder = if !etag.is_empty() && path.exists() {
+        builder.header(
+            IF_NONE_MATCH,
+            HeaderValue::from_bytes(&etag).map_err(Error::other)?,
+        )
+    } else {
+        builder
+    };
+    let response = builder.send().await.map_err(Error::other)?;
+    if response.status() == StatusCode::NOT_MODIFIED {
+        log::info!("Up-to-date {}", url);
+        // Up-to-date.
+        return Ok(());
+    }
+    let response = response.error_for_status().map_err(|e| {
+        if e.status() == Some(StatusCode::NOT_FOUND) {
+            ErrorKind::NotFound.into()
+        } else {
+            Error::other(e)
+        }
+    })?;
     if let Some(etag) = response.headers().get(ETAG) {
         std::fs::write(&etag_path, etag.as_bytes())?;
     }
     let mut stream = response.bytes_stream();
-    let mut file = tokio::fs::File::create(path).await?;
+    let mut file = tokio::fs::File::create(&path).await?;
     let mut hasher = hash.as_ref().map(|h| h.hasher());
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(Error::other)?;
@@ -547,10 +537,13 @@ async fn do_download_file<P: AsRef<Path>>(
         }
         file.write_all(&chunk).await?;
     }
+    file.flush().await?;
+    drop(file);
     if let (Some(hash), Some(hasher)) = (hash, hasher) {
         let actual_hash = hasher.finalize();
         if hash != actual_hash {
-            return Err(Error::other("hash mismatch"));
+            tokio::fs::remove_file(&path).await?;
+            return Err(Error::other("Hash mismatch"));
         }
     }
     Ok(())

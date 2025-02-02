@@ -1,5 +1,5 @@
-use std::io::Write;
 use std::io::Error;
+use std::io::Write;
 use std::path::PathBuf;
 
 use quick_xml::se::to_writer;

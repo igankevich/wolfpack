@@ -19,6 +19,7 @@ pub enum AnyHash {
     Sha512(Sha512Hash),
 }
 
+#[allow(clippy::len_without_is_empty)]
 impl AnyHash {
     pub fn hasher(&self) -> AnyHasher {
         use AnyHash::*;

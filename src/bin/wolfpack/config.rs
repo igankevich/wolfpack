@@ -142,6 +142,7 @@ impl DebRepo {
 impl Repo for DebRepo {
     async fn pull(&mut self, config: &Config, name: &str) -> Result<(), Error> {
         let arch = Self::native_arch()?;
+        #[allow(clippy::never_loop)]
         for base_url in self.config.base_urls.iter() {
             for suite in self.config.suites.iter() {
                 let suite_url = format!("{}/dists/{}", base_url, suite);
@@ -206,7 +207,7 @@ impl Repo for DebRepo {
                     }
                 }
             }
-            // Only one URL is used.
+            // TODO Only one URL is used.
             break;
         }
         Ok(())
@@ -288,7 +289,7 @@ impl Repo for DebRepo {
                                             log::info!("{:#?}", control);
                                             let mut tar_archive =
                                                 tar::Archive::new(AnyDecoder::new(&data[..]));
-                                            let dst = config.store_dir.join(&name);
+                                            let dst = config.store_dir.join(name);
                                             create_dir_all(&dst).await?;
                                             tar_archive.unpack(&dst)?;
                                             drop(tar_archive);
@@ -469,9 +470,10 @@ async fn do_download_file<P: AsRef<Path>>(
 fn get_elf_type(path: &Path) -> Result<ElfType, Error> {
     let mut file = File::open(path)?;
     let mut buf = [0; 64];
-    file.read(&mut buf[..])?;
+    let n = file.read(&mut buf[..])?;
+    let buf = &mut buf[..n];
     drop(file);
-    let ident = elf::file::parse_ident::<AnyEndian>(&buf).map_err(Error::other)?;
+    let ident = elf::file::parse_ident::<AnyEndian>(buf).map_err(Error::other)?;
     let header = elf::file::FileHeader::<AnyEndian>::parse_tail(ident, &buf[EI_NIDENT..])
         .map_err(Error::other)?;
     eprintln!("try {:?}", path);

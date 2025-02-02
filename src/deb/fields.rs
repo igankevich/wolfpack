@@ -51,21 +51,16 @@ impl Fields {
     }
 
     pub fn remove_system_time(&mut self, name: &'static str) -> Result<Option<SystemTime>, Error> {
-        match self
-            .fields
-            .remove(&FieldName::new_unchecked(name))
-            .map(|value| {
-                let value = value.as_str().replace("UTC", "+0000");
-                (DateTime::parse_from_rfc2822(&value), value)
-            }) {
-            Some((result, date_str)) => match result {
-                Ok(date) => Ok(Some(date.into())),
-                Err(e) => {
-                    log::error!("Failed to parse date {:?}: {}", date_str, e);
-                    Ok(None)
-                }
-            },
-            None => Ok(None),
+        let Some(value) = self.fields.remove(&FieldName::new_unchecked(name)) else {
+            return Ok(None);
+        };
+        let value = value.as_str().replace("UTC", "+0000");
+        match DateTime::parse_from_rfc2822(&value) {
+            Ok(date) => Ok(Some(date.into())),
+            Err(e) => {
+                log::error!("Failed to parse date {:?}: {}", value, e);
+                Ok(None)
+            }
         }
     }
 

@@ -25,7 +25,7 @@ impl Log for Logger {
     fn log(&self, record: &Record) {
         use std::fmt::Write;
         let mut buffer = String::with_capacity(4096);
-        if write!(&mut buffer, "{}\n", record.args()).is_ok() {
+        if writeln!(&mut buffer, "{}", record.args()).is_ok() {
             use std::io::Write;
             let _ = stderr().write_all(buffer.as_bytes());
         }

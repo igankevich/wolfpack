@@ -1,8 +1,8 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fs::File;
-use std::io::Read;
 use std::io::BufReader;
+use std::io::Read;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::path::Path;

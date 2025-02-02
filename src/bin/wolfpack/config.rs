@@ -1,6 +1,11 @@
 use deko::bufread::AnyDecoder;
+use elf::abi::EI_NIDENT;
+use elf::abi::ET_DYN;
+use elf::abi::ET_EXEC;
+use elf::endian::AnyEndian;
 use futures_util::StreamExt;
 use reqwest::header::HeaderValue;
+use reqwest::header::ETAG;
 use reqwest::header::IF_MATCH;
 use reqwest::header::USER_AGENT;
 use reqwest::StatusCode;
@@ -15,6 +20,7 @@ use std::io::ErrorKind;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
 use tokio::fs::create_dir_all;
 use tokio::io::AsyncWriteExt;
 use uname_rs::Uname;
@@ -41,6 +47,13 @@ impl Config {
             Err(ref e) if e.kind() == ErrorKind::NotFound => Ok(Default::default()),
             Err(e) => Err(e),
         }
+    }
+
+    pub fn take_repos(&mut self) -> BTreeMap<String, Box<dyn Repo>> {
+        std::mem::take(&mut self.repos)
+            .into_iter()
+            .map(|(name, repo_config)| (name, <dyn Repo>::new(repo_config)))
+            .collect()
     }
 }
 
@@ -86,8 +99,16 @@ impl Default for DebConfig {
 
 #[async_trait::async_trait]
 pub trait Repo {
-    async fn pull(&mut self, prefix: &Path, name: &str) -> Result<(), Error>;
-    fn search(&mut self, prefix: &Path, name: &str, keyword: &str) -> Result<(), Error>;
+    async fn pull(&mut self, config: &Config, name: &str) -> Result<(), Error>;
+
+    async fn install(
+        &mut self,
+        config: &Config,
+        name: &str,
+        packages: Vec<String>,
+    ) -> Result<(), Error>;
+
+    fn search(&mut self, config: &Config, name: &str, keyword: &str) -> Result<(), Error>;
 }
 
 impl dyn Repo {
@@ -119,12 +140,12 @@ impl DebRepo {
 
 #[async_trait::async_trait]
 impl Repo for DebRepo {
-    async fn pull(&mut self, prefix: &Path, name: &str) -> Result<(), Error> {
+    async fn pull(&mut self, config: &Config, name: &str) -> Result<(), Error> {
         let arch = Self::native_arch()?;
         for base_url in self.config.base_urls.iter() {
             for suite in self.config.suites.iter() {
                 let suite_url = format!("{}/dists/{}", base_url, suite);
-                let suite_dir = prefix.join(name).join(suite);
+                let suite_dir = config.cache_dir.join(name).join(suite);
                 create_dir_all(&suite_dir).await?;
                 let release_file = suite_dir.join("Release");
                 download_file(&format!("{}/Release", suite_url), &release_file, None).await?;
@@ -185,14 +206,130 @@ impl Repo for DebRepo {
                     }
                 }
             }
+            // Only one URL is used.
+            break;
         }
         Ok(())
     }
 
-    fn search(&mut self, prefix: &Path, name: &str, keyword: &str) -> Result<(), Error> {
+    async fn install(
+        &mut self,
+        config: &Config,
+        name: &str,
+        packages: Vec<String>,
+    ) -> Result<(), Error> {
+        for package_name in packages.into_iter() {
+            let arch = Self::native_arch()?;
+            for suite in self.config.suites.iter() {
+                let suite_dir = config.cache_dir.join(name).join(suite);
+                let release_file = suite_dir.join("Release");
+                let release: deb::Release = std::fs::read_to_string(&release_file)?
+                    .parse()
+                    .map_err(Error::other)?;
+                for component in release.components().intersection(&self.config.components) {
+                    let component_dir = suite_dir.join(component.as_str());
+                    for arch in [arch.as_str(), "all"] {
+                        let arch_dir = component_dir.join(format!("binary-{}", arch));
+                        let packages_prefix = format!("{}/binary-{}", component, arch);
+                        let files = release.get_files(&packages_prefix, "Packages");
+                        for (candidate, _hash, _file_size) in files.into_iter() {
+                            let file_name = candidate.file_name().unwrap();
+                            let packages_file = arch_dir.join(file_name);
+                            let mut packages_str = String::new();
+                            let file = match File::open(&packages_file) {
+                                Ok(file) => file,
+                                Err(ref e) if e.kind() == ErrorKind::NotFound => continue,
+                                Err(e) => return Err(e),
+                            };
+                            let mut file = AnyDecoder::new(BufReader::new(file));
+                            file.read_to_string(&mut packages_str)?;
+                            let packages: deb::PerArchPackages =
+                                packages_str.parse().map_err(Error::other)?;
+                            let matches = packages.find_by_name(&package_name);
+                            if !matches.is_empty() {
+                                println!(
+                                    "Source {} / {} / {} / {:?}",
+                                    name, suite, component, packages_file
+                                );
+                            }
+                            for package in matches.iter() {
+                                println!(
+                                    "{}  -  {}  -  {}",
+                                    package.inner.name,
+                                    package.inner.version,
+                                    package
+                                        .inner
+                                        .description
+                                        .as_str()
+                                        .lines()
+                                        .next()
+                                        .unwrap_or_default()
+                                );
+                            }
+                            for package in matches.into_iter() {
+                                for base_url in self.config.base_urls.iter() {
+                                    let package_url =
+                                        format!("{}/{}", base_url, package.filename.display());
+                                    let package_file = arch_dir.join(&package.filename);
+                                    if let Some(dirname) = package_file.parent() {
+                                        create_dir_all(dirname).await?;
+                                    }
+                                    match download_file(&package_url, &package_file, package.hash())
+                                        .await
+                                    {
+                                        Ok(..) => {
+                                            let verifier = deb::PackageVerifier::none();
+                                            let (control, data) = deb::Package::read(
+                                                File::open(&package_file)?,
+                                                &verifier,
+                                            )
+                                            .map_err(Error::other)?;
+
+                                            log::info!("{:#?}", control);
+                                            let mut tar_archive =
+                                                tar::Archive::new(AnyDecoder::new(&data[..]));
+                                            let dst = config.store_dir.join(&name);
+                                            create_dir_all(&dst).await?;
+                                            tar_archive.unpack(&dst)?;
+                                            drop(tar_archive);
+                                            let mut tar_archive =
+                                                tar::Archive::new(AnyDecoder::new(&data[..]));
+                                            for entry in tar_archive.entries()? {
+                                                let entry = entry?;
+                                                let path = dst.join(entry.path()?);
+                                                match get_elf_type(&path) {
+                                                    Ok(..) => {
+                                                        log::info!("patching {:?}", path);
+                                                        Command::new("./patchelf.sh")
+                                                            .arg(&path)
+                                                            .arg(&dst)
+                                                            .status()
+                                                            .unwrap();
+                                                    }
+                                                    _ => {
+                                                        // TODO
+                                                    }
+                                                }
+                                            }
+                                            break;
+                                        }
+                                        Err(..) => continue,
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn search(&mut self, config: &Config, name: &str, keyword: &str) -> Result<(), Error> {
         let arch = Self::native_arch()?;
         for suite in self.config.suites.iter() {
-            let suite_dir = prefix.join(name).join(suite);
+            let suite_dir = config.cache_dir.join(name).join(suite);
             let release_file = suite_dir.join("Release");
             let release: deb::Release = std::fs::read_to_string(&release_file)?
                 .parse()
@@ -218,7 +355,10 @@ impl Repo for DebRepo {
                             packages_str.parse().map_err(Error::other)?;
                         let matches = packages.find(keyword);
                         if !matches.is_empty() {
-                            println!("Source {} / {} / {} / {:?}", name, suite, component, packages_file);
+                            println!(
+                                "Source {} / {} / {} / {:?}",
+                                name, suite, component, packages_file
+                            );
                         }
                         for package in matches {
                             println!(
@@ -260,6 +400,7 @@ async fn do_download_file<P: AsRef<Path>>(
     hash: Option<AnyHash>,
 ) -> Result<(), Error> {
     // TODO last-modified, If-Modified-Since
+    // TODO if-none-match
     let path = path.as_ref();
     let etag_path = path.parent().unwrap().join(format!(
         ".{}.etag",
@@ -303,7 +444,7 @@ async fn do_download_file<P: AsRef<Path>>(
                 Error::other(e)
             }
         })?;
-    if let Some(etag) = response.headers().get("ETag") {
+    if let Some(etag) = response.headers().get(ETAG) {
         std::fs::write(&etag_path, etag.as_bytes())?;
     }
     let mut stream = response.bytes_stream();
@@ -323,6 +464,28 @@ async fn do_download_file<P: AsRef<Path>>(
         }
     }
     Ok(())
+}
+
+fn get_elf_type(path: &Path) -> Result<ElfType, Error> {
+    let mut file = File::open(path)?;
+    let mut buf = [0; 64];
+    file.read(&mut buf[..])?;
+    drop(file);
+    let ident = elf::file::parse_ident::<AnyEndian>(&buf).map_err(Error::other)?;
+    let header = elf::file::FileHeader::<AnyEndian>::parse_tail(ident, &buf[EI_NIDENT..])
+        .map_err(Error::other)?;
+    eprintln!("try {:?}", path);
+    eprintln!("header {:?}", header);
+    match header.e_type {
+        ET_EXEC => Ok(ElfType::Executable),
+        ET_DYN => Ok(ElfType::Library),
+        t => Err(Error::other(format!("unknown elf type: {}", t))),
+    }
+}
+
+enum ElfType {
+    Executable,
+    Library,
 }
 
 const WOLFPACK_UA: HeaderValue =

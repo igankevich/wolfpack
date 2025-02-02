@@ -7,10 +7,11 @@ use pgp::SignedSecretKey;
 use rand::rngs::OsRng;
 
 use crate::sign::Error;
+use crate::sign::PgpSignature;
 use crate::sign::PgpSigner;
-use crate::sign::PgpVerifier;
 use crate::sign::Signer;
 use crate::sign::Verifier;
+use crate::sign::VerifierV2;
 
 pub use crate::sign::PgpSignature as Signature;
 pub use crate::sign::PgpVerifyingKey as VerifyingKey;
@@ -38,20 +39,53 @@ impl Signer for PackageSigner {
 }
 
 pub struct PackageVerifier {
-    inner: PgpVerifier,
+    verifying_keys: Vec<VerifyingKey>,
+    no_verify: bool,
 }
 
 impl PackageVerifier {
     pub fn new(verifying_key: VerifyingKey) -> Self {
+        Self::new_v2(vec![verifying_key])
+    }
+
+    pub fn new_v2(verifying_keys: Vec<VerifyingKey>) -> Self {
         Self {
-            inner: PgpVerifier::new(verifying_key.into()),
+            verifying_keys,
+            no_verify: false,
+        }
+    }
+
+    pub fn none() -> Self {
+        Self {
+            verifying_keys: Default::default(),
+            no_verify: true,
         }
     }
 }
 
 impl Verifier for PackageVerifier {
     fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
-        self.inner.verify(message, signature)
+        if self.no_verify {
+            return Ok(());
+        }
+        let signature = PgpSignature::read_armored_one(signature).map_err(|_| Error)?;
+        VerifyingKey::verify_against_any(self.verifying_keys.iter(), message, &signature)
+    }
+
+    fn verify_any<I, S>(&self, message: &[u8], signatures: I) -> Result<(), Error>
+    where
+        I: Iterator<Item = S>,
+        S: AsRef<[u8]>,
+    {
+        if self.no_verify {
+            return Ok(());
+        }
+        for sig in signatures {
+            if self.verify(message, sig.as_ref()).is_ok() {
+                return Ok(());
+            }
+        }
+        Err(Error)
     }
 }
 

@@ -17,6 +17,7 @@ use crate::deb::Package;
 use crate::deb::PackageVerifier;
 use crate::deb::Release;
 use crate::deb::SimpleValue;
+use crate::hash::AnyHash;
 use crate::hash::Md5Hash;
 use crate::hash::MultiHashReader;
 use crate::hash::Sha1Hash;
@@ -42,7 +43,7 @@ impl Repository {
         let mut push_package = |path: &Path| -> Result<(), Error> {
             eprintln!("reading {}", path.display());
             let mut reader = MultiHashReader::new(File::open(path)?);
-            let package = Package::read_control(reader.by_ref(), verifier)?;
+            let (package, _data) = Package::read(reader.by_ref(), verifier)?;
             let (hash, size) = reader.digest()?;
             let mut filename = PathBuf::new();
             filename.push("data");
@@ -155,6 +156,16 @@ impl PerArchPackages {
         }
         matches
     }
+
+    pub fn find_by_name(&self, name: &str) -> Vec<ExtendedPackage> {
+        let mut matches = Vec::new();
+        for package in self.packages.iter() {
+            if package.inner.name.as_str() == name {
+                matches.push(package.clone());
+            }
+        }
+        matches
+    }
 }
 
 impl Display for PerArchPackages {
@@ -190,6 +201,21 @@ pub struct ExtendedPackage {
     pub sha256: Option<Sha256Hash>,
     pub filename: PathBuf,
     pub size: u64,
+}
+
+impl ExtendedPackage {
+    pub fn hash(&self) -> Option<AnyHash> {
+        if let Some(hash) = self.sha256.as_ref() {
+            return Some(hash.clone().into());
+        }
+        if let Some(hash) = self.sha1.as_ref() {
+            return Some(hash.clone().into());
+        }
+        if let Some(hash) = self.md5.as_ref() {
+            return Some(hash.clone().into());
+        }
+        None
+    }
 }
 
 impl Display for ExtendedPackage {

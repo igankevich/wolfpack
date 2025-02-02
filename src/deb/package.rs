@@ -70,9 +70,13 @@ impl Package {
         Ok(())
     }
 
-    pub fn read_control<R: Read>(reader: R, verifier: &PackageVerifier) -> Result<Package, Error> {
+    pub fn read<R: Read>(
+        reader: R,
+        verifier: &PackageVerifier,
+    ) -> Result<(Package, Vec<u8>), Error> {
         let mut reader = ar::Archive::new(reader);
         let mut control: Option<Vec<u8>> = None;
+        let mut data: Option<Vec<u8>> = None;
         let mut message_parts: [Vec<u8>; 3] = [Vec::new(), Vec::new(), Vec::new()];
         let mut signatures: Vec<Vec<u8>> = Vec::new();
         reader.find(|entry| {
@@ -92,8 +96,13 @@ impl Package {
                     control = Some(buf);
                 }
                 Some(path) if path.starts_with("data.tar") => {
-                    message_parts[2].clear();
-                    entry.read_to_end(&mut message_parts[2])?;
+                    if data.is_some() {
+                        return Err(std::io::Error::other("multiple `data.tar*` files"));
+                    }
+                    let mut buf = Vec::new();
+                    entry.read_to_end(&mut buf)?;
+                    message_parts[2] = buf.clone();
+                    data = Some(buf);
                 }
                 Some(path) if path.starts_with("_gpg") => {
                     let mut buf = Vec::new();
@@ -118,6 +127,7 @@ impl Package {
         {
             return Err(Error::other("signature verification failed"));
         }
+        let data = data.ok_or_else(|| Error::MissingFile("data.tar*".into()))?;
         let mut tar_archive = tar::Archive::new(AnyDecoder::new(&control[..]));
         for entry in tar_archive.entries()? {
             let mut entry = entry?;
@@ -125,7 +135,7 @@ impl Package {
             if path == Path::new("control") {
                 let mut buf = String::with_capacity(4096);
                 entry.read_to_string(&mut buf)?;
-                return buf.parse::<Package>();
+                return Ok((buf.parse::<Package>()?, data));
             }
         }
         Err(Error::MissingFile("control.tar*".into()))

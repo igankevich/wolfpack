@@ -6,7 +6,6 @@ use self::logger::*;
 
 use clap::Parser;
 use clap::Subcommand;
-use std::collections::BTreeMap;
 use std::io::Error;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -30,7 +29,12 @@ enum Command {
 
 #[derive(clap::Args)]
 struct InstallArgs {
-    name: String,
+    #[clap(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        value_name = "PACKAGE"
+    )]
+    packages: Vec<String>,
 }
 
 #[derive(clap::Args)]
@@ -55,40 +59,40 @@ fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
     }
 }
 
-fn pull(config: Config) -> Result<ExitCode, Box<dyn std::error::Error>> {
+fn pull(mut config: Config) -> Result<ExitCode, Box<dyn std::error::Error>> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     let _guard = rt.enter();
     rt.block_on(async {
-        let mut repos = config
-            .repos
-            .into_iter()
-            .map(|(name, repo_config)| (name, <dyn Repo>::new(repo_config)))
-            .collect::<BTreeMap<_, _>>();
+        let mut repos = config.take_repos();
         for (name, repo) in repos.iter_mut() {
-            repo.pull(config.store_dir.as_path(), name.as_str()).await?;
+            repo.pull(&config, name.as_str()).await?;
         }
         Ok(ExitCode::SUCCESS)
     })
 }
 
-fn search(config: Config, args: SearchArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
-    let mut repos = config
-        .repos
-        .into_iter()
-        .map(|(name, repo_config)| (name, <dyn Repo>::new(repo_config)))
-        .collect::<BTreeMap<_, _>>();
+fn search(mut config: Config, args: SearchArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    let mut repos = config.take_repos();
     let keyword = args.keyword.to_lowercase();
     for (name, repo) in repos.iter_mut() {
-        repo.search(config.store_dir.as_path(), name.as_str(), &keyword)?;
+        repo.search(&config, name.as_str(), &keyword)?;
     }
     Ok(ExitCode::SUCCESS)
 }
 
-fn install(
-    _config: Config,
-    _install_args: InstallArgs,
-) -> Result<ExitCode, Box<dyn std::error::Error>> {
-    Ok(ExitCode::SUCCESS)
+fn install(mut config: Config, args: InstallArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let _guard = rt.enter();
+    rt.block_on(async {
+        let mut repos = config.take_repos();
+        for (name, repo) in repos.iter_mut() {
+            repo.install(&config, name.as_str(), args.packages.clone())
+                .await?;
+        }
+        Ok(ExitCode::SUCCESS)
+    })
 }

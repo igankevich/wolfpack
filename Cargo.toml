@@ -18,6 +18,7 @@ cpio = { version = "0.2.0", package = "kpea" }
 crc = "3.2.1"
 deko = "0.2.0"
 der = { version = "0.7.9", features = ["std", "zeroize"], default-features = false }
+elf = "0.7.4"
 flate2 = "1.0.33"
 futures-util = "0.3.31"
 hex = "0.4.3"

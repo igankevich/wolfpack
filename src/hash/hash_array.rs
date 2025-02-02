@@ -106,5 +106,11 @@ impl<const N: usize> FromStr for HashArray<N> {
 #[derive(Debug)]
 pub struct HashParseError;
 
+impl Display for HashParseError {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "Invalid hash string")
+    }
+}
+
 #[derive(Debug)]
 pub struct HashTryFromError;

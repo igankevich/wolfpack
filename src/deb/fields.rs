@@ -2,6 +2,7 @@ use chrono::DateTime;
 use std::collections::hash_map::Entry::*;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::fmt::Display;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -30,18 +31,23 @@ impl Fields {
             .ok_or_else(|| Error::MissingField(name))
     }
 
-    pub fn remove<T: FromStr>(&mut self, name: &'static str) -> Result<T, Error> {
-        self.fields
+    pub fn remove<T: FromStr>(&mut self, name: &'static str) -> Result<T, Error>
+    where
+        <T as FromStr>::Err: Display,
+    {
+        let value = self
+            .fields
             .remove(&FieldName::new_unchecked(name))
-            .ok_or_else(|| Error::MissingField(name))?
+            .ok_or_else(|| Error::MissingField(name))?;
+        value
             .as_str()
-            .parse()
-            .map_err(|_| Error::FieldValue(name.into()))
+            .parse::<T>()
+            .map_err(|e| Error::FieldValue(name, value.to_string(), e.to_string()))
     }
 
     pub fn remove_some<T: FromStr>(&mut self, name: &'static str) -> Result<Option<T>, Error>
     where
-        <T as FromStr>::Err: Debug,
+        <T as FromStr>::Err: Display,
     {
         self.fields
             .remove(&FieldName::new_unchecked(name))
@@ -49,7 +55,7 @@ impl Fields {
                 value
                     .as_str()
                     .parse::<T>()
-                    .map_err(|e| Error::FieldValue(format!("`{name} = {value}`: {e:?}")))
+                    .map_err(|e| Error::FieldValue(name, value.to_string(), e.to_string()))
             })
             .transpose()
     }

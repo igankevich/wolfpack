@@ -9,10 +9,10 @@ pub enum Error {
     PackageName(String),
     #[error("invalid package version {0:?}")]
     Version(String),
-    #[error("invalid field name {0:?}")]
+    #[error("Invalid field name: {0:?}")]
     FieldName(String),
-    #[error("invalid field value {0:?}")]
-    FieldValue(String),
+    #[error("Invalid field {0:?}: {1:?}: {2}")]
+    FieldValue(&'static str, String, String),
     #[error("invalid line in control data: {0:?}")]
     Package(String),
     #[error("{0:?} is missing")]

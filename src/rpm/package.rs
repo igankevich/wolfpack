@@ -56,7 +56,7 @@ impl Package {
         W: Write,
         P: AsRef<Path>,
     {
-        let lead = Lead::new(CString::new(self.name.clone()).unwrap());
+        let lead = Lead::new(CString::new(self.name.clone()).map_err(Error::other)?);
         eprintln!("write {lead:?}");
         lead.write(writer.by_ref())?;
         let mut basenames = Vec::<CString>::new();
@@ -93,8 +93,8 @@ impl Package {
                     format!("{}/", parent)
                 };
                 let i = basenames.len();
-                basenames.push(CString::new(file_name).unwrap());
-                dirnames.push(CString::new(parent).unwrap());
+                basenames.push(CString::new(file_name).map_err(Error::other)?);
+                dirnames.push(CString::new(parent).map_err(Error::other)?);
                 dirindices.push(i as u32);
                 usernames.push(c"root".into());
                 groupnames.push(c"root".into());
@@ -105,10 +105,10 @@ impl Package {
                 } else {
                     sha2::Sha256::compute(&std::fs::read(path)?).to_string()
                 };
-                filedigests.push(CString::new(hash).unwrap());
+                filedigests.push(CString::new(hash).map_err(Error::other)?);
             }
         }
-        let mut header2 = Header::new(self.into());
+        let mut header2 = Header::new(self.try_into()?);
         header2.insert(Entry::BaseNames(basenames.try_into()?));
         header2.insert(Entry::DirNames(dirnames.try_into()?));
         header2.insert(Entry::DirIndexes(dirindices.try_into()?));
@@ -137,13 +137,13 @@ impl Package {
         // sign second header without the leading padding
         let signature_v4 = signer
             .sign(&header2)
-            .map_err(|_| Error::other("failed to sign rpm"))?
+            .map_err(|_| Error::other("Failed to sign RPM"))?
             .to_binary()?;
         header2.extend(payload);
         // sign second header without the leading padding and the rest of the file
         let signature_v3 = signer
             .sign(&header2)
-            .map_err(|_| Error::other("failed to sign rpm"))?
+            .map_err(|_| Error::other("Failed to sign RPM"))?
             .to_binary()?;
         eprintln!("header2 len {}", header2.len());
         let header1 = Header::new(
@@ -152,7 +152,7 @@ impl Package {
                 signature_v4,
                 header_sha256,
             }
-            .into(),
+            .try_into()?,
         );
         let header1 = header1.to_vec()?;
         writer.write_all(&header1)?;
@@ -230,23 +230,24 @@ impl Package {
     }
 }
 
-impl From<Package> for HashMap<Tag, Entry> {
-    fn from(other: Package) -> Self {
+impl TryFrom<Package> for HashMap<Tag, Entry> {
+    type Error = Error;
+    fn try_from(other: Package) -> Result<Self, Self::Error> {
         use Entry::*;
-        [
-            Name(CString::new(other.name).unwrap()).into(),
-            Version(CString::new(other.version).unwrap()).into(),
+        Ok([
+            Name(CString::new(other.name).map_err(Error::other)?).into(),
+            Version(CString::new(other.version).map_err(Error::other)?).into(),
             Release(c"1".into()).into(),
-            Summary(CString::new(other.summary).unwrap()).into(),
-            Description(CString::new(other.description).unwrap()).into(),
-            License(CString::new(other.license).unwrap()).into(),
-            Url(CString::new(other.url).unwrap()).into(),
+            Summary(CString::new(other.summary).map_err(Error::other)?).into(),
+            Description(CString::new(other.description).map_err(Error::other)?).into(),
+            License(CString::new(other.license).map_err(Error::other)?).into(),
+            Url(CString::new(other.url).map_err(Error::other)?).into(),
             Os(c"linux".into()).into(),
-            Arch(CString::new(other.arch).unwrap()).into(),
+            Arch(CString::new(other.arch).map_err(Error::other)?).into(),
             PayloadFormat(c"cpio".into()).into(),
             PayloadCompressor(c"gzip".into()).into(),
         ]
-        .into()
+        .into())
     }
 }
 
@@ -306,15 +307,16 @@ pub struct Signatures {
     pub header_sha256: Sha256Hash,
 }
 
-impl From<Signatures> for HashMap<SignatureTag, SignatureEntry> {
-    fn from(other: Signatures) -> Self {
+impl TryFrom<Signatures> for HashMap<SignatureTag, SignatureEntry> {
+    type Error = Error;
+    fn try_from(other: Signatures) -> Result<Self, Self::Error> {
         use SignatureEntry::*;
-        [
-            Gpg(other.signature_v3.try_into().unwrap()).into(),
-            Dsa(other.signature_v4.try_into().unwrap()).into(),
+        Ok([
+            Gpg(other.signature_v3.try_into().map_err(Error::other)?).into(),
+            Dsa(other.signature_v4.try_into().map_err(Error::other)?).into(),
             Sha256(other.header_sha256).into(),
         ]
-        .into()
+        .into())
     }
 }
 

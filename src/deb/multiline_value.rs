@@ -1,5 +1,6 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::io::ErrorKind;
 
 use crate::deb::Error;
 use crate::deb::SimpleValue;
@@ -11,7 +12,7 @@ pub struct MultilineValue(String);
 impl MultilineValue {
     pub fn try_from(value: String) -> Result<Self, Error> {
         if value.is_empty() || value.starts_with(char::is_whitespace) {
-            return Err(Error::FieldValue(value));
+            return Err(ErrorKind::InvalidData.into());
         }
         Ok(Self(value))
     }

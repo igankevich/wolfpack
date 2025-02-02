@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -120,13 +121,13 @@ impl TryFrom<&str> for SimpleValue {
 
 fn validate_simple_value(value: &str) -> Result<(), Error> {
     if !value.as_bytes().iter().all(is_valid_char) {
-        return Err(Error::FieldValue(value.to_string()));
+        return Err(ErrorKind::InvalidData.into());
     }
     if value.is_empty() || value.chars().all(char::is_whitespace) {
-        return Err(Error::FieldValue(value.to_string()));
+        return Err(ErrorKind::InvalidData.into());
     }
     if value.chars().next().iter().all(|ch| ch.is_whitespace()) {
-        return Err(Error::FieldValue(value.to_string()));
+        return Err(ErrorKind::InvalidData.into());
     }
     Ok(())
 }

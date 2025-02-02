@@ -5,6 +5,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fs::create_dir_all;
 use std::fs::File;
+use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
@@ -47,7 +48,7 @@ impl Repository {
             let mut filename = PathBuf::new();
             filename.push(hash.to_string());
             create_dir_all(output_dir.as_ref().join(&filename))?;
-            filename.push(path.file_name().unwrap());
+            filename.push(path.file_name().ok_or(ErrorKind::InvalidData)?);
             let new_path = output_dir.as_ref().join(&filename);
             std::fs::rename(path, new_path)?;
             let control = ExtendedPackage {

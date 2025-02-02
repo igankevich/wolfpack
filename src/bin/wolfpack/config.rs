@@ -19,6 +19,7 @@ use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Error;
 use std::io::ErrorKind;
+use std::io::ErrorKind::InvalidData;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
@@ -192,12 +193,12 @@ impl Repo for DebRepo {
                         let arch_dir = component_dir.join(format!("binary-{}", arch));
                         create_dir_all(&arch_dir).await?;
                         for (candidate, hash, _file_size) in files.into_iter() {
-                            let file_name = candidate.file_name().unwrap();
+                            let file_name = candidate.file_name().ok_or(ErrorKind::InvalidData)?;
                             let packages_url = format!(
                                 "{}/{}/{}",
                                 suite_url,
                                 packages_prefix,
-                                file_name.to_str().unwrap()
+                                file_name.to_str().ok_or(ErrorKind::InvalidData)?,
                             );
                             let packages_file = arch_dir.join(file_name);
                             match download_file(&packages_url, &packages_file, Some(hash)).await {
@@ -237,7 +238,7 @@ impl Repo for DebRepo {
                         let packages_prefix = format!("{}/binary-{}", component, arch);
                         let files = release.get_files(&packages_prefix, "Packages");
                         for (candidate, _hash, _file_size) in files.iter() {
-                            let file_name = candidate.file_name().unwrap();
+                            let file_name = candidate.file_name().ok_or(InvalidData)?;
                             let packages_file = arch_dir.join(file_name);
                             let mut packages_str = String::new();
                             let file = match File::open(&packages_file) {
@@ -322,7 +323,7 @@ impl Repo for DebRepo {
                     let packages_prefix = format!("{}/binary-{}", component, arch);
                     let files = release.get_files(&packages_prefix, "Packages");
                     for (candidate, _hash, _file_size) in files.iter() {
-                        let file_name = candidate.file_name().unwrap();
+                        let file_name = candidate.file_name().ok_or(InvalidData)?;
                         let packages_file = arch_dir.join(file_name);
                         let mut packages_str = String::new();
                         let file = match File::open(&packages_file) {
@@ -374,7 +375,6 @@ impl Repo for DebRepo {
                         let (_control, data) =
                             deb::Package::read(File::open(&package_file)?, &verifier)
                                 .map_err(Error::other)?;
-
                         log::info!("Installing {}", package_file.display());
                         let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
                         let dst = config.store_dir.join(name);
@@ -388,11 +388,16 @@ impl Repo for DebRepo {
                             match get_elf_type(&path) {
                                 Ok(..) => {
                                     log::info!("patching {:?}", path);
-                                    Command::new("./patchelf.sh")
+                                    let status = Command::new("./patchelf.sh")
                                         .arg(&path)
                                         .arg(&dst)
-                                        .status()
-                                        .unwrap();
+                                        .status()?;
+                                    if !status.success() {
+                                        return Err(Error::other(format!(
+                                            "Failed to patch {:?}",
+                                            path
+                                        )));
+                                    }
                                 }
                                 _ => {
                                     // TODO
@@ -423,7 +428,7 @@ impl Repo for DebRepo {
                     let packages_prefix = format!("{}/binary-{}", component, arch);
                     let files = release.get_files(&packages_prefix, "Packages");
                     for (candidate, _hash, _file_size) in files.into_iter() {
-                        let file_name = candidate.file_name().unwrap();
+                        let file_name = candidate.file_name().ok_or(InvalidData)?;
                         let packages_file = arch_dir.join(file_name);
                         let mut packages_str = String::new();
                         let file = match File::open(&packages_file) {
@@ -447,7 +452,7 @@ impl Repo for DebRepo {
                                 "{}  -  {}  -  {}  -  {}",
                                 package.inner.name,
                                 package.inner.version,
-                                package.sha256.unwrap(),
+                                package.hash().map(|h| h.to_string()).unwrap_or_default(),
                                 package
                                     .inner
                                     .description
@@ -484,9 +489,12 @@ async fn do_download_file<P: AsRef<Path>>(
     // TODO last-modified, If-Modified-Since
     // TODO if-none-match
     let path = path.as_ref();
-    let etag_path = path.parent().unwrap().join(format!(
+    let etag_path = path.parent().ok_or(InvalidData)?.join(format!(
         ".{}.etag",
-        path.file_name().unwrap().to_str().unwrap()
+        path.file_name()
+            .ok_or(InvalidData)?
+            .to_str()
+            .ok_or(InvalidData)?
     ));
     let etag = match std::fs::read(&etag_path) {
         Ok(etag) => etag,

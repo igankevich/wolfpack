@@ -3,6 +3,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::io::ErrorKind;
 
 use crate::deb::Error;
 use crate::deb::SimpleValue;
@@ -26,17 +27,17 @@ impl FoldedValue {
 
     pub fn try_from(value: String) -> Result<Self, Error> {
         if value.is_empty() {
-            return Err(Error::FieldValue(format!("empty {value}")));
+            return Err(ErrorKind::InvalidData.into());
         }
         if value.starts_with(char::is_whitespace) {
-            return Err(Error::FieldValue(format!("whitespace {value}")));
+            return Err(ErrorKind::InvalidData.into());
         }
         if value
             .split('\n')
             .skip(1)
             .any(|line| line.is_empty() || line == "." || line.chars().all(char::is_whitespace))
         {
-            return Err(Error::FieldValue(format!("empty line {value}")));
+            return Err(ErrorKind::InvalidData.into());
         }
         Ok(Self(value))
     }

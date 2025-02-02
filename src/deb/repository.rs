@@ -5,6 +5,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fs::create_dir_all;
 use std::fs::File;
+use std::io::ErrorKind;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
@@ -42,7 +43,6 @@ impl Repository {
     {
         let mut packages: HashMap<SimpleValue, PerArchPackages> = HashMap::new();
         let mut push_package = |path: &Path| -> Result<(), Error> {
-            eprintln!("reading {}", path.display());
             let mut reader = MultiHashReader::new(File::open(path)?);
             let (package, _data) = Package::read(reader.by_ref(), verifier)?;
             let (hash, size) = reader.digest()?;
@@ -50,7 +50,7 @@ impl Repository {
             filename.push("data");
             filename.push(hash.sha2.to_string());
             create_dir_all(output_dir.as_ref().join(&filename))?;
-            filename.push(path.file_name().unwrap());
+            filename.push(path.file_name().ok_or(ErrorKind::InvalidData)?);
             let new_path = output_dir.as_ref().join(&filename);
             std::fs::rename(path, new_path)?;
             let package = ExtendedPackage {

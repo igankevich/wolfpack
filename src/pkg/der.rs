@@ -1,3 +1,4 @@
+use crate::sign::Error;
 use der::asn1::BitStringRef;
 use der::asn1::Sequence;
 use der::asn1::Utf8StringRef;
@@ -23,7 +24,7 @@ pub struct SigningKeyDer<'a> {
 }
 
 impl<'a> SigningKeyDer<'a> {
-    pub fn signing_key(&self) -> SigningKey {
+    pub fn signing_key(&self) -> Result<SigningKey, Error> {
         self.key.signing_key()
     }
 }
@@ -105,14 +106,14 @@ impl SecretData {
         })
     }
 
-    fn signing_key(&self) -> SigningKey {
-        secp256k1::SecretKey::from_byte_array(
+    fn signing_key(&self) -> Result<SigningKey, Error> {
+        Ok(secp256k1::SecretKey::from_byte_array(
             self.data[(self.data.len() - SECRET_KEY_SIZE)..]
                 .try_into()
-                .unwrap(),
+                .expect("The slice length is `SECRET_KEY_SIZE`"),
         )
-        .unwrap()
-        .into()
+        .map_err(|_| Error)?
+        .into())
     }
 }
 

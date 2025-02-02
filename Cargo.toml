@@ -62,3 +62,7 @@ intervallum = "1.4.1"
 lddtree = "0.3.5"
 parking_lot = "0.12.3"
 pretty-hex = "0.4.1"
+
+[lints.clippy]
+unwrap_used = "deny"
+panic = "deny"

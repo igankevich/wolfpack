@@ -1,3 +1,5 @@
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::str::FromStr;
 
 use crate::hash::HashParseError;
@@ -38,6 +40,18 @@ impl AnyHash {
             Sha1(..) => Sha1Hash::LEN,
             Sha256(..) => Sha256Hash::LEN,
             Sha512(..) => Sha512Hash::LEN,
+        }
+    }
+}
+
+impl Display for AnyHash {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        use AnyHash::*;
+        match self {
+            Md5(h) => Display::fmt(h, f),
+            Sha1(h) => Display::fmt(h, f),
+            Sha256(h) => Display::fmt(h, f),
+            Sha512(h) => Display::fmt(h, f),
         }
     }
 }

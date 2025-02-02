@@ -38,8 +38,8 @@ pub fn display_parse<T: Display + FromStr + Debug + PartialEq + for<'a> Arbitrar
             .unwrap();
         assert_eq!(
             expected, actual,
-            "expected {:?} string {:?}",
-            expected, string
+            "expected = {:?}, actual = {:?}, string = {:?}",
+            expected, actual, string
         );
         Ok(())
     });

@@ -39,9 +39,9 @@ impl SigningKey {
     }
 
     pub fn from_der(der: &[u8]) -> Result<Self, Error> {
-        Ok(SigningKeyDer::from_der(der)
+        SigningKeyDer::from_der(der)
             .map_err(|_| Error)?
-            .signing_key())
+            .signing_key()
     }
 
     /// Sign file.

@@ -1,10 +1,10 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::io::Error;
 use std::io::ErrorKind;
 use std::ops::Deref;
 use std::str::FromStr;
 
+use crate::deb::Error;
 use crate::deb::Package;
 use crate::deb::PackageName;
 use crate::deb::SimpleValue;
@@ -220,7 +220,7 @@ impl FromStr for Dependency {
                 0..0
             };
             let version: Option<DependencyVersion> = if !range.is_empty() {
-                Some(value[range.clone()].parse().map_err(Error::other)?)
+                Some(value[range.clone()].parse()?)
             } else {
                 None
             };
@@ -254,7 +254,7 @@ impl FromStr for Dependency {
                 n
             };
             let range = 0..name_end;
-            let name: PackageName = value[range].trim().parse().map_err(Error::other)?;
+            let name: PackageName = value[range].trim().parse()?;
             name
         };
         Ok(Self {
@@ -298,7 +298,7 @@ impl FromStr for DependencyVersion {
         let operator = iter.next().ok_or(ErrorKind::InvalidData)?;
         let operator: DependencyVersionOp = operator.parse()?;
         let version = iter.next().ok_or(ErrorKind::InvalidData)?;
-        let version: Version = version.parse().map_err(Error::other)?;
+        let version: Version = version.parse()?;
         if iter.next().is_some() {
             return Err(ErrorKind::InvalidData.into());
         }
@@ -382,7 +382,7 @@ impl FromStr for DependencyArch {
         match value {
             "any" => Ok(Any),
             "all" => Ok(All),
-            other => Ok(One(other.parse().map_err(Error::other)?)),
+            other => Ok(One(other.parse()?)),
         }
     }
 }

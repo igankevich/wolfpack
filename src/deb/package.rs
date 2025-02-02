@@ -12,29 +12,32 @@ use normalize_path::NormalizePath;
 
 use crate::archive::ArchiveRead;
 use crate::archive::ArchiveWrite;
+use crate::deb::Dependencies;
 use crate::deb::Error;
 use crate::deb::Fields;
 use crate::deb::MultilineValue;
 use crate::deb::PackageName;
 use crate::deb::PackageSigner;
 use crate::deb::PackageVerifier;
-use crate::deb::PackageVersion;
 use crate::deb::SimpleValue;
+use crate::deb::Version;
 use crate::deb::DEBIAN_BINARY_CONTENTS;
 use crate::deb::DEBIAN_BINARY_FILE_NAME;
 use crate::sign::Signer;
 use crate::sign::Verifier;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
 pub struct Package {
     pub name: PackageName,
-    pub version: PackageVersion,
+    pub version: Version,
     pub license: SimpleValue,
     pub architecture: SimpleValue,
     pub maintainer: SimpleValue,
     pub description: MultilineValue,
     pub installed_size: Option<u64>,
+    pub depends: Dependencies,
+    pub pre_depends: Dependencies,
     pub other: Fields,
 }
 
@@ -160,6 +163,8 @@ impl Display for Package {
         for (name, value) in self.other.iter() {
             writeln!(f, "{}: {}", name, value)?;
         }
+        writeln!(f, "Depends: {}", self.depends)?;
+        writeln!(f, "Pre-Depends: {}", self.pre_depends)?;
         writeln!(f, "Description: {}", self.description)?;
         Ok(())
     }
@@ -177,6 +182,8 @@ impl FromStr for Package {
             description: fields.remove_any("description")?.try_into()?,
             maintainer: fields.remove_any("maintainer")?.try_into()?,
             installed_size: fields.remove_some("installed-size")?,
+            depends: fields.remove_some("depends")?.unwrap_or_default(),
+            pre_depends: fields.remove_some("pre-depends")?.unwrap_or_default(),
             other: fields,
         };
         Ok(control)
@@ -229,7 +236,7 @@ mod tests {
             let actual: Package = string
                 .parse()
                 .unwrap_or_else(|_| panic!("string = {:?}", string));
-            assert_eq!(expected, actual, "string = {:?}", string);
+            similar_asserts::assert_eq!(expected, actual, "string = {:?}", string);
             Ok(())
         });
     }

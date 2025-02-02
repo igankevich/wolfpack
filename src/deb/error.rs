@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::io::ErrorKind;
 
 use thiserror::Error;
 
@@ -7,7 +8,7 @@ pub enum Error {
     #[error("invalid package name {0:?}")]
     PackageName(String),
     #[error("invalid package version {0:?}")]
-    PackageVersion(String),
+    Version(String),
     #[error("invalid field name {0:?}")]
     FieldName(String),
     #[error("invalid field value {0:?}")]
@@ -39,5 +40,11 @@ impl Error {
     {
         let s: Cow<'a, str> = s.into();
         Self::Other(s.into_owned())
+    }
+}
+
+impl From<ErrorKind> for Error {
+    fn from(other: ErrorKind) -> Self {
+        Self::Io(other.into())
     }
 }

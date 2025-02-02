@@ -9,14 +9,14 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::deb::PackageName;
-use crate::deb::PackageVersion;
+use crate::deb::Version;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct CompactManifest {
     pub name: PackageName,
     pub origin: String,
-    pub version: PackageVersion,
+    pub version: Version,
     pub comment: String,
     pub maintainer: String,
     pub www: String,
@@ -119,7 +119,7 @@ impl FromStr for PackageMeta {
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Dependency {
     pub origin: String,
-    pub version: PackageVersion,
+    pub version: Version,
 }
 
 impl Debug for Dependency {

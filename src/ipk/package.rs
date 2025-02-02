@@ -25,8 +25,8 @@ use crate::ipk::PackageVerifier;
 use crate::sign::SignatureWriter;
 use crate::sign::VerifyingReader;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
 pub struct Package(deb::Package);
 
 impl Package {

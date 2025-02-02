@@ -206,6 +206,7 @@ mod tests {
     use crate::deb::PackageSigner;
     use crate::deb::PackageVerifier;
     use crate::deb::SigningKey;
+    use crate::deb::Value;
     use crate::test::DirectoryOfFiles;
     use crate::test::UpperHex;
 
@@ -245,7 +246,7 @@ mod tests {
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let mut buf: Vec<u8> = Vec::new();
             control.write(directory.path(), &mut buf, &signer).unwrap();
-            let actual = Package::read_control(&buf[..], &verifier).unwrap();
+            let (actual, ..) = Package::read(&buf[..], &verifier).unwrap();
             assert_eq!(control, actual);
             Ok(())
         });

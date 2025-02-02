@@ -79,13 +79,14 @@ mod tests {
     use std::time::Duration;
 
     use arbtest::arbtest;
+    use rand::rngs::OsRng;
     use tempfile::TempDir;
 
     use super::*;
-    use crate::macos::PackageSigner;
-    use crate::macos::SigningKey;
     use crate::test::prevent_concurrency;
     use crate::test::DirectoryOfFiles;
+    use zar::rsa::RsaPrivateKey;
+    use zar::ChecksumAlgo;
 
     #[ignore]
     #[test]
@@ -99,14 +100,10 @@ mod tests {
             .unwrap()
             .success());
         let _guard = prevent_concurrency("macos");
-        let (signing_key, _verifying_key) = SigningKey::generate("wolfpack".into()).unwrap();
-        let signer = PackageSigner::new(signing_key);
+        let signing_key = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
+        let signer = PackageSigner::new(ChecksumAlgo::Sha1, signing_key, Vec::new()).unwrap();
         let workdir = TempDir::new().unwrap();
         let package_file = workdir.path().join("test.pkg");
-        //let verifying_key_file = workdir.path().join("verifying-key");
-        //verifying_key
-        //    .write_armored(File::create(verifying_key_file.as_path()).unwrap())
-        //    .unwrap();
         arbtest(|u| {
             let package: Package = u.arbitrary()?;
             let directory: DirectoryOfFiles = u.arbitrary()?;

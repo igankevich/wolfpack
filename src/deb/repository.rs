@@ -347,8 +347,8 @@ mod tests {
                     .status()
                     .unwrap()
                     .success(),
-                "control = {:?}",
-                control
+                "package = {:?}",
+                package
             );
             Ok(())
         });

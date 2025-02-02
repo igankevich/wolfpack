@@ -19,7 +19,7 @@ where
         let mut data = vec![0_u8; BUFFER_LEN - spread + u.int_in_range::<usize>(0..=2 * spread)?];
         OsRng.fill_bytes(&mut data);
         let (actual_hash, size) = HashingReader::<&[u8], H>::new(&data[..]).digest().unwrap();
-        assert_eq!(data.len(), size);
+        assert_eq!(data.len() as u64, size);
         let mut hasher = H::new();
         hasher.update(&data);
         let expected_hash = hasher.finalize();

@@ -1,6 +1,7 @@
 use chrono::DateTime;
 use std::collections::hash_map::Entry::*;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -38,14 +39,17 @@ impl Fields {
             .map_err(|_| Error::FieldValue(name.into()))
     }
 
-    pub fn remove_some<T: FromStr>(&mut self, name: &'static str) -> Result<Option<T>, Error> {
+    pub fn remove_some<T: FromStr>(&mut self, name: &'static str) -> Result<Option<T>, Error>
+    where
+        <T as FromStr>::Err: Debug,
+    {
         self.fields
             .remove(&FieldName::new_unchecked(name))
             .map(|value| {
                 value
                     .as_str()
                     .parse::<T>()
-                    .map_err(|_| Error::FieldValue(name.into()))
+                    .map_err(|e| Error::FieldValue(format!("`{name} = {value}`: {e:?}")))
             })
             .transpose()
     }

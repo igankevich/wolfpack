@@ -19,6 +19,7 @@ use crate::deb::MultilineValue;
 use crate::deb::PackageName;
 use crate::deb::PackageSigner;
 use crate::deb::PackageVerifier;
+use crate::deb::Provides;
 use crate::deb::SimpleValue;
 use crate::deb::Version;
 use crate::deb::DEBIAN_BINARY_CONTENTS;
@@ -36,6 +37,7 @@ pub struct Package {
     pub maintainer: SimpleValue,
     pub description: MultilineValue,
     pub installed_size: Option<u64>,
+    pub provides: Option<Provides>,
     pub depends: Dependencies,
     pub pre_depends: Dependencies,
     pub other: Fields,
@@ -163,6 +165,9 @@ impl Display for Package {
         for (name, value) in self.other.iter() {
             writeln!(f, "{}: {}", name, value)?;
         }
+        if let Some(provides) = self.provides.as_ref() {
+            writeln!(f, "Provides: {}", provides)?;
+        }
         writeln!(f, "Depends: {}", self.depends)?;
         writeln!(f, "Pre-Depends: {}", self.pre_depends)?;
         writeln!(f, "Description: {}", self.description)?;
@@ -182,6 +187,7 @@ impl FromStr for Package {
             description: fields.remove_any("description")?.try_into()?,
             maintainer: fields.remove_any("maintainer")?.try_into()?,
             installed_size: fields.remove_some("installed-size")?,
+            provides: fields.remove_some("provides")?,
             depends: fields.remove_some("depends")?.unwrap_or_default(),
             pre_depends: fields.remove_some("pre-depends")?.unwrap_or_default(),
             other: fields,

@@ -13,7 +13,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::fs::File;
+use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Error;
 use std::io::ErrorKind;
@@ -219,8 +221,9 @@ impl Repo for DebRepo {
         name: &str,
         packages: Vec<String>,
     ) -> Result<(), Error> {
-        for package_name in packages.into_iter() {
-            let arch = Self::native_arch()?;
+        let native_arch = Self::native_arch()?;
+        let mut matches = Vec::new();
+        for package_name in packages.iter() {
             for suite in self.config.suites.iter() {
                 let suite_dir = config.cache_dir.join(name).join(suite);
                 let release_file = suite_dir.join("Release");
@@ -229,11 +232,11 @@ impl Repo for DebRepo {
                     .map_err(Error::other)?;
                 for component in release.components().intersection(&self.config.components) {
                     let component_dir = suite_dir.join(component.as_str());
-                    for arch in [arch.as_str(), "all"] {
+                    for arch in [native_arch.as_str(), "all"] {
                         let arch_dir = component_dir.join(format!("binary-{}", arch));
                         let packages_prefix = format!("{}/binary-{}", component, arch);
                         let files = release.get_files(&packages_prefix, "Packages");
-                        for (candidate, _hash, _file_size) in files.into_iter() {
+                        for (candidate, _hash, _file_size) in files.iter() {
                             let file_name = candidate.file_name().unwrap();
                             let packages_file = arch_dir.join(file_name);
                             let mut packages_str = String::new();
@@ -246,81 +249,159 @@ impl Repo for DebRepo {
                             file.read_to_string(&mut packages_str)?;
                             let packages: deb::PerArchPackages =
                                 packages_str.parse().map_err(Error::other)?;
-                            let matches = packages.find_by_name(&package_name);
-                            if !matches.is_empty() {
-                                println!(
-                                    "Source {} / {} / {} / {:?}",
-                                    name, suite, component, packages_file
-                                );
-                            }
-                            for package in matches.iter() {
-                                println!(
-                                    "{}  -  {}  -  {}",
-                                    package.inner.name,
-                                    package.inner.version,
-                                    package
-                                        .inner
-                                        .description
-                                        .as_str()
-                                        .lines()
-                                        .next()
-                                        .unwrap_or_default()
-                                );
-                            }
-                            for package in matches.into_iter() {
-                                for base_url in self.config.base_urls.iter() {
-                                    let package_url =
-                                        format!("{}/{}", base_url, package.filename.display());
+                            matches.extend(packages.find_by_name(package_name).into_iter().map(
+                                |package| {
                                     let package_file = arch_dir.join(&package.filename);
-                                    if let Some(dirname) = package_file.parent() {
-                                        create_dir_all(dirname).await?;
-                                    }
-                                    match download_file(&package_url, &package_file, package.hash())
-                                        .await
-                                    {
-                                        Ok(..) => {
-                                            let verifier = deb::PackageVerifier::none();
-                                            let (control, data) = deb::Package::read(
-                                                File::open(&package_file)?,
-                                                &verifier,
-                                            )
-                                            .map_err(Error::other)?;
-
-                                            log::info!("{:#?}", control);
-                                            let mut tar_archive =
-                                                tar::Archive::new(AnyDecoder::new(&data[..]));
-                                            let dst = config.store_dir.join(name);
-                                            create_dir_all(&dst).await?;
-                                            tar_archive.unpack(&dst)?;
-                                            drop(tar_archive);
-                                            let mut tar_archive =
-                                                tar::Archive::new(AnyDecoder::new(&data[..]));
-                                            for entry in tar_archive.entries()? {
-                                                let entry = entry?;
-                                                let path = dst.join(entry.path()?);
-                                                match get_elf_type(&path) {
-                                                    Ok(..) => {
-                                                        log::info!("patching {:?}", path);
-                                                        Command::new("./patchelf.sh")
-                                                            .arg(&path)
-                                                            .arg(&dst)
-                                                            .status()
-                                                            .unwrap();
-                                                    }
-                                                    _ => {
-                                                        // TODO
-                                                    }
-                                                }
-                                            }
-                                            break;
-                                        }
-                                        Err(..) => continue,
-                                    }
-                                }
-                            }
-                            break;
+                                    (package, package_file)
+                                },
+                            ));
                         }
                     }
+                }
+            }
+        }
+        for (i, (package, package_file)) in matches.iter().enumerate() {
+            println!(
+                "{}. {}  -  {}  -  {}",
+                i,
+                package_file.display(),
+                package.inner.version,
+                package
+                    .inner
+                    .description
+                    .as_str()
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+            );
+        }
+        match matches.len() {
+            0 => {
+                return Err(Error::other("package not found"));
+            }
+            1 => {
+                eprintln!("OK");
+                // Ok. One match.
+            }
+            n => {
+                eprintln!("N");
+                // Multiple matches.
+                loop {
+                    println!("Which package do you want to install? Number: ");
+                    let mut line = String::new();
+                    std::io::stdin().lock().read_line(&mut line)?;
+                    let Ok(i) = line.trim().parse() else {
+                        continue;
+                    };
+                    if i >= n {
+                        continue;
+                    }
+                    let x = matches.remove(i);
+                    matches.clear();
+                    matches.push(x);
+                    break;
+                }
+            }
+        }
+        // Add dependencies.
+        // TODO DRY
+        let mut dependencies = VecDeque::new();
+        dependencies.extend(matches[0].0.inner.pre_depends.clone().into_inner());
+        dependencies.extend(matches[0].0.inner.depends.clone().into_inner());
+        let mut visited = HashSet::new();
+        for suite in self.config.suites.iter() {
+            let suite_dir = config.cache_dir.join(name).join(suite);
+            let release_file = suite_dir.join("Release");
+            let release: deb::Release = std::fs::read_to_string(&release_file)?
+                .parse()
+                .map_err(Error::other)?;
+            for component in release.components().intersection(&self.config.components) {
+                let component_dir = suite_dir.join(component.as_str());
+                for arch in [native_arch.as_str(), "all"] {
+                    let arch_dir = component_dir.join(format!("binary-{}", arch));
+                    let packages_prefix = format!("{}/binary-{}", component, arch);
+                    let files = release.get_files(&packages_prefix, "Packages");
+                    for (candidate, _hash, _file_size) in files.iter() {
+                        let file_name = candidate.file_name().unwrap();
+                        let packages_file = arch_dir.join(file_name);
+                        let mut packages_str = String::new();
+                        let file = match File::open(&packages_file) {
+                            Ok(file) => file,
+                            Err(ref e) if e.kind() == ErrorKind::NotFound => continue,
+                            Err(e) => return Err(e),
+                        };
+                        let mut file = AnyDecoder::new(BufReader::new(file));
+                        file.read_to_string(&mut packages_str)?;
+                        let packages: deb::PerArchPackages =
+                            packages_str.parse().map_err(Error::other)?;
+                        while let Some(dep) = dependencies.pop_front() {
+                            log::info!("Resolving {}", dep);
+                            let candidates = packages.find_dependency(&dep);
+                            if candidates.is_empty() {
+                                return Err(Error::other(format!(
+                                    "Failed to resolve dependency: {}",
+                                    dep
+                                )));
+                            }
+                            // Recurse into dependencies of the dependency.
+                            for package in candidates.into_iter() {
+                                let hash = package.hash();
+                                if visited.insert(hash) {
+                                    log::info!("Recurse into {}", package.inner.name);
+                                    dependencies
+                                        .extend(package.inner.pre_depends.clone().into_inner());
+                                    dependencies.extend(package.inner.depends.clone().into_inner());
+                                    let package_file = arch_dir.join(&package.filename);
+                                    matches.push((package, package_file));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        log::info!("Installing...");
+        // Install in topological (reverse) order.
+        for (package, package_file) in matches.into_iter().rev() {
+            for base_url in self.config.base_urls.iter() {
+                let package_url = format!("{}/{}", base_url, package.filename.display());
+                if let Some(dirname) = package_file.parent() {
+                    create_dir_all(dirname).await?;
+                }
+                match download_file(&package_url, &package_file, package.hash()).await {
+                    Ok(..) => {
+                        let verifier = deb::PackageVerifier::none();
+                        let (_control, data) =
+                            deb::Package::read(File::open(&package_file)?, &verifier)
+                                .map_err(Error::other)?;
+
+                        log::info!("Installing {}", package_file.display());
+                        let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
+                        let dst = config.store_dir.join(name);
+                        create_dir_all(&dst).await?;
+                        tar_archive.unpack(&dst)?;
+                        drop(tar_archive);
+                        let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
+                        for entry in tar_archive.entries()? {
+                            let entry = entry?;
+                            let path = dst.join(entry.path()?);
+                            match get_elf_type(&path) {
+                                Ok(..) => {
+                                    log::info!("patching {:?}", path);
+                                    Command::new("./patchelf.sh")
+                                        .arg(&path)
+                                        .arg(&dst)
+                                        .status()
+                                        .unwrap();
+                                }
+                                _ => {
+                                    // TODO
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    Err(..) => continue,
                 }
             }
         }
@@ -476,8 +557,6 @@ fn get_elf_type(path: &Path) -> Result<ElfType, Error> {
     let ident = elf::file::parse_ident::<AnyEndian>(buf).map_err(Error::other)?;
     let header = elf::file::FileHeader::<AnyEndian>::parse_tail(ident, &buf[EI_NIDENT..])
         .map_err(Error::other)?;
-    eprintln!("try {:?}", path);
-    eprintln!("header {:?}", header);
     match header.e_type {
         ET_EXEC => Ok(ElfType::Executable),
         ET_DYN => Ok(ElfType::Library),

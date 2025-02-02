@@ -12,6 +12,7 @@ use std::str::FromStr;
 
 use walkdir::WalkDir;
 
+use crate::deb::DependencyChoice;
 use crate::deb::Error;
 use crate::deb::Package;
 use crate::deb::PackageVerifier;
@@ -161,6 +162,16 @@ impl PerArchPackages {
         let mut matches = Vec::new();
         for package in self.packages.iter() {
             if package.inner.name.as_str() == name {
+                matches.push(package.clone());
+            }
+        }
+        matches
+    }
+
+    pub fn find_dependency(&self, dependency: &DependencyChoice) -> Vec<ExtendedPackage> {
+        let mut matches = Vec::new();
+        for package in self.packages.iter() {
+            if dependency.matches(&package.inner) {
                 matches.push(package.clone());
             }
         }

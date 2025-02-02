@@ -11,7 +11,7 @@ use crate::hash::Sha256Hasher;
 use crate::hash::Sha512Hash;
 use crate::hash::Sha512Hasher;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum AnyHash {
     Md5(Md5Hash),
     Sha1(Sha1Hash),

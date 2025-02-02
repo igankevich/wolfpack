@@ -1,14 +1,24 @@
-use crate::deb::SimpleValue;
-use crate::deb::Version;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::io::Error;
 use std::io::ErrorKind;
+use std::ops::Deref;
 use std::str::FromStr;
+
+use crate::deb::Package;
+use crate::deb::PackageName;
+use crate::deb::SimpleValue;
+use crate::deb::Version;
 
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
 pub struct Dependencies(Vec<DependencyChoice>);
+
+impl Dependencies {
+    pub fn into_inner(self) -> Vec<DependencyChoice> {
+        self.0
+    }
+}
 
 impl Display for Dependencies {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
@@ -38,6 +48,60 @@ impl FromStr for Dependencies {
     }
 }
 
+impl Deref for Dependencies {
+    type Target = [DependencyChoice];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0[..]
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+#[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
+pub struct Provides(Vec<Dependency>);
+
+impl Provides {
+    pub fn matches(&self, other: &Dependency) -> bool {
+        self.0.iter().any(|dep| dep.provides_matches(other))
+    }
+}
+
+impl Display for Provides {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let mut iter = self.0.iter();
+        if let Some(dep) = iter.next() {
+            write!(f, "{}", dep)?;
+        }
+        for dep in iter {
+            write!(f, ", {}", dep)?;
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for Provides {
+    type Err = Error;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let mut deps = Vec::new();
+        let value = value.trim();
+        if !value.is_empty() {
+            for dep in value.split(',') {
+                let dep: Dependency = dep.trim().parse()?;
+                deps.push(dep);
+            }
+        }
+        Ok(Self(deps))
+    }
+}
+
+impl Deref for Provides {
+    type Target = [Dependency];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0[..]
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct DependencyChoice(Vec<Dependency>);
@@ -48,6 +112,10 @@ impl DependencyChoice {
             return Err(ErrorKind::InvalidData.into());
         }
         Ok(Self(deps))
+    }
+
+    pub fn matches(&self, package: &Package) -> bool {
+        self.0.iter().any(|dep| dep.matches(package))
     }
 }
 
@@ -82,13 +150,53 @@ impl FromStr for DependencyChoice {
 #[derive(Clone, Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
 pub struct Dependency {
-    pub name: SimpleValue,
+    pub name: PackageName,
+    pub arch: Option<DependencyArch>,
     pub version: Option<DependencyVersion>,
+}
+
+impl Dependency {
+    pub fn matches(&self, package: &Package) -> bool {
+        if self.name != package.name {
+            // Name doesn't match, but maybe "Provides" match.
+            if let Some(provides) = package.provides.as_ref() {
+                if !provides.matches(self) {
+                    return false;
+                }
+            }
+            return false;
+        }
+        if let Some(version) = self.version.as_ref() {
+            // Check versions.
+            return version.matches(&package.version);
+        }
+        true
+    }
+
+    pub fn provides_matches(&self, other: &Dependency) -> bool {
+        // TODO arch?
+        if self.name != other.name {
+            return false;
+        }
+        if let Some(version) = self.version.as_ref() {
+            if version.operator != DependencyVersionOp::Equal {
+                // Only `=` is permitted in `Provides`.
+                return false;
+            }
+            if let Some(other_version) = other.version.as_ref() {
+                return other_version.matches(&version.version);
+            }
+        }
+        true
+    }
 }
 
 impl Display for Dependency {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "{}", self.name)?;
+        if let Some(arch) = self.arch.as_ref() {
+            write!(f, ":{}", arch)?;
+        }
         if let Some(version) = self.version.as_ref() {
             write!(f, " ({})", version)?;
         }
@@ -99,17 +207,61 @@ impl Display for Dependency {
 impl FromStr for Dependency {
     type Err = Error;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let i = value.as_bytes().iter().position(|ch| *ch == b'(');
-        let (name, version) = if i.is_some() && value.ends_with(')') {
-            let i = i.unwrap();
-            let name: SimpleValue = value[..i].trim().parse().map_err(Error::other)?;
-            let version: DependencyVersion = value[(i + 1)..(value.len() - 1)].parse()?;
-            (name, Some(version))
-        } else {
-            let name: SimpleValue = value.parse().map_err(Error::other)?;
-            (name, None)
+        let n = value.as_bytes().len();
+        let (version, version_range) = {
+            let range = if value.ends_with(')') {
+                value
+                    .as_bytes()
+                    .iter()
+                    .position(|ch| *ch == b'(')
+                    .map(|i| i + 1..n - 1)
+                    .unwrap_or(0..0)
+            } else {
+                0..0
+            };
+            let version: Option<DependencyVersion> = if !range.is_empty() {
+                Some(value[range.clone()].parse().map_err(Error::other)?)
+            } else {
+                None
+            };
+            (version, range)
         };
-        Ok(Self { name, version })
+        let (arch, arch_range) = {
+            let arch_end = if version_range.is_empty() {
+                n
+            } else {
+                version_range.start - 1
+            };
+            let range = value[..arch_end]
+                .as_bytes()
+                .iter()
+                .position(|ch| *ch == b':')
+                .map(|i| i + 1..arch_end)
+                .unwrap_or(0..0);
+            let arch: Option<DependencyArch> = if !range.is_empty() {
+                Some(value[range.clone()].trim().parse()?)
+            } else {
+                None
+            };
+            (arch, range)
+        };
+        let name = {
+            let name_end = if !arch_range.is_empty() {
+                arch_range.start - 1
+            } else if !version_range.is_empty() {
+                version_range.start - 1
+            } else {
+                n
+            };
+            let range = 0..name_end;
+            let name: PackageName = value[range].trim().parse().map_err(Error::other)?;
+            name
+        };
+        Ok(Self {
+            name,
+            arch,
+            version,
+        })
     }
 }
 
@@ -118,6 +270,19 @@ impl FromStr for Dependency {
 pub struct DependencyVersion {
     pub operator: DependencyVersionOp,
     pub version: Version,
+}
+
+impl DependencyVersion {
+    pub fn matches(&self, package: &Version) -> bool {
+        use DependencyVersionOp::*;
+        match self.operator {
+            Lesser => package < &self.version,
+            LesserEqual => package <= &self.version,
+            Equal => package == &self.version,
+            Greater => package > &self.version,
+            GreaterEqual => package >= &self.version,
+        }
+    }
 }
 
 impl Display for DependencyVersion {
@@ -141,8 +306,8 @@ impl FromStr for DependencyVersion {
     }
 }
 
-#[derive(Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
 pub enum DependencyVersionOp {
     /// `<<`
     Lesser,
@@ -190,12 +355,49 @@ impl FromStr for DependencyVersionOp {
     }
 }
 
+// TODO custom Arbitrary
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
+pub enum DependencyArch {
+    Any,
+    All,
+    One(SimpleValue),
+}
+
+impl Display for DependencyArch {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        use DependencyArch::*;
+        match self {
+            Any => write!(f, "any"),
+            All => write!(f, "all"),
+            One(arch) => write!(f, "{}", arch),
+        }
+    }
+}
+
+impl FromStr for DependencyArch {
+    type Err = Error;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        use DependencyArch::*;
+        match value {
+            "any" => Ok(Any),
+            "all" => Ok(All),
+            other => Ok(One(other.parse().map_err(Error::other)?)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test::to_string_parse_symmetry;
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
+
+    #[test]
+    fn dependency_arch_symmetry() {
+        to_string_parse_symmetry::<DependencyArch>();
+    }
 
     #[test]
     fn dependency_version_op_symmery() {
@@ -231,4 +433,24 @@ mod tests {
             Ok(Self(deps))
         }
     }
+
+    //impl<'a> Arbitrary<'a> for DependencyArch {
+    //    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+    //        let mut arch: DependencyArch = u.arbitrary()?;
+    //        match arch {
+    //            DependencyArch::One(ref mut arch) => {
+    //                if arch.as_str() == "all" || arch.as_str() == "one" {
+    //                    *arch = "x".parse::<SimpleValue>().unwrap();
+    //                }
+    //            }
+    //            _ => {}
+    //            //DependencyArch::Set(ref mut arches) => {
+    //            //    if arches.is_empty() {
+    //            //        arches.push(u.arbitrary()?);
+    //            //    }
+    //            //}
+    //        }
+    //        Ok(arch)
+    //    }
+    //}
 }

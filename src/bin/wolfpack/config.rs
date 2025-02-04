@@ -37,6 +37,8 @@ pub struct Config {
     pub cache_dir: PathBuf,
     #[serde(rename = "repo", default)]
     pub repos: BTreeMap<String, RepoConfig>,
+    #[serde(default)]
+    pub max_age: u64,
 }
 
 impl Config {
@@ -66,6 +68,7 @@ impl Default for Config {
             cache_dir: "/var/cache/wolfpack".into(),
             store_dir: "/wp/store".into(),
             repos: Default::default(),
+            max_age: 60 * 60 * 24 * 365,
         }
     }
 }
@@ -200,6 +203,7 @@ impl Repo for DebRepo {
                     &release_file,
                     None,
                     db_conn.clone(),
+                    config,
                 )
                 .await?;
                 if self.config.verify {
@@ -209,6 +213,7 @@ impl Repo for DebRepo {
                         &release_gpg_file,
                         None,
                         db_conn.clone(),
+                        config,
                     )
                     .await?;
                     let message = std::fs::read(&release_file)?;
@@ -252,6 +257,7 @@ impl Repo for DebRepo {
                                 &packages_file,
                                 Some(hash),
                                 db_conn.clone(),
+                                config,
                             )
                             .await
                             {
@@ -409,6 +415,7 @@ impl Repo for DebRepo {
                         &package_file,
                         package.hash(),
                         db_conn.clone(),
+                        config,
                     )
                     .await
                     {
@@ -552,6 +559,7 @@ mod tests {
         let config = Config {
             store_dir: "/wolfpack".into(),
             cache_dir: "/tmp/wolfpack".into(),
+            max_age: 1000,
             repos: [
                 (
                     "debian".into(),

@@ -1,9 +1,13 @@
 use log::error;
+use rusqlite::types::ToSql;
+use rusqlite::types::ToSqlOutput;
 use rusqlite::OptionalExtension;
 use rusqlite_migration::{Migrations, M};
 use sql_minifier::macros::load_sql;
 use std::fs::create_dir_all;
 use std::sync::Arc;
+use std::time::Duration;
+use std::time::SystemTime;
 use tokio::sync::Mutex;
 
 use crate::Config;
@@ -33,10 +37,12 @@ impl Connection {
 
     pub fn select_downloaded_file(&self, url: &str) -> Result<Option<DownloadedFile>, Error> {
         self.inner
-            .prepare_cached("SELECT etag, last_modified FROM downloaded_files WHERE url = ?1")?
+            .prepare_cached("SELECT etag, last_modified, expires, file_size FROM downloaded_files WHERE url = ?1")?
             .query_row((url,), |row| {
                 let etag: Option<Vec<u8>> = row.get(0)?;
                 let last_modified: Option<Vec<u8>> = row.get(1)?;
+                let expires: Option<u64> = row.get(2)?;
+                let file_size: Option<u64> = row.get(3)?;
                 Ok(DownloadedFile {
                     etag: match etag {
                         Some(x) => x.try_into().ok(),
@@ -46,6 +52,11 @@ impl Connection {
                         Some(x) => x.try_into().ok(),
                         None => None,
                     },
+                    expires: match expires {
+                        Some(x) => SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(x)),
+                        None => None,
+                    },
+                    file_size,
                 })
             })
             .optional()
@@ -57,12 +68,24 @@ impl Connection {
         url: &str,
         etag: Option<&[u8]>,
         last_modified: Option<&[u8]>,
+        max_age: Option<Duration>,
+        file_size: Option<u64>,
     ) -> Result<(), Error> {
+        let expires = max_age
+            .and_then(|max_age| SystemTime::now().checked_add(max_age))
+            .map(Timestamp);
         self.inner
             .prepare_cached(
-                "INSERT INTO downloaded_files (url, etag, last_modified) VALUES (?1, ?2, ?3)",
+                "INSERT INTO downloaded_files(url, etag, last_modified, expires, file_size) \
+                VALUES(?1, ?2, ?3, ?4, ?5) \
+                ON CONFLICT(url) \
+                DO UPDATE \
+                SET etag = excluded.etag, \
+                    last_modified = excluded.last_modified, \
+                    expires = excluded.expires, \
+                    file_size = excluded.file_size",
             )?
-            .execute((url, etag, last_modified))
+            .execute((url, etag, last_modified, expires, file_size))
             .ensure_num_rows_modified(1)?;
         Ok(())
     }
@@ -86,6 +109,29 @@ impl EnsureNumRowsModified for Result<usize, rusqlite::Error> {
             Ok(n) if n != num_rows => Err(rusqlite::Error::QueryReturnedNoRows),
             other => other,
         }
+    }
+}
+
+pub struct Timestamp(pub SystemTime);
+
+impl From<SystemTime> for Timestamp {
+    fn from(other: SystemTime) -> Self {
+        Self(other)
+    }
+}
+
+impl ToSql for Timestamp {
+    fn to_sql(&self) -> Result<ToSqlOutput<'_>, rusqlite::Error> {
+        use rusqlite::Error::ToSqlConversionFailure;
+        let secs_since_epoch = self
+            .0
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|e| ToSqlConversionFailure(e.into()))?
+            .as_secs();
+        let secs_since_epoch: i64 = secs_since_epoch.try_into().map_err(|_| {
+            ToSqlConversionFailure(std::io::Error::other("Timestamp overflow").into())
+        })?;
+        Ok(ToSqlOutput::Owned(secs_since_epoch.into()))
     }
 }
 

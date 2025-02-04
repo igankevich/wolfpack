@@ -1,8 +1,9 @@
 CREATE TABLE downloaded_files (
-    url TEXT NOT NULL,
+    url TEXT NOT NULL PRIMARY KEY,
     etag BLOB,
-    last_modified BLOB
-    -- TODO expires, max-age, last-modified
+    last_modified BLOB,
+    expires INTEGER,
+    file_size INTEGER
 );
 
 -- CREATE INDEX downloaded_files_hash ON downloaded_files(hash);

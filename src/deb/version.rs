@@ -30,14 +30,14 @@ impl Version {
     }
 
     fn do_new(version: &str) -> Result<Self, &str> {
-        let (epoch, version) = match version.find(|ch| ch == ':') {
+        let (epoch, version) = match version.find(':') {
             Some(i) => (
                 version[..i].parse().map_err(|_| version)?,
                 &version[(i + 1)..],
             ),
             None => (0, version),
         };
-        let (revision, version, has_revision) = match version.rfind(|ch| ch == '-') {
+        let (revision, version, has_revision) = match version.rfind('-') {
             Some(i) => (version[(i + 1)..].to_string(), &version[..i], true),
             None => (String::new(), version, false),
         };

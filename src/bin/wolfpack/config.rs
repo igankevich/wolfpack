@@ -3,12 +3,6 @@ use elf::abi::EI_NIDENT;
 use elf::abi::ET_DYN;
 use elf::abi::ET_EXEC;
 use elf::endian::AnyEndian;
-use futures_util::StreamExt;
-use reqwest::header::HeaderValue;
-use reqwest::header::ETAG;
-use reqwest::header::IF_NONE_MATCH;
-use reqwest::header::USER_AGENT;
-use reqwest::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -18,7 +12,6 @@ use std::collections::VecDeque;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
-use std::io::Error;
 use std::io::ErrorKind;
 use std::io::ErrorKind::InvalidData;
 use std::io::Read;
@@ -27,12 +20,13 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use tokio::fs::create_dir_all;
-use tokio::io::AsyncWriteExt;
 use uname_rs::Uname;
 use wolfpack::deb;
-use wolfpack::hash::AnyHash;
-use wolfpack::hash::Hasher;
 use wolfpack::sign::VerifierV2;
+
+use crate::download_file;
+use crate::Connection;
+use crate::Error;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
@@ -48,9 +42,9 @@ pub struct Config {
 impl Config {
     pub fn open<P: AsRef<Path>>(config_dir: P) -> Result<Self, Error> {
         match std::fs::read_to_string(config_dir.as_ref().join("config.toml")) {
-            Ok(s) => toml::from_str(&s).map_err(Error::other),
+            Ok(s) => Ok(toml::from_str(&s)?),
             Err(ref e) if e.kind() == ErrorKind::NotFound => Ok(Default::default()),
-            Err(e) => Err(e),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -59,6 +53,10 @@ impl Config {
             .into_iter()
             .map(|(name, repo_config)| (name, <dyn Repo>::new(repo_config)))
             .collect()
+    }
+
+    pub fn database_path(&self) -> PathBuf {
+        self.cache_dir.join("cache.sqlite3")
     }
 }
 
@@ -138,7 +136,7 @@ impl DebRepo {
         let uts = Uname::new()?;
         match uts.machine.as_str() {
             "x86_64" => Ok("amd64".into()),
-            other => Err(Error::other(format!("unsupported architecture: {}", other))),
+            other => Err(Error::UnsupportedArchitecture(other.into())),
         }
     }
 
@@ -155,9 +153,7 @@ impl DebRepo {
         for suite in self.config.suites.iter() {
             let suite_dir = config.cache_dir.join(name).join(suite);
             let release_file = suite_dir.join("Release");
-            let release: deb::Release = std::fs::read_to_string(&release_file)?
-                .parse()
-                .map_err(Error::other)?;
+            let release: deb::Release = std::fs::read_to_string(&release_file)?.parse()?;
             for component in release.components().intersection(&self.config.components) {
                 let component_dir = suite_dir.join(component.as_str());
                 for arch in [native_arch.as_str(), "all"] {
@@ -173,12 +169,11 @@ impl DebRepo {
                         let file = match File::open(&packages_file) {
                             Ok(file) => file,
                             Err(ref e) if e.kind() == ErrorKind::NotFound => continue,
-                            Err(e) => return Err(e),
+                            Err(e) => return Err(e.into()),
                         };
                         let mut file = AnyDecoder::new(BufReader::new(file));
                         file.read_to_string(&mut packages_str)?;
-                        let packages: deb::PerArchPackages =
-                            packages_str.parse().map_err(Error::other)?;
+                        let packages: deb::PerArchPackages = packages_str.parse()?;
                         callback(packages, arch_dir.as_path())?;
                     }
                 }
@@ -191,6 +186,7 @@ impl DebRepo {
 #[async_trait::async_trait]
 impl Repo for DebRepo {
     async fn pull(&mut self, config: &Config, name: &str) -> Result<(), Error> {
+        let db_conn = Connection::new(config)?;
         let arch = Self::native_arch()?;
         #[allow(clippy::never_loop)]
         for base_url in self.config.base_urls.iter() {
@@ -199,13 +195,20 @@ impl Repo for DebRepo {
                 let suite_dir = config.cache_dir.join(name).join(suite);
                 create_dir_all(&suite_dir).await?;
                 let release_file = suite_dir.join("Release");
-                download_file(&format!("{}/Release", suite_url), &release_file, None).await?;
+                download_file(
+                    &format!("{}/Release", suite_url),
+                    &release_file,
+                    None,
+                    db_conn.clone(),
+                )
+                .await?;
                 if self.config.verify {
                     let release_gpg_file = suite_dir.join("Release.gpg");
                     download_file(
                         &format!("{}/Release.gpg", suite_url),
                         &release_gpg_file,
                         None,
+                        db_conn.clone(),
                     )
                     .await?;
                     let message = std::fs::read(&release_file)?;
@@ -219,19 +222,15 @@ impl Repo for DebRepo {
                         &message,
                         &signature,
                     )
-                    .map_err(|_| {
-                        Error::other(format!("Failed to verify {}", release_gpg_file.display()))
-                    })?;
+                    .map_err(|_| Error::Verify(release_gpg_file.clone()))?;
                     log::info!(
                         "Verified {} against {}",
                         release_file.display(),
                         release_gpg_file.display()
                     );
                 }
-                let release: deb::Release = tokio::fs::read_to_string(&release_file)
-                    .await?
-                    .parse()
-                    .map_err(Error::other)?;
+                let release: deb::Release =
+                    tokio::fs::read_to_string(&release_file).await?.parse()?;
                 for component in release.components().intersection(&self.config.components) {
                     let component_dir = suite_dir.join(component.as_str());
                     for arch in [arch.as_str(), "all"] {
@@ -248,9 +247,16 @@ impl Repo for DebRepo {
                                 file_name.to_str().ok_or(ErrorKind::InvalidData)?,
                             );
                             let packages_file = arch_dir.join(file_name);
-                            match download_file(&packages_url, &packages_file, Some(hash)).await {
+                            match download_file(
+                                &packages_url,
+                                &packages_file,
+                                Some(hash),
+                                db_conn.clone(),
+                            )
+                            .await
+                            {
                                 Ok(..) => break,
-                                Err(ref e) if e.kind() == ErrorKind::NotFound => continue,
+                                Err(Error::ResourceNotFound(..)) => continue,
                                 Err(e) => return Err(e),
                             }
                         }
@@ -269,6 +275,7 @@ impl Repo for DebRepo {
         name: &str,
         packages: Vec<String>,
     ) -> Result<(), Error> {
+        let db_conn = Connection::new(config)?;
         let mut matches: HashMap<String, Vec<(deb::ExtendedPackage, PathBuf)>> = Default::default();
         self.for_each_packages_db(config, name, |packages_db, arch_dir| {
             for package_name in packages.iter() {
@@ -302,10 +309,7 @@ impl Repo for DebRepo {
             }
             match matches.len() {
                 0 => {
-                    return Err(Error::other(format!(
-                        "Package `{}` not found",
-                        package_name
-                    )));
+                    return Err(Error::NotFound(package_name));
                 }
                 1 => {
                     // Ok. One match.
@@ -341,10 +345,7 @@ impl Repo for DebRepo {
                     log::info!("Resolving {}", dep);
                     let mut candidates = packages.find_dependency(&dep);
                     if candidates.is_empty() {
-                        return Err(Error::other(format!(
-                            "Failed to resolve dependency: {}",
-                            dep
-                        )));
+                        return Err(Error::DependencyNotFound(dep.to_string()));
                     }
                     if candidates.len() > 1 {
                         let unique_names = candidates
@@ -403,12 +404,18 @@ impl Repo for DebRepo {
                     if let Some(dirname) = package_file.parent() {
                         create_dir_all(dirname).await?;
                     }
-                    match download_file(&package_url, &package_file, package.hash()).await {
+                    match download_file(
+                        &package_url,
+                        &package_file,
+                        package.hash(),
+                        db_conn.clone(),
+                    )
+                    .await
+                    {
                         Ok(..) => {
                             let verifier = deb::PackageVerifier::none();
                             let (_control, data) =
-                                deb::Package::read(File::open(&package_file)?, &verifier)
-                                    .map_err(Error::other)?;
+                                deb::Package::read(File::open(&package_file)?, &verifier)?;
                             log::info!("Installing {}", package_file.display());
                             let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
                             let dst = config.store_dir.join(name);
@@ -427,10 +434,7 @@ impl Repo for DebRepo {
                                             .arg(&dst)
                                             .status()?;
                                         if !status.success() {
-                                            return Err(Error::other(format!(
-                                                "Failed to patch {:?}",
-                                                path
-                                            )));
+                                            return Err(Error::Patch(path));
                                         }
                                     }
                                     _ => {
@@ -453,9 +457,7 @@ impl Repo for DebRepo {
         for suite in self.config.suites.iter() {
             let suite_dir = config.cache_dir.join(name).join(suite);
             let release_file = suite_dir.join("Release");
-            let release: deb::Release = std::fs::read_to_string(&release_file)?
-                .parse()
-                .map_err(Error::other)?;
+            let release: deb::Release = std::fs::read_to_string(&release_file)?.parse()?;
             for component in release.components().intersection(&self.config.components) {
                 let component_dir = suite_dir.join(component.as_str());
                 for arch in [arch.as_str(), "all"] {
@@ -469,12 +471,11 @@ impl Repo for DebRepo {
                         let file = match File::open(&packages_file) {
                             Ok(file) => file,
                             Err(ref e) if e.kind() == ErrorKind::NotFound => continue,
-                            Err(e) => return Err(e),
+                            Err(e) => return Err(e.into()),
                         };
                         let mut file = AnyDecoder::new(BufReader::new(file));
                         file.read_to_string(&mut packages_str)?;
-                        let packages: deb::PerArchPackages =
-                            packages_str.parse().map_err(Error::other)?;
+                        let packages: deb::PerArchPackages = packages_str.parse()?;
                         let matches = packages.find(keyword);
                         if !matches.is_empty() {
                             println!(
@@ -506,97 +507,18 @@ impl Repo for DebRepo {
     }
 }
 
-async fn download_file<P: AsRef<Path>>(
-    url: &str,
-    path: P,
-    hash: Option<AnyHash>,
-) -> Result<(), Error> {
-    do_download_file(url, path, hash)
-        .await
-        .inspect_err(|e| log::error!("Failed to download {}: {}", url, e))
-}
-
-async fn do_download_file<P: AsRef<Path>>(
-    url: &str,
-    path: P,
-    hash: Option<AnyHash>,
-) -> Result<(), Error> {
-    // TODO last-modified, If-Modified-Since
-    let path = path.as_ref();
-    let etag_path = path.parent().ok_or(InvalidData)?.join(format!(
-        ".{}.etag",
-        path.file_name()
-            .ok_or(InvalidData)?
-            .to_str()
-            .ok_or(InvalidData)?
-    ));
-    let etag = match std::fs::read(&etag_path) {
-        Ok(etag) => etag,
-        Err(e) if e.kind() == ErrorKind::NotFound => Default::default(),
-        Err(e) => return Err(e),
-    };
-    let client = reqwest::Client::builder().build().map_err(Error::other)?;
-    log::info!("Downloading {} to {}", url, path.display());
-    let builder = client.get(url).header(USER_AGENT, &WOLFPACK_UA);
-    let builder = if !etag.is_empty() && path.exists() {
-        builder.header(
-            IF_NONE_MATCH,
-            HeaderValue::from_bytes(&etag).map_err(Error::other)?,
-        )
-    } else {
-        builder
-    };
-    let response = builder.send().await.map_err(Error::other)?;
-    if response.status() == StatusCode::NOT_MODIFIED {
-        log::info!("Up-to-date {}", url);
-        // Up-to-date.
-        return Ok(());
-    }
-    let response = response.error_for_status().map_err(|e| {
-        if e.status() == Some(StatusCode::NOT_FOUND) {
-            ErrorKind::NotFound.into()
-        } else {
-            Error::other(e)
-        }
-    })?;
-    if let Some(etag) = response.headers().get(ETAG) {
-        std::fs::write(&etag_path, etag.as_bytes())?;
-    }
-    let mut stream = response.bytes_stream();
-    let mut file = tokio::fs::File::create(&path).await?;
-    let mut hasher = hash.as_ref().map(|h| h.hasher());
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(Error::other)?;
-        if let Some(ref mut hasher) = hasher {
-            hasher.update(&chunk);
-        }
-        file.write_all(&chunk).await?;
-    }
-    file.flush().await?;
-    drop(file);
-    if let (Some(hash), Some(hasher)) = (hash, hasher) {
-        let actual_hash = hasher.finalize();
-        if hash != actual_hash {
-            tokio::fs::remove_file(&path).await?;
-            return Err(Error::other("Hash mismatch"));
-        }
-    }
-    Ok(())
-}
-
 fn get_elf_type(path: &Path) -> Result<ElfType, Error> {
     let mut file = File::open(path)?;
     let mut buf = [0; 64];
     let n = file.read(&mut buf[..])?;
     let buf = &mut buf[..n];
     drop(file);
-    let ident = elf::file::parse_ident::<AnyEndian>(buf).map_err(Error::other)?;
-    let header = elf::file::FileHeader::<AnyEndian>::parse_tail(ident, &buf[EI_NIDENT..])
-        .map_err(Error::other)?;
+    let ident = elf::file::parse_ident::<AnyEndian>(buf)?;
+    let header = elf::file::FileHeader::<AnyEndian>::parse_tail(ident, &buf[EI_NIDENT..])?;
     match header.e_type {
         ET_EXEC => Ok(ElfType::Executable),
         ET_DYN => Ok(ElfType::Library),
-        t => Err(Error::other(format!("unknown elf type: {}", t))),
+        other => Err(Error::UnknownElf(other)),
     }
 }
 
@@ -620,9 +542,6 @@ fn ask_number(prompt: &str, valid_range: RangeInclusive<usize>) -> Result<usize,
         }
     }
 }
-
-const WOLFPACK_UA: HeaderValue =
-    HeaderValue::from_static(concat!("Wolfpack/", env!("CARGO_PKG_VERSION")));
 
 #[cfg(test)]
 mod tests {

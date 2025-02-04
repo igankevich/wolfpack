@@ -18,6 +18,7 @@ pub struct Package {
 }
 
 impl Package {
+    #[allow(unused)]
     pub fn write<W: Write, P: AsRef<Path>>(
         &self,
         writer: W,

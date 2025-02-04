@@ -1,12 +1,17 @@
 mod config;
+mod db;
+mod download;
+mod error;
 mod logger;
 
 use self::config::*;
+use self::db::*;
+use self::download::*;
+use self::error::*;
 use self::logger::*;
 
 use clap::Parser;
 use clap::Subcommand;
-use std::io::Error;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -49,7 +54,7 @@ fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
 }
 
 fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
-    Logger::init().map_err(|e| Error::other(format!("Failed to init logger: {}", e)))?;
+    Logger::init().map_err(Error::Logger)?;
     let args = Args::parse();
     let config = Config::open(&args.config_dir)?;
     match args.command {

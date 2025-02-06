@@ -40,6 +40,8 @@ pub enum Error {
     ResourceNotFound(String),
     #[error("Hash mismatch")]
     HashMismatch,
+    #[error("Task error: {0}")]
+    Join(#[from] tokio::task::JoinError),
 }
 
 impl From<ErrorKind> for Error {

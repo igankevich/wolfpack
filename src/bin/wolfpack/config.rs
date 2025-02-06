@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::fs::create_dir_all;
+use std::fs::read_to_string;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -19,14 +21,15 @@ use std::ops::RangeInclusive;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
-use tokio::fs::create_dir_all;
 use uname_rs::Uname;
 use wolfpack::deb;
 use wolfpack::sign::VerifierV2;
 
 use crate::download_file;
 use crate::Connection;
+use crate::ConnectionArc;
 use crate::Error;
+use crate::Id;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
@@ -156,7 +159,7 @@ impl DebRepo {
         for suite in self.config.suites.iter() {
             let suite_dir = config.cache_dir.join(name).join(suite);
             let release_file = suite_dir.join("Release");
-            let release: deb::Release = std::fs::read_to_string(&release_file)?.parse()?;
+            let release: deb::Release = read_to_string(&release_file)?.parse()?;
             for component in release.components().intersection(&self.config.components) {
                 let component_dir = suite_dir.join(component.as_str());
                 for arch in [native_arch.as_str(), "all"] {
@@ -176,6 +179,7 @@ impl DebRepo {
                         };
                         let mut file = AnyDecoder::new(BufReader::new(file));
                         file.read_to_string(&mut packages_str)?;
+                        drop(file);
                         let packages: deb::PerArchPackages = packages_str.parse()?;
                         callback(packages, arch_dir.as_path())?;
                     }
@@ -184,11 +188,35 @@ impl DebRepo {
         }
         Ok(())
     }
+
+    fn index_packages(
+        packages_file: &Path,
+        base_url: String,
+        component_id: Id,
+        db_conn: ConnectionArc,
+    ) -> Result<(), Error> {
+        let mut packages_str = String::new();
+        let mut file = AnyDecoder::new(BufReader::new(File::open(packages_file)?));
+        file.read_to_string(&mut packages_str)?;
+        let packages: deb::PerArchPackages = packages_str.parse()?;
+        for package in packages.into_inner().iter() {
+            let url = format!("{}/{}", base_url, package.filename.display());
+            db_conn
+                .lock()
+                .insert_deb_package(package, &url, component_id)?;
+        }
+        log::info!("Indexed {:?}", packages_file);
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
 impl Repo for DebRepo {
     async fn pull(&mut self, config: &Config, name: &str) -> Result<(), Error> {
+        // TODO dynamic thread count
+        let threads = threadpool::Builder::new()
+            .thread_name("Indexer".into())
+            .build();
         let db_conn = Connection::new(config)?;
         let arch = Self::native_arch()?;
         #[allow(clippy::never_loop)]
@@ -196,7 +224,7 @@ impl Repo for DebRepo {
             for suite in self.config.suites.iter() {
                 let suite_url = format!("{}/dists/{}", base_url, suite);
                 let suite_dir = config.cache_dir.join(name).join(suite);
-                create_dir_all(&suite_dir).await?;
+                create_dir_all(&suite_dir)?;
                 let release_file = suite_dir.join("Release");
                 download_file(
                     &format!("{}/Release", suite_url),
@@ -234,21 +262,28 @@ impl Repo for DebRepo {
                         release_gpg_file.display()
                     );
                 }
-                let release: deb::Release =
-                    tokio::fs::read_to_string(&release_file).await?.parse()?;
+                let release: deb::Release = read_to_string(&release_file)?.parse()?;
                 for component in release.components().intersection(&self.config.components) {
                     let component_dir = suite_dir.join(component.as_str());
                     for arch in [arch.as_str(), "all"] {
                         let packages_prefix = format!("{}/binary-{}", component, arch);
                         let files = release.get_files(&packages_prefix, "Packages");
                         let arch_dir = component_dir.join(format!("binary-{}", arch));
-                        create_dir_all(&arch_dir).await?;
+                        create_dir_all(&arch_dir)?;
                         for (candidate, hash, _file_size) in files.into_iter() {
                             let file_name = candidate.file_name().ok_or(ErrorKind::InvalidData)?;
+                            let component_url = format!("{}/{}", suite_url, packages_prefix);
+                            let component_id = db_conn.lock().insert_deb_component(
+                                &component_url,
+                                name,
+                                base_url,
+                                suite,
+                                component.as_str(),
+                                arch,
+                            )?;
                             let packages_url = format!(
-                                "{}/{}/{}",
-                                suite_url,
-                                packages_prefix,
+                                "{}/{}",
+                                component_url,
                                 file_name.to_str().ok_or(ErrorKind::InvalidData)?,
                             );
                             let packages_file = arch_dir.join(file_name);
@@ -261,7 +296,21 @@ impl Repo for DebRepo {
                             )
                             .await
                             {
-                                Ok(..) => break,
+                                Ok(..) => {
+                                    let db_conn = db_conn.clone();
+                                    let base_url = base_url.into();
+                                    threads.execute(move || {
+                                        if let Err(e) = Self::index_packages(
+                                            &packages_file,
+                                            base_url,
+                                            component_id,
+                                            db_conn,
+                                        ) {
+                                            log::error!("Failed to index packages: {}", e)
+                                        }
+                                    });
+                                    break;
+                                }
                                 Err(Error::ResourceNotFound(..)) => continue,
                                 Err(e) => return Err(e),
                             }
@@ -272,6 +321,7 @@ impl Repo for DebRepo {
             // TODO Only one URL is used.
             break;
         }
+        threads.join();
         Ok(())
     }
 
@@ -408,7 +458,7 @@ impl Repo for DebRepo {
                 for base_url in self.config.base_urls.iter() {
                     let package_url = format!("{}/{}", base_url, package.filename.display());
                     if let Some(dirname) = package_file.parent() {
-                        create_dir_all(dirname).await?;
+                        create_dir_all(dirname)?;
                     }
                     match download_file(
                         &package_url,
@@ -426,7 +476,7 @@ impl Repo for DebRepo {
                             log::info!("Installing {}", package_file.display());
                             let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
                             let dst = config.store_dir.join(name);
-                            create_dir_all(&dst).await?;
+                            create_dir_all(&dst)?;
                             tar_archive.unpack(&dst)?;
                             drop(tar_archive);
                             let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
@@ -464,7 +514,7 @@ impl Repo for DebRepo {
         for suite in self.config.suites.iter() {
             let suite_dir = config.cache_dir.join(name).join(suite);
             let release_file = suite_dir.join("Release");
-            let release: deb::Release = std::fs::read_to_string(&release_file)?.parse()?;
+            let release: deb::Release = read_to_string(&release_file)?.parse()?;
             for component in release.components().intersection(&self.config.components) {
                 let component_dir = suite_dir.join(component.as_str());
                 for arch in [arch.as_str(), "all"] {

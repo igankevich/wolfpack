@@ -177,6 +177,10 @@ impl PerArchPackages {
         }
         matches
     }
+
+    pub fn into_inner(self) -> Vec<ExtendedPackage> {
+        self.packages
+    }
 }
 
 impl Display for PerArchPackages {
@@ -188,6 +192,7 @@ impl Display for PerArchPackages {
     }
 }
 
+// TODO read from file
 impl FromStr for PerArchPackages {
     type Err = Error;
     fn from_str(string: &str) -> Result<Self, Self::Err> {

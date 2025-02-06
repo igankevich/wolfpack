@@ -1,4 +1,5 @@
 use log::error;
+use parking_lot::Mutex;
 use rusqlite::types::ToSql;
 use rusqlite::types::ToSqlOutput;
 use rusqlite::OptionalExtension;
@@ -8,13 +9,14 @@ use std::fs::create_dir_all;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
-use tokio::sync::Mutex;
+use wolfpack::deb;
 
 use crate::Config;
 use crate::DownloadedFile;
 use crate::Error;
 
 pub type ConnectionArc = Arc<Mutex<Connection>>;
+pub type Id = i64;
 
 pub struct Connection {
     inner: rusqlite::Connection,
@@ -89,6 +91,66 @@ impl Connection {
             .ensure_num_rows_modified(1)?;
         Ok(())
     }
+
+    pub fn insert_deb_component(
+        &self,
+        url: &str,
+        repo_name: &str,
+        base_url: &str,
+        suite: &str,
+        component: &str,
+        architecture: &str,
+    ) -> Result<Id, Error> {
+        let id = self.inner
+            .prepare_cached(
+                "INSERT INTO deb_components(url, repo_name, base_url, suite, component, architecture) \
+                VALUES(?1, ?2, ?3, ?4, ?5, ?6) \
+                ON CONFLICT(url) DO NOTHING \
+                RETURNING id",
+            )?
+            .query_row((url, repo_name, base_url, suite, component, architecture), |row| {
+                let id: Id = row.get(0)?;
+                Ok(id)
+            })
+            .optional()?;
+        match id {
+            Some(id) => Ok(id),
+            None => Ok(self
+                .inner
+                .prepare_cached("SELECT id FROM deb_components WHERE url = ?1")?
+                .query_row((url,), |row| {
+                    let id: Id = row.get(0)?;
+                    Ok(id)
+                })
+                .optional()?
+                .expect("Should return id")),
+        }
+    }
+
+    pub fn insert_deb_package(
+        &self,
+        package: &deb::ExtendedPackage,
+        url: &str,
+        component_id: Id,
+    ) -> Result<(), Error> {
+        self.inner
+            .prepare_cached(
+                "INSERT INTO deb_packages(name, version, architecture, description, installed_size, url, component_id) \
+                VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+                ON CONFLICT(url) DO NOTHING"
+            )?
+            .execute((
+                package.inner.name.as_str(),
+                package.inner.version.to_string(),
+                package.inner.architecture.as_str(),
+                package.inner.description.as_str(),
+                package.inner.installed_size,
+                url,
+                component_id
+            ))
+            .optional()?;
+        Ok(())
+    }
 }
 
 impl Drop for Connection {
@@ -153,9 +215,7 @@ impl PathAsBytes for Path {
 const PREAMBLE: &str = load_sql!("src/bin/wolfpack/sql/preamble.sql");
 const POSTAMBLE: &str = load_sql!("src/bin/wolfpack/sql/postamble.sql");
 const POST_MIGRATIONS: &str = load_sql!("src/bin/wolfpack/sql/post-migrations.sql");
-const MIGRATIONS: [M<'static>; 1] = [M::up(load_sql!(
-    "src/bin/wolfpack/sql/migrations/01-initial.sql"
-))];
+const MIGRATIONS: [M<'static>; 1] = [M::up(include_str!("sql/migrations/01-initial.sql"))];
 
 const MAX_CACHED_QUERIES: usize = 100;
 

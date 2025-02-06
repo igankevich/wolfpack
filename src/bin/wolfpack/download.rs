@@ -9,12 +9,14 @@ use reqwest::header::IF_NONE_MATCH;
 use reqwest::header::LAST_MODIFIED;
 use reqwest::header::USER_AGENT;
 use reqwest::StatusCode;
+use std::fs::remove_file;
+use std::fs::File;
+use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 use std::time::SystemTime;
-use tokio::io::AsyncWriteExt;
 use wolfpack::hash::AnyHash;
 use wolfpack::hash::Hasher;
 
@@ -49,7 +51,7 @@ async fn do_download_file<P: AsRef<Path>>(
     config: &Config,
 ) -> Result<(), Error> {
     let path = path.as_ref();
-    let downloaded_file = conn.lock().await.select_downloaded_file(url)?;
+    let downloaded_file = conn.lock().select_downloaded_file(url)?;
     let client = reqwest::Client::builder().build()?;
     let mut externally_modified = false;
     let response = loop {
@@ -130,15 +132,10 @@ async fn do_download_file<P: AsRef<Path>>(
         .get(CONTENT_LENGTH)
         .and_then(|age| age.to_str().ok())
         .and_then(|s| s.parse().ok());
-    conn.lock().await.insert_downloaded_file(
-        url,
-        etag,
-        last_modified,
-        real_max_age,
-        content_length,
-    )?;
+    conn.lock()
+        .insert_downloaded_file(url, etag, last_modified, real_max_age, content_length)?;
     let mut stream = response.bytes_stream();
-    let mut file = tokio::fs::File::create(&path).await?;
+    let mut file = File::create(path)?;
     let mut hasher = hash.as_ref().map(|h| h.hasher());
     log::info!("Downloading {} to {}", url, path.display());
     while let Some(chunk) = stream.next().await {
@@ -146,14 +143,15 @@ async fn do_download_file<P: AsRef<Path>>(
         if let Some(ref mut hasher) = hasher {
             hasher.update(&chunk);
         }
-        file.write_all(&chunk).await?;
+        file.write_all(&chunk)?;
     }
-    file.flush().await?;
+    file.flush()?;
     drop(file);
+    log::info!("Finished downloading {} to {}", url, path.display());
     if let (Some(hash), Some(hasher)) = (hash, hasher) {
         let actual_hash = hasher.finalize();
         if hash != actual_hash {
-            tokio::fs::remove_file(&path).await?;
+            remove_file(path)?;
             return Err(Error::HashMismatch);
         }
     }

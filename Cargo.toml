@@ -20,12 +20,14 @@ deko = "0.2.0"
 der = { version = "0.7.9", features = ["std", "zeroize"], default-features = false }
 elf = "0.7.4"
 flate2 = "1.0.33"
+futures = "0.3.31"
 futures-util = "0.3.31"
 hex = "0.4.3"
 ksign = { path = "../ksign" }
 log = "0.4.22"
 md5 = "0.7.0"
 normalize-path = "0.2.1"
+parking_lot = "0.12.3"
 pgp = "0.14.0"
 pkcs8 = { version = "0.10.2", features = ["std", "encryption"], default-features = false }
 quick-xml = { version = "0.36.2", features = ["serialize"], default-features = false }
@@ -47,6 +49,7 @@ stuckliste = "0.3.7"
 tar = { version = "0.4.42", features = [], default-features = false }
 tempfile = "3.13.0"
 thiserror = "1.0.64"
+threadpool = "1.8.1"
 tokio = { version = "1.42.0", features = ["full"] }
 toml = "0.8.19"
 uname-rs = "0.1.1"

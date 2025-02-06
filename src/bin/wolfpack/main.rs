@@ -66,6 +66,7 @@ fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
 
 fn pull(mut config: Config) -> Result<ExitCode, Box<dyn std::error::Error>> {
     let rt = tokio::runtime::Builder::new_current_thread()
+        .thread_name("tokio")
         .enable_all()
         .build()?;
     let _guard = rt.enter();

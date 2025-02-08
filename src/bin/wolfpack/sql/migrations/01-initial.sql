@@ -36,7 +36,7 @@ CREATE TABLE deb_packages (
         REFERENCES deb_components(id)
         ON DELETE CASCADE
         ON UPDATE CASCADE
+    -- fts_rowid INTEGER NOT NULL
 );
 
--- TODO FTS
--- CREATE VIRTUAL TABLE deb_packages_fts USING fts5(name, description);
+-- CREATE VIRTUAL TABLE deb_packages_fts USING fts5(name, description, content='deb_packages', content_rowid='fts_rowid');

@@ -20,6 +20,7 @@ use std::ops::RangeInclusive;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Instant;
 use uname_rs::Uname;
 use wolfpack::deb;
 use wolfpack::sign::VerifierV2;
@@ -306,23 +307,6 @@ impl Repo for DebRepo {
                 .collect();
             matches.insert(package_name.clone(), candidates);
         }
-        /*
-        let mut matches: HashMap<String, Vec<(deb::ExtendedPackage, PathBuf)>> = Default::default();
-        self.for_each_packages_db(config, name, |packages_db, arch_dir| {
-        for package_name in packages.iter() {
-        matches.entry(package_name.to_string()).or_default().extend(
-        packages_db
-        .find_by_name(package_name)
-        .into_iter()
-        .map(|package| {
-        let package_file = arch_dir.join(&package.filename);
-        (package, package_file)
-        }),
-        );
-        }
-        Ok(())
-        })?;
-        */
         for (package_name, mut matches) in matches.into_iter() {
             for (i, package) in matches.iter().enumerate() {
                 println!(
@@ -371,15 +355,23 @@ impl Repo for DebRepo {
             //dependencies.extend(matches[0].0.inner.pre_depends.clone().into_inner());
             dependencies.extend(matches[0].depends.clone().into_inner());
             let mut visited = HashSet::new();
-            while let Some(dep) = dependencies.pop_front() {
+            'outer: while let Some(dep) = dependencies.pop_front() {
                 log::info!("Resolving {}", dep);
+                let t = Instant::now();
                 let mut candidates = db_conn.lock().select_deb_dependencies(name, &dep)?;
+                log::info!("{}s", t.elapsed().as_secs_f32());
                 if candidates.is_empty() {
                     return Err(Error::DependencyNotFound(dep.to_string()));
                 }
                 if candidates.len() > 1 {
                     let unique_names = candidates.iter().map(|p| &p.name).collect::<HashSet<_>>();
                     if unique_names.len() > 1 {
+                        for package in candidates.iter() {
+                            if visited.contains(&package.hash) {
+                                // We already made the decision to install this package.
+                                continue 'outer;
+                            }
+                        }
                         for (i, package) in candidates.iter().enumerate() {
                             println!(
                                 "{}. {}  -  {}  -  {}",

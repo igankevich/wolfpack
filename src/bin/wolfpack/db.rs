@@ -58,13 +58,22 @@ impl Connection {
                     .map_err(|e| UserFunctionError(e.into()))?
                     .parse::<deb::Version>()
                     .map_err(|e| UserFunctionError(e.into()))?;
-                let version1 = ctx
-                    .get_raw(1)
-                    .as_str()
-                    .map_err(|e| UserFunctionError(e.into()))?
-                    .parse::<deb::Version>()
-                    .map_err(|e| UserFunctionError(e.into()))?;
-                let ret: i64 = match version0.cmp(&version1) {
+                let ret = match ctx.get_raw(1) {
+                    ValueRef::Integer(address) => {
+                        let ptr = address as *const deb::Version;
+                        let version1 = unsafe { ptr.as_ref() }.expect("address is valid");
+                        version0.cmp(version1)
+                    }
+                    other => {
+                        let version1 = other
+                            .as_str()
+                            .map_err(|e| UserFunctionError(e.into()))?
+                            .parse::<deb::Version>()
+                            .map_err(|e| UserFunctionError(e.into()))?;
+                        version0.cmp(&version1)
+                    }
+                };
+                let ret: i64 = match ret {
                     Ordering::Equal => 0,
                     Ordering::Less => -1,
                     Ordering::Greater => 1,
@@ -278,11 +287,7 @@ impl Connection {
                     name: row.get(0)?,
                     version: row.get(1)?,
                     description: row.get(2)?,
-                    depends: row
-                        .get_ref(3)?
-                        .as_str()?
-                        .parse::<deb::Dependencies>()
-                        .unwrap_or_default(),
+                    depends: row.get::<usize, DebDependencies>(3)?.0,
                     url: row.get(4)?,
                     filename: PathBuf::from_bytes(row.get::<usize, Vec<u8>>(5)?),
                     hash: row.get::<usize, OptionAnyHash>(6)?.0,
@@ -310,7 +315,7 @@ impl Connection {
             // Compare name.
             let _ = write!(&mut condition, "(name = ?{}", params.len());
             if let Some(version) = dep.version.as_ref() {
-                params.push(version.version.to_string());
+                //params.push(version.version.to_string());
                 let operator = match version.operator {
                     deb::DependencyVersionOp::Lesser => " < 0",
                     deb::DependencyVersionOp::LesserEqual => " <= 0",
@@ -320,9 +325,8 @@ impl Connection {
                 };
                 let _ = write!(
                     &mut condition,
-                    " AND deb_version_compare(version, ?{}){}",
-                    params.len(),
-                    operator,
+                    " AND deb_version_compare(version, {}){}",
+                    &version.version as *const deb::Version as i64, operator,
                 );
             }
             let _ = write!(&mut condition, ")");
@@ -341,18 +345,15 @@ impl Connection {
                 &format!("SELECT name, version, description, depends, url, filename, hash
                 FROM deb_packages
                 WHERE EXISTS(SELECT repo_name FROM deb_components WHERE component_id=id AND repo_name=?1)
-                  AND ({})", condition)
+                  AND ({})
+                ORDER BY name ASC, version DESC", condition)
             )?
             .query_map(params_from_iter(params.into_iter()), |row| {
                 Ok(DebDependencyMatch {
                     name: row.get(0)?,
                     version: row.get(1)?,
                     description: row.get(2)?,
-                    depends: row
-                        .get_ref(3)?
-                        .as_str()?
-                        .parse::<deb::Dependencies>()
-                        .unwrap_or_default(),
+                    depends: row.get::<usize, DebDependencies>(3)?.0,
                     url: row.get(4)?,
                     filename: PathBuf::from_bytes(row.get::<usize, Vec<u8>>(5)?),
                     hash: row.get::<usize, OptionAnyHash>(6)?.0,
@@ -416,6 +417,19 @@ impl FromSql for OptionAnyHash {
         };
         let hash: Option<AnyHash> = bytes.try_into().ok();
         Ok(OptionAnyHash(hash))
+    }
+}
+
+struct DebDependencies(deb::Dependencies);
+
+impl FromSql for DebDependencies {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        match value.as_str_or_null()? {
+            Some(s) => Ok(DebDependencies(
+                s.parse::<deb::Dependencies>().unwrap_or_default(),
+            )),
+            None => Ok(DebDependencies(Default::default())),
+        }
     }
 }
 

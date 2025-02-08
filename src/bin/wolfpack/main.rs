@@ -3,12 +3,14 @@ mod db;
 mod download;
 mod error;
 mod logger;
+mod table;
 
 use self::config::*;
 use self::db::*;
 use self::download::*;
 use self::error::*;
 use self::logger::*;
+use self::table::*;
 
 use clap::Parser;
 use clap::Subcommand;

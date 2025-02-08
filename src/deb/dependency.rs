@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::io::ErrorKind;
@@ -147,6 +148,14 @@ impl FromStr for DependencyChoice {
     }
 }
 
+impl Deref for DependencyChoice {
+    type Target = [Dependency];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0[..]
+    }
+}
+
 #[derive(Clone, Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
 pub struct Dependency {
@@ -159,12 +168,12 @@ impl Dependency {
     pub fn matches(&self, package: &Package) -> bool {
         if self.name != package.name {
             // Name doesn't match, but maybe "Provides" match.
-            if let Some(provides) = package.provides.as_ref() {
-                if !provides.matches(self) {
-                    return false;
-                }
+            let Some(provides) = package.provides.as_ref() else {
+                return false;
+            };
+            if !provides.matches(self) {
+                return false;
             }
-            return false;
         }
         if let Some(version) = self.version.as_ref() {
             // Check versions.
@@ -275,12 +284,13 @@ pub struct DependencyVersion {
 impl DependencyVersion {
     pub fn matches(&self, package: &Version) -> bool {
         use DependencyVersionOp::*;
+        let ordering = package.cmp(&self.version);
         match self.operator {
-            Lesser => package < &self.version,
-            LesserEqual => package <= &self.version,
-            Equal => package == &self.version,
-            Greater => package > &self.version,
-            GreaterEqual => package >= &self.version,
+            Lesser => ordering == Ordering::Less,
+            LesserEqual => ordering == Ordering::Less || ordering == Ordering::Equal,
+            Equal => ordering == Ordering::Equal,
+            Greater => ordering == Ordering::Greater,
+            GreaterEqual => ordering == Ordering::Greater || ordering == Ordering::Equal,
         }
     }
 }

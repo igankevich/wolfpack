@@ -54,6 +54,18 @@ impl<const N: usize> Hash for HashArray<N> {
     }
 }
 
+impl<const N: usize> AsRef<[u8]> for HashArray<N> {
+    fn as_ref(&self) -> &[u8] {
+        &self.0[..]
+    }
+}
+
+impl<const N: usize> AsRef<[u8; N]> for HashArray<N> {
+    fn as_ref(&self) -> &[u8; N] {
+        &self.0
+    }
+}
+
 impl<const N: usize> From<[u8; N]> for HashArray<N> {
     fn from(data: [u8; N]) -> Self {
         Self(data)

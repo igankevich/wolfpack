@@ -15,7 +15,6 @@ use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::ErrorKind;
-use std::io::ErrorKind::InvalidData;
 use std::io::Read;
 use std::ops::RangeInclusive;
 use std::path::Path;
@@ -26,10 +25,15 @@ use wolfpack::deb;
 use wolfpack::sign::VerifierV2;
 
 use crate::download_file;
+use crate::print_table;
 use crate::Connection;
 use crate::ConnectionArc;
+use crate::DebDependencyMatch;
+use crate::DebMatch;
 use crate::Error;
 use crate::Id;
+use crate::Row;
+use crate::ToRow;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
@@ -146,51 +150,9 @@ impl DebRepo {
         }
     }
 
-    fn for_each_packages_db<F>(
-        &self,
-        config: &Config,
-        name: &str,
-        mut callback: F,
-    ) -> Result<(), Error>
-    where
-        F: FnMut(deb::PerArchPackages, &Path) -> Result<(), Error>,
-    {
-        let native_arch = Self::native_arch()?;
-        for suite in self.config.suites.iter() {
-            let suite_dir = config.cache_dir.join(name).join(suite);
-            let release_file = suite_dir.join("Release");
-            let release: deb::Release = read_to_string(&release_file)?.parse()?;
-            for component in release.components().intersection(&self.config.components) {
-                let component_dir = suite_dir.join(component.as_str());
-                for arch in [native_arch.as_str(), "all"] {
-                    let arch_dir = component_dir.join(format!("binary-{}", arch));
-                    let packages_prefix = format!("{}/binary-{}", component, arch);
-                    let files = release.get_files(&packages_prefix, "Packages");
-                    // Read the first file only. This should be the one with the highest
-                    // compression ratio.
-                    if let Some((candidate, _hash, _file_size)) = files.into_iter().next() {
-                        let file_name = candidate.file_name().ok_or(InvalidData)?;
-                        let packages_file = arch_dir.join(file_name);
-                        let mut packages_str = String::new();
-                        let file = match File::open(&packages_file) {
-                            Ok(file) => file,
-                            Err(ref e) if e.kind() == ErrorKind::NotFound => continue,
-                            Err(e) => return Err(e.into()),
-                        };
-                        let mut file = AnyDecoder::new(BufReader::new(file));
-                        file.read_to_string(&mut packages_str)?;
-                        drop(file);
-                        let packages: deb::PerArchPackages = packages_str.parse()?;
-                        callback(packages, arch_dir.as_path())?;
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
     fn index_packages(
         packages_file: &Path,
+        arch_dir: &Path,
         base_url: String,
         component_id: Id,
         db_conn: ConnectionArc,
@@ -199,11 +161,13 @@ impl DebRepo {
         let mut file = AnyDecoder::new(BufReader::new(File::open(packages_file)?));
         file.read_to_string(&mut packages_str)?;
         let packages: deb::PerArchPackages = packages_str.parse()?;
-        for package in packages.into_inner().iter() {
+        let packages = packages.into_inner();
+        for package in packages.iter() {
             let url = format!("{}/{}", base_url, package.filename.display());
+            let package_file = arch_dir.join(&package.filename);
             db_conn
                 .lock()
-                .insert_deb_package(package, &url, component_id)?;
+                .insert_deb_package(package, &url, &package_file, component_id)?;
         }
         log::info!("Indexed {:?}", packages_file);
         Ok(())
@@ -302,6 +266,7 @@ impl Repo for DebRepo {
                                     threads.execute(move || {
                                         if let Err(e) = Self::index_packages(
                                             &packages_file,
+                                            &arch_dir,
                                             base_url,
                                             component_id,
                                             db_conn,
@@ -332,30 +297,40 @@ impl Repo for DebRepo {
         packages: Vec<String>,
     ) -> Result<(), Error> {
         let db_conn = Connection::new(config)?;
+        let mut matches: HashMap<String, Vec<DebDependencyMatch>> = Default::default();
+        for package_name in packages.iter() {
+            let candidates = db_conn
+                .lock()
+                .find_deb_packages_by_name(name, package_name)?
+                .into_iter()
+                .collect();
+            matches.insert(package_name.clone(), candidates);
+        }
+        /*
         let mut matches: HashMap<String, Vec<(deb::ExtendedPackage, PathBuf)>> = Default::default();
         self.for_each_packages_db(config, name, |packages_db, arch_dir| {
-            for package_name in packages.iter() {
-                matches.entry(package_name.to_string()).or_default().extend(
-                    packages_db
-                        .find_by_name(package_name)
-                        .into_iter()
-                        .map(|package| {
-                            let package_file = arch_dir.join(&package.filename);
-                            (package, package_file)
-                        }),
-                );
-            }
-            Ok(())
+        for package_name in packages.iter() {
+        matches.entry(package_name.to_string()).or_default().extend(
+        packages_db
+        .find_by_name(package_name)
+        .into_iter()
+        .map(|package| {
+        let package_file = arch_dir.join(&package.filename);
+        (package, package_file)
+        }),
+        );
+        }
+        Ok(())
         })?;
+        */
         for (package_name, mut matches) in matches.into_iter() {
-            for (i, (package, package_file)) in matches.iter().enumerate() {
+            for (i, package) in matches.iter().enumerate() {
                 println!(
                     "{}. {}  -  {}  -  {}",
                     i + 1,
-                    package_file.display(),
-                    package.inner.version,
+                    package.filename.display(),
+                    package.version,
                     package
-                        .inner
                         .description
                         .as_str()
                         .lines()
@@ -393,161 +368,25 @@ impl Repo for DebRepo {
             }
             // Add dependencies.
             let mut dependencies = VecDeque::new();
-            dependencies.extend(matches[0].0.inner.pre_depends.clone().into_inner());
-            dependencies.extend(matches[0].0.inner.depends.clone().into_inner());
+            //dependencies.extend(matches[0].0.inner.pre_depends.clone().into_inner());
+            dependencies.extend(matches[0].depends.clone().into_inner());
             let mut visited = HashSet::new();
-            self.for_each_packages_db(config, name, |packages, arch_dir| {
-                while let Some(dep) = dependencies.pop_front() {
-                    log::info!("Resolving {}", dep);
-                    let mut candidates = packages.find_dependency(&dep);
-                    if candidates.is_empty() {
-                        return Err(Error::DependencyNotFound(dep.to_string()));
-                    }
-                    if candidates.len() > 1 {
-                        let unique_names = candidates
-                            .iter()
-                            .map(|p| &p.inner.name)
-                            .collect::<HashSet<_>>();
-                        if unique_names.len() > 1 {
-                            for (i, package) in candidates.iter().enumerate() {
-                                println!(
-                                    "{}. {}  -  {}  -  {}",
-                                    i + 1,
-                                    package.inner.name,
-                                    package.inner.version,
-                                    package
-                                        .inner
-                                        .description
-                                        .as_str()
-                                        .lines()
-                                        .next()
-                                        .unwrap_or_default()
-                                );
-                            }
-                            let i = ask_number(
-                                "Which dependency do you want to install? Number: ",
-                                1..=candidates.len(),
-                            )?;
-                            let x = candidates.remove(i - 1);
-                            candidates.clear();
-                            candidates.push(x);
-                        } else {
-                            // Highest version goes first.
-                            candidates
-                                .sort_unstable_by(|a, b| b.inner.version.cmp(&a.inner.version));
-                            candidates.drain(1..);
-                        }
-                    }
-                    // Recurse into dependencies of the dependency.
-                    for package in candidates.into_iter() {
-                        let hash = package.hash();
-                        if visited.insert(hash) {
-                            log::info!("Recurse into {}", package.inner.name);
-                            dependencies.extend(package.inner.pre_depends.clone().into_inner());
-                            dependencies.extend(package.inner.depends.clone().into_inner());
-                            let package_file = arch_dir.join(&package.filename);
-                            matches.push((package, package_file));
-                        }
-                    }
+            while let Some(dep) = dependencies.pop_front() {
+                log::info!("Resolving {}", dep);
+                let mut candidates = db_conn.lock().select_deb_dependencies(name, &dep)?;
+                if candidates.is_empty() {
+                    return Err(Error::DependencyNotFound(dep.to_string()));
                 }
-                Ok(())
-            })?;
-            log::info!("Installing...");
-            // Install in topological (reverse) order.
-            for (package, package_file) in matches.into_iter().rev() {
-                for base_url in self.config.base_urls.iter() {
-                    let package_url = format!("{}/{}", base_url, package.filename.display());
-                    if let Some(dirname) = package_file.parent() {
-                        create_dir_all(dirname)?;
-                    }
-                    match download_file(
-                        &package_url,
-                        &package_file,
-                        package.hash(),
-                        db_conn.clone(),
-                        config,
-                    )
-                    .await
-                    {
-                        Ok(..) => {
-                            let verifier = deb::PackageVerifier::none();
-                            let (_control, data) =
-                                deb::Package::read(File::open(&package_file)?, &verifier)?;
-                            log::info!("Installing {}", package_file.display());
-                            let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
-                            let dst = config.store_dir.join(name);
-                            create_dir_all(&dst)?;
-                            tar_archive.unpack(&dst)?;
-                            drop(tar_archive);
-                            let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
-                            for entry in tar_archive.entries()? {
-                                let entry = entry?;
-                                let path = dst.join(entry.path()?);
-                                match get_elf_type(&path) {
-                                    Ok(..) => {
-                                        log::info!("patching {:?}", path);
-                                        let status = Command::new("./patchelf.sh")
-                                            .arg(&path)
-                                            .arg(&dst)
-                                            .status()?;
-                                        if !status.success() {
-                                            return Err(Error::Patch(path));
-                                        }
-                                    }
-                                    _ => {
-                                        // TODO
-                                    }
-                                }
-                            }
-                            break;
-                        }
-                        Err(..) => continue,
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn search(&mut self, config: &Config, name: &str, keyword: &str) -> Result<(), Error> {
-        let arch = Self::native_arch()?;
-        for suite in self.config.suites.iter() {
-            let suite_dir = config.cache_dir.join(name).join(suite);
-            let release_file = suite_dir.join("Release");
-            let release: deb::Release = read_to_string(&release_file)?.parse()?;
-            for component in release.components().intersection(&self.config.components) {
-                let component_dir = suite_dir.join(component.as_str());
-                for arch in [arch.as_str(), "all"] {
-                    let arch_dir = component_dir.join(format!("binary-{}", arch));
-                    let packages_prefix = format!("{}/binary-{}", component, arch);
-                    let files = release.get_files(&packages_prefix, "Packages");
-                    for (candidate, _hash, _file_size) in files.into_iter() {
-                        let file_name = candidate.file_name().ok_or(InvalidData)?;
-                        let packages_file = arch_dir.join(file_name);
-                        let mut packages_str = String::new();
-                        let file = match File::open(&packages_file) {
-                            Ok(file) => file,
-                            Err(ref e) if e.kind() == ErrorKind::NotFound => continue,
-                            Err(e) => return Err(e.into()),
-                        };
-                        let mut file = AnyDecoder::new(BufReader::new(file));
-                        file.read_to_string(&mut packages_str)?;
-                        let packages: deb::PerArchPackages = packages_str.parse()?;
-                        let matches = packages.find(keyword);
-                        if !matches.is_empty() {
+                if candidates.len() > 1 {
+                    let unique_names = candidates.iter().map(|p| &p.name).collect::<HashSet<_>>();
+                    if unique_names.len() > 1 {
+                        for (i, package) in candidates.iter().enumerate() {
                             println!(
-                                "Source {} / {} / {} / {:?}",
-                                name, suite, component, packages_file
-                            );
-                        }
-                        for package in matches {
-                            println!(
-                                "{}  -  {}  -  {}  -  {}",
-                                package.inner.name,
-                                package.inner.version,
-                                package.hash().map(|h| h.to_string()).unwrap_or_default(),
+                                "{}. {}  -  {}  -  {}",
+                                i + 1,
+                                package.name,
+                                package.version,
                                 package
-                                    .inner
                                     .description
                                     .as_str()
                                     .lines()
@@ -555,27 +394,103 @@ impl Repo for DebRepo {
                                     .unwrap_or_default()
                             );
                         }
-                        break;
+                        let i = ask_number(
+                            "Which dependency do you want to install? Number: ",
+                            1..=candidates.len(),
+                        )?;
+                        let x = candidates.remove(i - 1);
+                        candidates.clear();
+                        candidates.push(x);
+                    } else {
+                        // Highest version goes first.
+                        candidates.sort_unstable_by(|a, b| b.version.cmp(&a.version));
+                        candidates.drain(1..);
                     }
+                }
+                // Recurse into dependencies of the dependency.
+                for package in candidates.into_iter() {
+                    // TODO unique `dependencies`
+                    if visited.insert(package.hash.clone()) {
+                        log::info!("Recurse into {}", package.name);
+                        dependencies.extend(package.depends.clone().into_inner());
+                        matches.push(package);
+                    }
+                }
+            }
+            log::info!("Installing...");
+            // Install in topological (reverse) order.
+            for package in matches.into_iter().rev() {
+                if let Some(dirname) = package.filename.parent() {
+                    create_dir_all(dirname)?;
+                }
+                match download_file(
+                    &package.url,
+                    &package.filename,
+                    package.hash.clone(),
+                    db_conn.clone(),
+                    config,
+                )
+                .await
+                {
+                    Ok(..) => {
+                        let verifier = deb::PackageVerifier::none();
+                        let (_control, data) =
+                            deb::Package::read(File::open(&package.filename)?, &verifier)?;
+                        log::info!("Installing {}", package.filename.display());
+                        let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
+                        let dst = config.store_dir.join(name);
+                        create_dir_all(&dst)?;
+                        tar_archive.unpack(&dst)?;
+                        drop(tar_archive);
+                        let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
+                        for entry in tar_archive.entries()? {
+                            let entry = entry?;
+                            let path = dst.join(entry.path()?);
+                            if get_elf_type(&path).is_some() {
+                                log::info!("patching {:?}", path);
+                                let status = Command::new("./patchelf.sh")
+                                    .arg(&path)
+                                    .arg(&dst)
+                                    .status()?;
+                                if !status.success() {
+                                    return Err(Error::Patch(path));
+                                }
+                            }
+                        }
+                    }
+                    Err(..) => continue,
                 }
             }
         }
         Ok(())
     }
+
+    fn search(&mut self, config: &Config, name: &str, keyword: &str) -> Result<(), Error> {
+        let db_conn = Connection::new(config)?;
+        let architecture = Self::native_arch()?;
+        let matches = db_conn
+            .lock()
+            .find_deb_packages(name, &architecture, keyword)?;
+        print_table(matches.iter(), std::io::stdout())?;
+        Ok(())
+    }
 }
 
-fn get_elf_type(path: &Path) -> Result<ElfType, Error> {
-    let mut file = File::open(path)?;
+fn get_elf_type(path: &Path) -> Option<ElfType> {
+    let mut file = File::open(path).ok()?;
     let mut buf = [0; 64];
-    let n = file.read(&mut buf[..])?;
+    let n = file.read(&mut buf[..]).ok()?;
     let buf = &mut buf[..n];
     drop(file);
-    let ident = elf::file::parse_ident::<AnyEndian>(buf)?;
-    let header = elf::file::FileHeader::<AnyEndian>::parse_tail(ident, &buf[EI_NIDENT..])?;
+    if buf.len() < 4 {
+        return None;
+    }
+    let ident = elf::file::parse_ident::<AnyEndian>(buf).ok()?;
+    let header = elf::file::FileHeader::<AnyEndian>::parse_tail(ident, &buf[EI_NIDENT..]).ok()?;
     match header.e_type {
-        ET_EXEC => Ok(ElfType::Executable),
-        ET_DYN => Ok(ElfType::Library),
-        other => Err(Error::UnknownElf(other)),
+        ET_EXEC => Some(ElfType::Executable),
+        ET_DYN => Some(ElfType::Library),
+        _ => None,
     }
 }
 
@@ -597,6 +512,22 @@ fn ask_number(prompt: &str, valid_range: RangeInclusive<usize>) -> Result<usize,
         if valid_range.contains(&i) {
             return Ok(i);
         }
+    }
+}
+
+impl ToRow<3> for DebMatch {
+    fn to_row(&self) -> Row<'_, 3> {
+        Row([
+            self.name.as_str().into(),
+            self.version.as_str().into(),
+            self.description
+                .as_str()
+                .lines()
+                .next()
+                .map(|line| line.trim())
+                .unwrap_or_default()
+                .into(),
+        ])
     }
 }
 

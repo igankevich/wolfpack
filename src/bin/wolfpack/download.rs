@@ -152,7 +152,7 @@ async fn do_download_file<P: AsRef<Path>>(
         let actual_hash = hasher.finalize();
         if hash != actual_hash {
             remove_file(path)?;
-            return Err(Error::HashMismatch);
+            return Err(Error::HashMismatch(hash.into(), actual_hash.into()));
         }
     }
     Ok(())

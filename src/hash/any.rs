@@ -3,6 +3,7 @@ use std::fmt::Formatter;
 use std::str::FromStr;
 
 use crate::hash::HashParseError;
+use crate::hash::HashTryFromError;
 use crate::hash::Hasher;
 use crate::hash::Md5Hash;
 use crate::hash::Md5Hasher;
@@ -13,7 +14,7 @@ use crate::hash::Sha256Hasher;
 use crate::hash::Sha512Hash;
 use crate::hash::Sha512Hasher;
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum AnyHash {
     Md5(Md5Hash),
     Sha1(Sha1Hash),
@@ -42,6 +43,16 @@ impl AnyHash {
             Sha512(..) => Sha512Hash::LEN,
         }
     }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        use AnyHash::*;
+        match self {
+            Md5(h) => h.as_ref(),
+            Sha1(h) => h.as_ref(),
+            Sha256(h) => h.as_ref(),
+            Sha512(h) => h.as_ref(),
+        }
+    }
 }
 
 impl Display for AnyHash {
@@ -60,11 +71,24 @@ impl FromStr for AnyHash {
     type Err = HashParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.len() {
-            Md5Hash::LEN => Ok(Self::Md5(s.parse()?)),
-            Sha1Hash::LEN => Ok(Self::Sha1(s.parse()?)),
-            Sha256Hash::LEN => Ok(Self::Sha256(s.parse()?)),
-            Sha512Hash::LEN => Ok(Self::Sha512(s.parse()?)),
+            Md5Hash::HEX_LEN => Ok(Self::Md5(s.parse()?)),
+            Sha1Hash::HEX_LEN => Ok(Self::Sha1(s.parse()?)),
+            Sha256Hash::HEX_LEN => Ok(Self::Sha256(s.parse()?)),
+            Sha512Hash::HEX_LEN => Ok(Self::Sha512(s.parse()?)),
             _ => Err(HashParseError),
+        }
+    }
+}
+
+impl TryFrom<&[u8]> for AnyHash {
+    type Error = HashTryFromError;
+    fn try_from(s: &[u8]) -> Result<Self, Self::Error> {
+        match s.len() {
+            Md5Hash::LEN => Ok(Self::Md5(s.try_into()?)),
+            Sha1Hash::LEN => Ok(Self::Sha1(s.try_into()?)),
+            Sha256Hash::LEN => Ok(Self::Sha256(s.try_into()?)),
+            Sha512Hash::LEN => Ok(Self::Sha512(s.try_into()?)),
+            _ => Err(HashTryFromError),
         }
     }
 }

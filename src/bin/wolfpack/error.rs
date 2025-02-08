@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use reqwest::header::InvalidHeaderValue;
 use thiserror::Error;
+use wolfpack::hash::AnyHash;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -30,16 +31,16 @@ pub enum Error {
     Patch(PathBuf),
     #[error("Failed to parse ELF: {0}")]
     Elf(#[from] elf::ParseError),
-    #[error("Unknown ELF type: {0}")]
-    UnknownElf(u16),
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("Invalid header: {0}")]
     Header(#[from] InvalidHeaderValue),
     #[error("Resource `{0}` not found")]
     ResourceNotFound(String),
-    #[error("Hash mismatch")]
-    HashMismatch,
+    #[error("Hash mismatch: expected {0}, actual {1}")]
+    HashMismatch(Box<AnyHash>, Box<AnyHash>),
+    #[error("No hash")]
+    NoHash,
     #[error("Task error: {0}")]
     Join(#[from] tokio::task::JoinError),
 }

@@ -245,22 +245,20 @@ impl Connection {
         &self,
         repo_name: &str,
         architecture: &str,
-        keyword: &str,
+        query: &str,
     ) -> Result<Vec<DebMatch>, Error> {
-        let mut like = String::with_capacity(keyword.len() + 2);
-        like.push('%');
-        like.push_str(keyword);
-        like.push('%');
         self.inner
             .prepare_cached(
-                "SELECT name, version, description
-                FROM deb_packages
-                WHERE architecture=?3
-                  AND (name LIKE ?1 OR description LIKE ?1)
+                "SELECT deb_packages.name, deb_packages.version, deb_packages.description
+                FROM deb_packages_fts
+                JOIN deb_packages
+                  ON id=deb_packages_fts.rowid
+                WHERE architecture IN (?3, 'all')
                   AND EXISTS(SELECT repo_name FROM deb_components WHERE component_id=id AND repo_name=?2)
-                ORDER BY name ASC, version DESC",
+                  AND deb_packages_fts MATCH ?1
+                ORDER BY rank",
             )?
-            .query_map((like, repo_name, architecture), |row| {
+            .query_map((query, repo_name, architecture), |row| {
                 Ok(DebMatch {
                     name: row.get(0)?,
                     version: row.get(1)?,

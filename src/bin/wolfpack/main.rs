@@ -46,9 +46,13 @@ struct InstallArgs {
 
 #[derive(clap::Args)]
 struct SearchArgs {
-    /// Search keyword.
-    #[clap(value_name = "KEYWORD")]
-    keyword: String,
+    /// Search query.
+    #[clap(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        value_name = "KEYWORD"
+    )]
+    query: Vec<String>,
 }
 
 fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
@@ -83,9 +87,9 @@ fn pull(mut config: Config) -> Result<ExitCode, Box<dyn std::error::Error>> {
 
 fn search(mut config: Config, args: SearchArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut repos = config.take_repos();
-    let keyword = args.keyword.to_lowercase();
+    let query = args.query.join(" ");
     for (name, repo) in repos.iter_mut() {
-        repo.search(&config, name.as_str(), &keyword)?;
+        repo.search(&config, name.as_str(), &query)?;
     }
     Ok(ExitCode::SUCCESS)
 }

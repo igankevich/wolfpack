@@ -29,10 +29,11 @@ CREATE TABLE deb_packages (
     version TEXT NOT NULL,
     architecture TEXT NOT NULL,
     description TEXT NOT NULL,
+    homepage TEXT,
     installed_size INTEGER,
     provides TEXT,
     depends TEXT,
-    component_id BLOB NOT NULL
+    component_id INTEGER NOT NULL
         REFERENCES deb_components(id)
         ON DELETE CASCADE
         ON UPDATE CASCADE
@@ -40,19 +41,31 @@ CREATE TABLE deb_packages (
 
 -- Full-text search for DEB packages. {{{
 CREATE VIRTUAL TABLE deb_packages_fts
-USING fts5(name, description, content='deb_packages', content_rowid='id');
+USING fts5(
+    name,
+    description,
+    homepage,
+    content = 'deb_packages',
+    content_rowid = 'id',
+    tokenize = 'porter unicode61 remove_diacritics 2'
+);
 
-CREATE TRIGGER deb_packages_after_insert AFTER INSERT ON deb_packages
+CREATE TRIGGER deb_packages_after_insert
+AFTER INSERT ON deb_packages
 BEGIN
     INSERT INTO deb_packages_fts(rowid, name, description)
     VALUES (new.id, new.name, new.description);
 END;
-CREATE TRIGGER deb_packages_after_delete AFTER DELETE ON deb_packages
+
+CREATE TRIGGER deb_packages_after_delete
+AFTER DELETE ON deb_packages
 BEGIN
     INSERT INTO deb_packages_fts(deb_packages_fts, rowid, name, description)
     VALUES('delete', old.name, old.description, old.description);
 END;
-CREATE TRIGGER deb_packages_after_update AFTER UPDATE ON deb_packages
+
+CREATE TRIGGER deb_packages_after_update
+AFTER UPDATE ON deb_packages
 BEGIN
     INSERT INTO deb_packages_fts(deb_packages_fts, rowid, name, description)
     VALUES('delete', old.name, old.name, old.description);

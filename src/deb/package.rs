@@ -40,6 +40,7 @@ pub struct Package {
     pub provides: Option<Provides>,
     pub depends: Dependencies,
     pub pre_depends: Dependencies,
+    pub homepage: Option<String>,
     pub other: Fields,
 }
 
@@ -162,14 +163,17 @@ impl Display for Package {
         if let Some(installed_size) = self.installed_size.as_ref() {
             writeln!(f, "Installed-Size: {}", installed_size)?;
         }
-        for (name, value) in self.other.iter() {
-            writeln!(f, "{}: {}", name, value)?;
-        }
         if let Some(provides) = self.provides.as_ref() {
             writeln!(f, "Provides: {}", provides)?;
         }
         writeln!(f, "Depends: {}", self.depends)?;
         writeln!(f, "Pre-Depends: {}", self.pre_depends)?;
+        if let Some(homepage) = self.homepage.as_ref() {
+            writeln!(f, "Homepage: {}", homepage)?;
+        }
+        for (name, value) in self.other.iter() {
+            writeln!(f, "{}: {}", name, value)?;
+        }
         writeln!(f, "Description: {}", self.description)?;
         Ok(())
     }
@@ -190,6 +194,7 @@ impl FromStr for Package {
             provides: fields.remove_some("provides")?,
             depends: fields.remove_some("depends")?.unwrap_or_default(),
             pre_depends: fields.remove_some("pre-depends")?.unwrap_or_default(),
+            homepage: fields.remove_some("homepage")?,
             other: fields,
         };
         Ok(control)

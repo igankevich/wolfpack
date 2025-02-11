@@ -216,9 +216,10 @@ impl Connection {
         let hash = package.hash();
         self.inner
             .prepare_cached(
-                "INSERT INTO deb_packages(name, version, architecture, description, installed_size, provides, depends, url, filename, hash, component_id) \
-                VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
-                ON CONFLICT(url) DO NOTHING"
+                "INSERT INTO deb_packages(name, version, architecture, description, \
+                installed_size, provides, depends, url, filename, hash, homepage, component_id) \
+                VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
+                ON CONFLICT(url) DO NOTHING",
             )?
             .execute((
                 package.inner.name.as_str(),
@@ -235,7 +236,8 @@ impl Connection {
                 url,
                 filename.as_bytes(),
                 hash.as_ref().map(|x| x.as_bytes()).ok_or(Error::NoHash)?,
-                component_id
+                package.inner.homepage.as_ref(),
+                component_id,
             ))
             .optional()?;
         Ok(())

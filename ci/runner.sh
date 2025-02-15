@@ -17,9 +17,15 @@ ldd "$executable" |
     while read -r lib _arrow path _rest; do
         if test -e "$path"; then
             cp -v "$path" "$workdir"/
+            # Fix permissions.
+            name="$(basename "$path")"
+            chmod 755 "$workdir"/"$name"
         fi
         if test -e "$lib"; then
             cp -v "$lib" "$workdir"/
+            # Fix permissions.
+            name="$(basename "$lib")"
+            chmod 755 "$workdir"/"$name"
         fi
     done
 patchelf \

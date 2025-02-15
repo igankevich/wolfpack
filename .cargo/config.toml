@@ -1,4 +1,12 @@
 [alias]
+test-lib = [
+    "test",
+    "--lib",
+    "--config",
+    "target.'cfg(target_os = \"linux\")'.runner=\"./ci/runner.sh ghcr.io/igankevich/wolfpack-ci:latest\"",
+    "--",
+    "--nocapture",
+]
 test-deb = [
     "test",
     "--lib",

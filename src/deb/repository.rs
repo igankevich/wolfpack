@@ -283,7 +283,7 @@ mod tests {
     use crate::test::DirectoryOfFiles;
     use crate::test::UpperHex;
 
-    #[ignore]
+    #[ignore = "Needs `apt`"]
     #[test]
     fn apt_adds_random_repositories() {
         let (signing_key, verifying_key) = SigningKey::generate("wolfpack-pgp-id".into()).unwrap();

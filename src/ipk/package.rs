@@ -174,7 +174,7 @@ mod tests {
         });
     }
 
-    #[ignore]
+    #[ignore = "Needs `opkg`"]
     #[test]
     fn opkg_installs_random_packages() {
         let workdir = TempDir::new().unwrap();

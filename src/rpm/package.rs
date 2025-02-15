@@ -355,7 +355,7 @@ mod tests {
     }
     */
 
-    #[ignore]
+    #[ignore = "Needs `rpm`"]
     #[test]
     fn rpm_installs_random_package() {
         let _guard = prevent_concurrency("rpm");

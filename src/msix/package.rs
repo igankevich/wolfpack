@@ -153,7 +153,7 @@ mod tests {
     use crate::test::prevent_concurrency;
     use crate::test::DirectoryOfFiles;
 
-    #[ignore]
+    #[ignore = "Needs `msixmgr`"]
     #[test]
     fn msixmgr_installs_random_package() {
         let _guard = prevent_concurrency("wine");

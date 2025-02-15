@@ -124,7 +124,7 @@ mod tests {
 
     use super::*;
 
-    #[ignore]
+    #[ignore = "Needs FreeBSD's `pkg`"]
     #[test]
     fn freebsd_pkg_key_public() {
         let (signing_key, verifying_key) = SigningKey::generate();
@@ -161,7 +161,7 @@ mod tests {
         assert_eq!(verifying_key, pkg_verifying_key);
     }
 
-    #[ignore]
+    #[ignore = "Needs FreeBSD's `pkg`"]
     #[test]
     fn freebsd_pkg_key_create() {
         let workdir = TempDir::new().unwrap();
@@ -197,7 +197,7 @@ mod tests {
         assert_eq!(verifying_key, signing_key.verifying_key())
     }
 
-    #[ignore]
+    #[ignore = "Needs FreeBSD's `pkg`"]
     #[test]
     fn freebsd_pkg_key_sign() {
         let (signing_key, verifying_key) = SigningKey::generate();

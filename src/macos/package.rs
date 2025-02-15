@@ -89,7 +89,7 @@ mod tests {
     use zar::rsa::RsaPrivateKey;
     use zar::ChecksumAlgo;
 
-    #[ignore]
+    #[ignore = "Needs `darling`"]
     #[test]
     fn macos_installer_installs_random_package() {
         assert!(Command::new("mount")

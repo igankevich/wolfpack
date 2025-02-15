@@ -346,7 +346,7 @@ mod tests {
         });
     }
 
-    #[ignore]
+    #[ignore = "Needs FreeBSD's `pkg`"]
     #[test]
     fn freebsd_pkg_adds_repo() {
         let _guard = prevent_concurrency("freebsd-pkg");

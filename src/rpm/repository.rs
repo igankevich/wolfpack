@@ -454,12 +454,14 @@ mod tests {
     use crate::test::prevent_concurrency;
     use crate::test::DirectoryOfFiles;
 
+    #[ignore]
     #[test]
     fn repo_md_read() {
         let input = std::fs::read_to_string("epel/repomd.xml").unwrap();
         let _repo_md = RepoMd::from_str(&input).unwrap();
     }
 
+    #[ignore]
     #[test]
     fn primary_xml_read() {
         let input = std::fs::read_to_string(
@@ -469,6 +471,7 @@ mod tests {
         let _metadata = Metadata::from_str(&input).unwrap();
     }
 
+    #[ignore]
     #[test]
     fn file_lists_xml_read() {
         let input = std::fs::read_to_string(
@@ -478,6 +481,7 @@ mod tests {
         let _filelists = FileLists::from_str(&input).unwrap();
     }
 
+    #[ignore]
     #[test]
     fn other_xml_read() {
         let input = std::fs::read_to_string(
@@ -487,7 +491,7 @@ mod tests {
         let _otherdata = OtherData::from_str(&input).unwrap();
     }
 
-    #[ignore]
+    #[ignore = "Needs `dnf`"]
     #[test]
     fn dnf_install() {
         let _guard = prevent_concurrency("rpm");

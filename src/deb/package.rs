@@ -272,7 +272,7 @@ mod tests {
         });
     }
 
-    #[ignore]
+    #[ignore = "Needs `dpkg`"]
     #[test]
     fn dpkg_installs_random_packages() {
         let (signing_key, verifying_key) = SigningKey::generate("wolfpack-pgp-id".into()).unwrap();

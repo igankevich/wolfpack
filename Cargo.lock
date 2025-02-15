@@ -1816,7 +1816,8 @@ dependencies = [
 
 [[package]]
 name = "ksign"
-version = "0.2.0"
+version = "0.3.0"
+source = "git+https://github.com/igankevich/ksign?branch=more-methods#246023fe154885487d2616a5304843eeb8f0ac46"
 dependencies = [
  "base64ct",
  "clap",

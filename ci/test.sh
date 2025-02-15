@@ -15,8 +15,9 @@ cargo_test_lib() {
 
 main() {
     . ./ci/preamble.sh
-    export ARBTEST_BUDGET_MS=10000
+    export ARBTEST_BUDGET_MS=2000
     DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-lib:latest" cargo_test_lib --nocapture
+    export ARBTEST_BUDGET_MS=10000
     DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-openwrt-2:latest" cargo_test_lib --nocapture --ignored opkg
     DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-debian:latest" cargo_test_lib --nocapture --ignored dpkg apt
     #test_integration

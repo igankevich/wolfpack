@@ -1817,7 +1817,8 @@ dependencies = [
 [[package]]
 name = "ksign"
 version = "0.3.0"
-source = "git+https://github.com/igankevich/ksign?branch=more-methods#246023fe154885487d2616a5304843eeb8f0ac46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "389a76d26a9ffc14226e77dee30efdcbd32c34a0615e514f7ca6a279c1b13aed"
 dependencies = [
  "base64ct",
  "clap",

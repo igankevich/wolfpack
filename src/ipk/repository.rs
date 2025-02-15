@@ -171,7 +171,7 @@ mod tests {
     use crate::ipk::SigningKey;
     use crate::test::DirectoryOfFiles;
 
-    #[ignore = "Needs opkg"]
+    #[ignore = "Needs `opkg`"]
     #[test]
     fn opkg_installs_from_repo() {
         let workdir = TempDir::new().unwrap();

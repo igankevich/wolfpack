@@ -15,7 +15,7 @@ cargo_test_lib() {
 
 main() {
     . ./ci/preamble.sh
-    DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci:latest" cargo_test_lib --nocapture
+    DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-lib:latest" cargo_test_lib --nocapture
     #test_integration
 }
 

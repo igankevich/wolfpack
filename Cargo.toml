@@ -3,6 +3,14 @@ name = "wolfpack"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0"
+homepage = "https://github.com/igankevich/wolfpack"
+repository = "https://github.com/igankevich/wolfpack"
+documentation = "https://docs.rs/wolfpack"
+readme = "README.md"
+description = "A package manager and a build tool that supports major package formats (deb, RPM, ipk, pkg, MSIX)."
+keywords = ["deb", "rpm", "ipk", "pkg", "msix"]
+categories = ["command-line-utilities", "development-tools::build-utils"]
+include = ["**/*.rs", "**/*.sql", "Cargo.toml", "README.md", "LICENSE"]
 
 [dependencies]
 ar = "0.9.0"

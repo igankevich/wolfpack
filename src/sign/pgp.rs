@@ -290,7 +290,6 @@ fn get_public_key_algorithm<P: PublicKeyTrait>(
         EdDSALegacy { .. } => Ok(PublicKeyAlgorithm::EdDSALegacy),
         Ed25519 { .. } => Ok(PublicKeyAlgorithm::Ed25519),
         X25519 { .. } => Ok(PublicKeyAlgorithm::X25519),
-        X448 { .. } => Ok(PublicKeyAlgorithm::X448),
         Unknown { .. } => Err(Error),
     }
 }

@@ -41,7 +41,7 @@ main() {
     suffix="$1"
     case "$suffix" in
     openwrt) build_openwrt ;;
-    *) build_other "$suffix" ;;
+    *) build_other -"$suffix" ;;
     esac
 }
 

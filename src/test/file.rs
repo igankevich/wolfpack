@@ -55,10 +55,12 @@ impl<'a> Arbitrary<'a> for DirectoryOfFiles {
             if path.is_dir() {
                 continue;
             }
-            create_dir_all(path.parent().unwrap()).unwrap();
-            let mut contents: ByteArray = [0; 4096];
-            rng.fill_bytes(&mut contents);
-            std::fs::write(path, &contents[..]).unwrap();
+            // Might fail with "not a directory".
+            if create_dir_all(path.parent().unwrap()).is_ok() {
+                let mut contents: ByteArray = [0; 4096];
+                rng.fill_bytes(&mut contents);
+                std::fs::write(path, &contents[..]).unwrap();
+            }
         }
         Ok(Self { dir })
     }

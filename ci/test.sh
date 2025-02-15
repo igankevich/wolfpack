@@ -16,7 +16,7 @@ cargo_test_lib() {
 main() {
     . ./ci/preamble.sh
     DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-lib:latest" cargo_test_lib --nocapture
-    DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-openwrt:latest" cargo_test_lib --nocapture --ignored opkg
+    DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-openwrt-2:latest" cargo_test_lib --nocapture --ignored opkg
     #test_integration
 }
 

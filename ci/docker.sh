@@ -3,7 +3,7 @@
 build_openwrt() {
     version=23.05.5
     url=https://downloads.openwrt.org/releases/$version/targets/x86/64/openwrt-$version-x86-64-rootfs.tar.gz
-    image=ghcr.io/igankevich/wolfpack-ci-openwrt:latest
+    image=ghcr.io/igankevich/wolfpack-ci-openwrt-2:latest
     rootfs="$workdir"/openwrt-rootfs
     mkdir -p "$rootfs"
     curl --silent --fail --location "$url" | tar -xzf- -C "$workdir"

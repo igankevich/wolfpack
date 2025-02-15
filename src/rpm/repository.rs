@@ -545,9 +545,7 @@ gpgkey=file://{}
                 package
             );
             assert!(
-                Command::new("dnf")
-                    .arg("--verbose")
-                    .arg("--debuglevel=10")
+                dnf()
                     .arg("--repo=test")
                     .arg("install")
                     .arg("--assumeyes")
@@ -559,8 +557,8 @@ gpgkey=file://{}
                 package
             );
             assert!(
-                Command::new("dnf")
-                    .arg("erase")
+                dnf()
+                    .arg("remove")
                     .arg("--assumeyes")
                     .arg(&package.name)
                     .status()
@@ -571,5 +569,13 @@ gpgkey=file://{}
             );
             Ok(())
         });
+    }
+
+    fn dnf() -> Command {
+        let mut c = Command::new("dnf");
+        c.arg("--setopt=debuglevel=10");
+        c.arg("--setopt=errorlevel=10");
+        c.arg("--setopt=rpmverbosity=debug");
+        c
     }
 }

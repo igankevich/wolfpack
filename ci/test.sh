@@ -27,7 +27,6 @@ test_integration() {
 cargo_test_lib() {
     silent cargo test \
         --workspace \
-        --no-fail-fast \
         --lib \
         --config "target.'cfg(target_os = \"linux\")'.runner=\"./ci/runner.sh $DOCKER_IMAGE\"" \
         -- "$@"
@@ -42,7 +41,7 @@ cargo_test_all() {
     DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-openwrt-2:latest" cargo_test_lib --nocapture --ignored opkg
     DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-debian:latest" cargo_test_lib --nocapture --ignored dpkg apt
     DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-freebsd:latest" cargo_test_lib --nocapture --ignored bsd_pkg
-    DOCKER_IMAGE="docker.io/fedora:latest" cargo_test_lib --nocapture --ignored rpm_ dnf
+    DOCKER_IMAGE="docker.io/fedora:41" cargo_test_lib --nocapture --ignored rpm_ dnf
     unset ARBTEST_BUDGET_MS
     unset RUST_TEST_THREADS
 }

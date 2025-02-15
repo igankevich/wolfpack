@@ -41,7 +41,6 @@ impl Repository {
     {
         let mut packages: HashMap<SimpleValue, PerArchPackages> = HashMap::new();
         let mut push_package = |path: &Path| -> Result<(), Error> {
-            eprintln!("reading {}", path.display());
             let mut reader = Sha256Reader::new(File::open(path)?);
             let control = Package::read_control(reader.by_ref(), path, verifier)?;
             let (hash, size) = reader.digest()?;

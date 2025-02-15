@@ -226,7 +226,6 @@ impl PgpSignature {
         let mut signatures = Vec::new();
         let parser = PacketParser::new(reader);
         for packet in parser {
-            eprintln!("packet {:?}", packet);
             let packet = packet.map_err(std::io::Error::other)?;
             let signature = match packet {
                 Packet::Signature(signature) => signature,

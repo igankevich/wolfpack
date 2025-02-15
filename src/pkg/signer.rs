@@ -104,10 +104,7 @@ impl VerifyingKey {
     pub fn verify_data(&self, message: &[u8], signature: &Signature) -> Result<(), Error> {
         let message = sha256::Hash::hash(message);
         let message = Message::from_digest(message.to_byte_array());
-        signature.verify(&message, &self.0).map_err(|e| {
-            eprintln!("{e}");
-            Error
-        })?;
+        signature.verify(&message, &self.0).map_err(|_| Error)?;
         Ok(())
     }
 }

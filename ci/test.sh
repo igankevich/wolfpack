@@ -20,8 +20,10 @@ silent() {
     fi
 }
 
-test_integration() {
-    cargo test-deb
+lint() {
+    cargo deny check
+    cargo fmt --all --check
+    cargo clippy --all-targets --all-features --workspace -- -D warnings
 }
 
 cargo_test_lib() {
@@ -53,8 +55,8 @@ cargo_test_all() {
 main() {
     . ./ci/preamble.sh
     install_dependencies
+    lints
     cargo_test_all
-    #test_integration
 }
 
 main

@@ -36,7 +36,6 @@ impl Repository {
     {
         let mut packages = HashMap::new();
         let mut push_package = |directory: &Path, path: &Path| -> Result<(), std::io::Error> {
-            eprintln!("reading {}", path.display());
             let relative_path = Path::new(".").join(
                 path.strip_prefix(directory)
                     .map_err(std::io::Error::other)?

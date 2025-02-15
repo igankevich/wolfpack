@@ -57,7 +57,6 @@ impl Package {
         P: AsRef<Path>,
     {
         let lead = Lead::new(CString::new(self.name.clone()).map_err(Error::other)?);
-        eprintln!("write {lead:?}");
         lead.write(writer.by_ref())?;
         let mut basenames = Vec::<CString>::new();
         let mut dirnames = Vec::<CString>::new();
@@ -108,9 +107,7 @@ impl Package {
                 filedigests.push(CString::new(hash).map_err(Error::other)?);
             }
         }
-        eprintln!("Package::write 2");
         let mut header2 = Header::new(self.try_into()?);
-        eprintln!("Package::write 3");
         header2.insert(Entry::BaseNames(basenames.try_into()?));
         header2.insert(Entry::DirNames(dirnames.try_into()?));
         header2.insert(Entry::DirIndexes(dirindices.try_into()?));
@@ -148,7 +145,6 @@ impl Package {
             .sign(&header2)
             .map_err(|_| Error::other("Failed to sign RPM"))?
             .to_binary()?;
-        eprintln!("header2 len {}", header2.len());
         let header1 = Header::new(
             Signatures {
                 signature_v3,
@@ -180,11 +176,6 @@ impl Package {
         let mut cpio = cpio::Archive::new(decoder);
         while let Some(entry) = cpio.read_entry()? {
             files.push(entry.path.clone());
-            //eprintln!(
-            //    "{} ({} bytes)",
-            //    cpio.entry().name(),
-            //    cpio.entry().file_size()
-            //);
         }
         let (sha256, _size) = reader.digest()?;
         let package: Package = header2.try_into()?;

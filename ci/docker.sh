@@ -3,7 +3,7 @@
 build_openwrt() {
     version=23.05.5
     url=https://downloads.openwrt.org/releases/$version/targets/x86/64/openwrt-$version-x86-64-rootfs.tar.gz
-    image=ghcr.io/igankevich/wolfpack-ci-openwrt:"$version"
+    image=ghcr.io/igankevich/wolfpack-ci-openwrt:latest
     rootfs="$workdir"/openwrt-rootfs
     mkdir -p "$rootfs"
     curl --silent --fail --location "$url" | tar -xzf- -C "$workdir"
@@ -12,8 +12,11 @@ build_openwrt() {
 FROM scratch
 COPY . /
 CMD ["/bin/sh"]
+LABEL org.opencontainers.image.source=https://github.com/igankevich/wolfpack
+LABEL org.opencontainers.image.description="CI image"
 EOF
     docker build --tag "$image" "$workdir"
+    docker push $image
 }
 
 build_other() {

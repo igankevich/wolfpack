@@ -45,6 +45,7 @@ cargo_test_all() {
     cargo_test_lib ghcr.io/igankevich/wolfpack-ci-freebsd:latest --nocapture --ignored bsd_pkg
     cargo_test_lib docker.io/fedora:latest --nocapture --ignored rpm_ dnf
     cargo_test_lib ghcr.io/igankevich/wolfpack-ci-darling:latest --nocapture --ignored darling_
+    cargo_test_lib ghcr.io/igankevich/wolfpack-ci-wine:latest --nocapture --ignored msixmgr_
     unset ARBTEST_BUDGET_MS
     unset RUST_TEST_THREADS
 }

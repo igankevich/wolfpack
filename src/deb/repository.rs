@@ -346,20 +346,10 @@ mod tests {
                 .status()
                 .unwrap()
                 .success());
-            assert!(Command::new("apt-get")
-                //Command::new("strace")
-                //.arg("-f")
-                //.arg("-e")
-                //.arg("execve")
-                //.arg("apt-get")
-                .arg("update")
-                .status()
-                .unwrap()
-                .success());
+            assert!(apt_get().arg("update").status().unwrap().success());
             assert!(
-                Command::new("apt-get")
+                apt_get()
                     .arg("install")
-                    .arg("-y")
                     .arg(package_name.to_string())
                     .status()
                     .unwrap()
@@ -368,9 +358,8 @@ mod tests {
                 package
             );
             assert!(
-                Command::new("apt-get")
+                apt_get()
                     .arg("remove")
-                    .arg("-y")
                     .arg(package_name.to_string())
                     .status()
                     .unwrap()
@@ -380,5 +369,12 @@ mod tests {
             );
             Ok(())
         });
+    }
+
+    fn apt_get() -> Command {
+        let mut c = Command::new("apt-get");
+        c.args(["-o", "APT::Get::Assume-Yes=true"]);
+        c.args(["-o", "Debug::pkgDPkgPM=true"]);
+        c
     }
 }

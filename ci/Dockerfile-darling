@@ -20,3 +20,6 @@ RUN export GIT_CLONE_PROTECTION_ACTIVE=false \
     && make install \
     && cd / \
     && rm -rf /tmp/*
+
+LABEL org.opencontainers.image.source=https://github.com/igankevich/wolfpack
+LABEL org.opencontainers.image.description="CI image"

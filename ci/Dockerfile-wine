@@ -14,3 +14,6 @@ RUN curl -L https://github.com/microsoft/msix-packaging/releases/download/MSIX-C
     && rm -rf /tmp/*
 
 CMD ["/bin/bash"]
+
+LABEL org.opencontainers.image.source=https://github.com/igankevich/wolfpack
+LABEL org.opencontainers.image.description="CI image"

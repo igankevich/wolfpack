@@ -18,5 +18,6 @@ static BUCKETS: LazyLock<Vec<(&'static str, Mutex<()>)>> = LazyLock::new(|| {
         ("rpm", Mutex::new(())),
         ("macos", Mutex::new(())),
         ("wine", Mutex::new(())),
+        ("opkg", Mutex::new(())),
     ]
 });

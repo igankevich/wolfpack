@@ -145,6 +145,7 @@ mod tests {
 
     use super::*;
     use crate::ipk::SigningKey;
+    use crate::test::prevent_concurrency;
     use crate::test::DirectoryOfFiles;
 
     #[test]
@@ -177,6 +178,7 @@ mod tests {
     #[ignore = "Needs `opkg`"]
     #[test]
     fn opkg_installs_random_packages() {
+        let _guard = prevent_concurrency("opkg");
         let workdir = TempDir::new().unwrap();
         let signing_key = SigningKey::generate(Some("wolfpack".into()));
         let _verifying_key = signing_key.to_verifying_key();

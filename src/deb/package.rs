@@ -250,8 +250,6 @@ mod tests {
         });
     }
 
-    // TODO display object difference, i.e. assert_eq_diff, DebugDiff trait
-
     #[test]
     fn write_read() {
         let (signing_key, verifying_key) = SigningKey::generate("wolfpack-pgp-id".into()).unwrap();
@@ -263,7 +261,7 @@ mod tests {
             let mut buf: Vec<u8> = Vec::new();
             control.write(directory.path(), &mut buf, &signer).unwrap();
             let (actual, ..) = Package::read(&buf[..], &verifier).unwrap();
-            assert_eq!(control, actual);
+            similar_asserts::assert_eq!(control, actual);
             Ok(())
         });
     }

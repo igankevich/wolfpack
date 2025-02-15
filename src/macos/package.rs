@@ -67,7 +67,6 @@ impl Package {
             zar::Compression::Gzip,
             zar::no_extra_contents,
         )?;
-        // TODO payload without compression
         xar.finish()?;
         Ok(())
     }

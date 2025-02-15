@@ -387,7 +387,6 @@ impl FromStr for DependencyVersionOp {
     }
 }
 
-// TODO custom Arbitrary
 #[derive(Clone, Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum DependencyArch {

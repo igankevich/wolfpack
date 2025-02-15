@@ -223,7 +223,7 @@ define_entry_enums! {
     //Exclude = 1041,
     //Exclusive = 1042,
     //Icon = 1043,
-    //SourceRpm = 1044,
+    SourceRpm = (1044, String, CString),
     FileVerifyFlags = (1045, Int32, NonEmptyVec<u32>),
     //ArchiveSize = 1046,
     //ProvideName = 1047,

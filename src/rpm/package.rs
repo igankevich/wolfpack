@@ -33,7 +33,7 @@ use crate::rpm::Tag;
 use crate::rpm::ALIGN;
 
 #[derive(Debug)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Clone))]
+#[cfg_attr(test, derive(PartialEq, Eq, Clone))]
 pub struct Package {
     pub name: String,
     pub version: String,
@@ -108,7 +108,9 @@ impl Package {
                 filedigests.push(CString::new(hash).map_err(Error::other)?);
             }
         }
+        eprintln!("Package::write 2");
         let mut header2 = Header::new(self.try_into()?);
+        eprintln!("Package::write 3");
         header2.insert(Entry::BaseNames(basenames.try_into()?));
         header2.insert(Entry::DirNames(dirnames.try_into()?));
         header2.insert(Entry::DirIndexes(dirindices.try_into()?));
@@ -118,6 +120,7 @@ impl Package {
         header2.insert(Entry::FileDigests(filedigests.try_into()?));
         header2.insert(Entry::FileModes(filemodes.try_into()?));
         header2.insert(Entry::FileSizes(filesizes.try_into()?));
+        header2.insert(Entry::SourceRpm(c"(none)".into()));
         let mut payload = Vec::new();
         {
             let writer = GzEncoder::new(&mut payload, Compression::best());
@@ -327,15 +330,21 @@ mod tests {
     use std::fs::File;
     use std::process::Command;
 
+    use arbitrary::Arbitrary;
+    use arbitrary::Unstructured;
     use arbtest::arbtest;
+    use rand::Rng;
+    use rand_mt::Mt64;
     use tempfile::TempDir;
 
     use super::*;
     use crate::rpm::SigningKey;
     use crate::test::prevent_concurrency;
+    use crate::test::Chars;
     use crate::test::DirectoryOfFiles;
+    use crate::test::CONTROL;
+    use crate::test::UNICODE;
 
-    /*
     #[test]
     fn package_write_read() {
         let (signing_key, _verifying_key) = SigningKey::generate("wolfpack".into()).unwrap();
@@ -344,15 +353,15 @@ mod tests {
             let expected: Package = u.arbitrary()?;
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let mut buf = Vec::new();
-            expected.clone()
+            expected
+                .clone()
                 .write(&mut buf, directory.path(), &signer)
                 .unwrap();
-            let actual = Lead::read(&buf).unwrap();
+            let (actual, ..) = Package::read(&buf[..]).unwrap();
             assert_eq!(expected, actual);
             Ok(())
         });
     }
-    */
 
     #[ignore = "Needs `rpm`"]
     #[test]
@@ -464,6 +473,37 @@ mod tests {
             );
             Ok(())
         });
+    }
+
+    impl<'a> Arbitrary<'a> for Package {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let seed: u64 = u.arbitrary()?;
+            let mut rng = Mt64::new(seed);
+            let valid_chars = Chars::from(UNICODE).difference(CONTROL);
+            let len = rng.gen_range(1..=10);
+            let name = valid_chars.random_string(&mut rng, len);
+            let len = rng.gen_range(1..=10);
+            let version = valid_chars.random_string(&mut rng, len);
+            let len = rng.gen_range(1..=10);
+            let summary = valid_chars.random_string(&mut rng, len);
+            let len = rng.gen_range(1..=10);
+            let description = valid_chars.random_string(&mut rng, len);
+            let len = rng.gen_range(1..=10);
+            let license = valid_chars.random_string(&mut rng, len);
+            let len = rng.gen_range(1..=10);
+            let url = valid_chars.random_string(&mut rng, len);
+            let len = rng.gen_range(1..=10);
+            let arch = valid_chars.random_string(&mut rng, len);
+            Ok(Self {
+                name,
+                version,
+                summary,
+                description,
+                license,
+                url,
+                arch,
+            })
+        }
     }
 
     //const RPM: &str = "/home/igankevich/workspace/etd/rpm/tmp/tools/rpm";

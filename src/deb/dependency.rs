@@ -19,6 +19,10 @@ impl Dependencies {
     pub fn into_inner(self) -> Vec<DependencyChoice> {
         self.0
     }
+
+    pub fn clear(&mut self) {
+        self.0.clear()
+    }
 }
 
 impl Display for Dependencies {

@@ -22,7 +22,7 @@ test-ipk = [
     "test",
     "--lib",
     "--config",
-    "target.'cfg(target_os = \"linux\")'.runner=\"./ci/runner.sh ghcr.io/igankevich/wolfpack-ci-openwrt:23.05.5\"",
+    "target.'cfg(target_os = \"linux\")'.runner=\"./ci/runner.sh ghcr.io/igankevich/wolfpack-ci-openwrt-2:latest\"",
     "--",
     "--nocapture",
     "--ignored",

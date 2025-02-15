@@ -39,7 +39,6 @@ pub struct Package {
     pub installed_size: Option<u64>,
     pub provides: Provides,
     pub depends: Dependencies,
-    pub pre_depends: Dependencies,
     pub homepage: Option<SimpleValue>,
     pub other: Fields,
 }
@@ -169,7 +168,6 @@ impl Display for Package {
         if !self.depends.is_empty() {
             writeln!(f, "Depends: {}", self.depends)?;
         }
-        writeln!(f, "Pre-Depends: {}", self.pre_depends)?;
         if let Some(homepage) = self.homepage.as_ref() {
             writeln!(f, "Homepage: {}", homepage)?;
         }
@@ -195,7 +193,6 @@ impl FromStr for Package {
             installed_size: fields.remove_some("installed-size")?,
             provides: fields.remove_some("provides")?.unwrap_or_default(),
             depends: fields.remove_some("depends")?.unwrap_or_default(),
-            pre_depends: fields.remove_some("pre-depends")?.unwrap_or_default(),
             homepage: fields.remove_some("homepage")?,
             other: fields,
         };

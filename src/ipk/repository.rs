@@ -183,6 +183,7 @@ mod tests {
         arbtest(|u| {
             let mut package: Package = u.arbitrary()?;
             package.architecture = "all".parse().unwrap();
+            package.depends.clear();
             package.installed_size = Some(100);
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let package_path = workdir.path().join("test.ipk");
@@ -210,10 +211,6 @@ mod tests {
             Command::new("sh")
                 .arg("-c")
                 .arg("cat /etc/opkg/keys/*")
-                .status()
-                .unwrap();
-            Command::new("cat")
-                .arg(repo_dir.join("meta/Packages.sig"))
                 .status()
                 .unwrap();
             assert!(

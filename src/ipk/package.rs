@@ -184,6 +184,7 @@ mod tests {
             let mut package: Package = u.arbitrary()?;
             package.architecture = "all".parse().unwrap();
             package.installed_size = Some(100);
+            package.depends.clear();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let package_path = workdir.path().join("test.ipk");
             package

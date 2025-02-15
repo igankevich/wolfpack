@@ -548,7 +548,6 @@ gpgkey=file://{}
                 dnf()
                     .arg("--repo=test")
                     .arg("install")
-                    .arg("--assumeyes")
                     .arg(&package.name)
                     .status()
                     .unwrap()
@@ -559,7 +558,6 @@ gpgkey=file://{}
             assert!(
                 dnf()
                     .arg("remove")
-                    .arg("--assumeyes")
                     .arg(&package.name)
                     .status()
                     .unwrap()
@@ -576,6 +574,7 @@ gpgkey=file://{}
         c.arg("--setopt=debuglevel=10");
         c.arg("--setopt=errorlevel=10");
         c.arg("--setopt=rpmverbosity=debug");
+        c.arg("--setopt=assumeyes=1");
         c
     }
 }

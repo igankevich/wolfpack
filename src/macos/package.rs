@@ -11,7 +11,7 @@ pub use zar::RsaSigner as PackageSigner;
 
 use crate::macos::xml;
 
-#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Clone, Debug))]
+#[cfg_attr(test, derive(PartialEq, Eq, Clone, Debug))]
 pub struct Package {
     pub identifier: String,
     pub version: String,
@@ -78,19 +78,26 @@ mod tests {
     use std::fs::File;
     use std::process::Command;
 
+    use arbitrary::Arbitrary;
+    use arbitrary::Unstructured;
     use arbtest::arbtest;
     use rand::rngs::OsRng;
+    use rand::Rng;
+    use rand_mt::Mt64;
     use tempfile::TempDir;
-
-    use super::*;
-    use crate::test::prevent_concurrency;
-    use crate::test::DirectoryOfFiles;
     use zar::rsa::RsaPrivateKey;
     use zar::ChecksumAlgo;
 
+    use super::*;
+    use crate::test::prevent_concurrency;
+    use crate::test::Chars;
+    use crate::test::DirectoryOfFiles;
+    use crate::test::CONTROL;
+    use crate::test::UNICODE;
+
     #[ignore = "Needs `darling`"]
     #[test]
-    fn macos_installer_installs_random_package() {
+    fn darling_installer_installs_random_package() {
         assert!(Command::new("mount")
             .arg("-t")
             .arg("tmpfs")
@@ -144,5 +151,21 @@ mod tests {
             );
             Ok(())
         });
+    }
+
+    impl<'a> Arbitrary<'a> for Package {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let seed: u64 = u.arbitrary()?;
+            let mut rng = Mt64::new(seed);
+            let valid_chars = Chars::from(UNICODE).difference(CONTROL);
+            let len = rng.gen_range(1..=10);
+            let identifier = valid_chars.random_string(&mut rng, len);
+            let len = rng.gen_range(1..=10);
+            let version = valid_chars.random_string(&mut rng, len);
+            Ok(Self {
+                identifier,
+                version,
+            })
+        }
     }
 }

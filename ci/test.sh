@@ -25,23 +25,26 @@ test_integration() {
 }
 
 cargo_test_lib() {
+    docker_image="$1"
+    shift
     silent cargo test \
         --workspace \
         --lib \
-        --config "target.'cfg(target_os = \"linux\")'.runner=\"./ci/runner.sh $DOCKER_IMAGE\"" \
+        --config "target.'cfg(target_os = \"linux\")'.runner=\"./ci/runner.sh $docker_image\"" \
         -- "$@"
 }
 
 cargo_test_all() {
     export ARBTEST_BUDGET_MS=2000
     unset RUST_TEST_THREADS
-    DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-lib:latest" cargo_test_lib --nocapture
+    cargo_test_lib ghcr.io/igankevich/wolfpack-ci-lib:latest --nocapture
     export ARBTEST_BUDGET_MS=10000
     export RUST_TEST_THREADS=1
-    DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-openwrt-2:latest" cargo_test_lib --nocapture --ignored opkg
-    DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-debian:latest" cargo_test_lib --nocapture --ignored dpkg apt
-    DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-freebsd:latest" cargo_test_lib --nocapture --ignored bsd_pkg
-    DOCKER_IMAGE="docker.io/fedora:41" cargo_test_lib --nocapture --ignored rpm_ dnf
+    cargo_test_lib ghcr.io/igankevich/wolfpack-ci-openwrt-2:latest --nocapture --ignored opkg
+    cargo_test_lib ghcr.io/igankevich/wolfpack-ci-debian:latest --nocapture --ignored dpkg apt
+    cargo_test_lib ghcr.io/igankevich/wolfpack-ci-freebsd:latest --nocapture --ignored bsd_pkg
+    cargo_test_lib docker.io/fedora:latest --nocapture --ignored rpm_ dnf
+    cargo_test_lib ghcr.io/igankevich/wolfpack-ci-darling:latest --nocapture --ignored darling_
     unset ARBTEST_BUDGET_MS
     unset RUST_TEST_THREADS
 }

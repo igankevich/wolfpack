@@ -223,7 +223,7 @@ impl Connection {
                     url,
                     filename.as_bytes(),
                     hash.as_ref().map(|x| x.as_bytes()).ok_or(Error::NoHash)?,
-                    package.inner.homepage.as_ref(),
+                    package.inner.homepage.as_ref().map(|x| x.as_str()),
                     component_id,
                 ),
                 |row| {
@@ -233,15 +233,13 @@ impl Connection {
             )
             .optional()?;
         if let Some(id) = id {
-            if let Some(provides) = package.inner.provides.as_ref() {
-                for dep in provides.iter() {
-                    self.inner
-                        .prepare_cached(
-                            "INSERT INTO deb_provisions(package_id, name, version) VALUES(?1, ?2, ?3) ON CONFLICT DO NOTHING",
-                        )?
-                        .execute((id, dep.name.as_str(), dep.version.as_ref().map(|v| v.version.to_string())))
-                        .optional()?;
-                }
+            for dep in package.inner.provides.iter() {
+                self.inner
+                    .prepare_cached(
+                        "INSERT INTO deb_provisions(package_id, name, version) VALUES(?1, ?2, ?3) ON CONFLICT DO NOTHING",
+                    )?
+                    .execute((id, dep.name.as_str(), dep.version.as_ref().map(|v| v.version.to_string())))
+                    .optional()?;
             }
         }
         Ok(())

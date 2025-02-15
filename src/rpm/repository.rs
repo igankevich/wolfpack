@@ -317,26 +317,26 @@ pub mod xml {
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct Format {
-        #[serde(rename = "rpm:license")]
+        #[serde(rename = "license")]
         pub license: String,
-        #[serde(rename = "rpm:vendor")]
+        #[serde(rename = "vendor")]
         pub vendor: String,
-        #[serde(rename = "rpm:group")]
+        #[serde(rename = "group")]
         pub group: String,
-        #[serde(rename = "rpm:buildhost")]
+        #[serde(rename = "buildhost")]
         pub buildhost: String,
-        #[serde(rename = "rpm:sourcerpm")]
+        #[serde(rename = "sourcerpm")]
         pub sourcerpm: String,
-        #[serde(rename = "rpm:header-range")]
+        #[serde(rename = "header-range")]
         pub header_range: HeaderRange,
         #[serde(
-            rename = "rpm:provides",
+            rename = "provides",
             default,
             skip_serializing_if = "Provides::is_empty"
         )]
         pub provides: Provides,
         #[serde(
-            rename = "rpm:requires",
+            rename = "requires",
             default,
             skip_serializing_if = "Requires::is_empty"
         )]

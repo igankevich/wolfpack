@@ -174,10 +174,10 @@ impl Dependency {
     pub fn matches(&self, package: &Package) -> bool {
         if self.name != package.name {
             // Name doesn't match, but maybe "Provides" match.
-            let Some(provides) = package.provides.as_ref() else {
+            if package.provides.is_empty() {
                 return false;
             };
-            if !provides.matches(self) {
+            if !package.provides.matches(self) {
                 return false;
             }
         }

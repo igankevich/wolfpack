@@ -4,6 +4,8 @@ on: [push]
 jobs:
   ci:
     runs-on: ubuntu-latest
+    permissions:
+      packages: read
     env:
       TZ: Europe/Berlin
       RUST_BACKTRACE: 1
@@ -19,6 +21,9 @@ jobs:
         # TODO lint
       - name: Checkout
         uses: actions/checkout@v4.1.4
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }}
+          --password-stdin
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Test

@@ -33,6 +33,11 @@ patchelf \
     --set-rpath \$ORIGIN \
     --force-rpath \
     "$workdir"/"$filename"
-docker run --rm --volume "$workdir":/wolfpack --volume "$PWD":/src --privileged \
+docker run \
+    --rm \
+    --volume "$workdir":/wolfpack \
+    --volume "$PWD":/src \
+    --privileged \
+    --env ARBTEST_BUDGET_MS="$ARBTEST_BUDGET_MS" \
     "$image" \
     /wolfpack/"$filename" "$@"

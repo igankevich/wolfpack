@@ -300,6 +300,7 @@ mod tests {
                 Default::default(),
             )
             .unwrap();
+        remove_file("/etc/apt/sources.list.d/debian.sources").unwrap();
         arbtest(|u| {
             let mut package: Package = u.arbitrary()?;
             package.architecture = "amd64".parse().unwrap();
@@ -330,7 +331,6 @@ mod tests {
                 ),
             )
             .unwrap();
-            remove_file("/etc/apt/sources.list.d/debian.sources").unwrap();
             assert!(Command::new("find")
                 .arg(root.as_path())
                 .status()
@@ -358,10 +358,19 @@ mod tests {
                 .success());
             assert!(
                 Command::new("apt-get")
-                    //Command::new("strace")
-                    //.arg("-f")
-                    //.arg("apt-get")
                     .arg("install")
+                    .arg("-y")
+                    .arg(package_name.to_string())
+                    .status()
+                    .unwrap()
+                    .success(),
+                "package = {:?}",
+                package
+            );
+            assert!(
+                Command::new("apt-get")
+                    .arg("remove")
+                    .arg("-y")
                     .arg(package_name.to_string())
                     .status()
                     .unwrap()

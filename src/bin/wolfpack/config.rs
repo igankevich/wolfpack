@@ -3,6 +3,11 @@ use elf::abi::EI_NIDENT;
 use elf::abi::ET_DYN;
 use elf::abi::ET_EXEC;
 use elf::endian::AnyEndian;
+use indicatif::MultiProgress;
+use indicatif::ProgressBar;
+use indicatif::ProgressDrawTarget;
+use indicatif::ProgressStyle;
+use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -20,6 +25,7 @@ use std::ops::RangeInclusive;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Arc;
 use std::time::Instant;
 use uname_rs::Uname;
 use wolfpack::deb;
@@ -123,6 +129,13 @@ pub trait Repo {
     ) -> Result<(), Error>;
 
     fn search(&mut self, config: &Config, name: &str, keyword: &str) -> Result<(), Error>;
+
+    fn resolve(
+        &mut self,
+        config: &Config,
+        name: &str,
+        dependencies: Vec<String>,
+    ) -> Result<(), Error>;
 }
 
 impl dyn Repo {
@@ -151,26 +164,82 @@ impl DebRepo {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn index_packages(
         packages_file: &Path,
         arch_dir: &Path,
         base_url: String,
         component_id: Id,
         db_conn: ConnectionArc,
+        dependency_resolution_tasks: Arc<Mutex<Vec<Task>>>,
+        repo_name: String,
+        indexing_progress_bar: Arc<Mutex<ProgressBar>>,
+        progress_bar: Arc<Mutex<ProgressBar>>,
     ) -> Result<(), Error> {
         let mut packages_str = String::new();
         let mut file = AnyDecoder::new(BufReader::new(File::open(packages_file)?));
         file.read_to_string(&mut packages_str)?;
         let packages: deb::PerArchPackages = packages_str.parse()?;
         let packages = packages.into_inner();
+        indexing_progress_bar
+            .lock()
+            .inc_length(packages.len() as u64);
+        // Insert the packages into the database.
         for package in packages.iter() {
             let url = format!("{}/{}", base_url, package.filename.display());
             let package_file = arch_dir.join(&package.filename);
             db_conn
                 .lock()
                 .insert_deb_package(package, &url, &package_file, component_id)?;
+            indexing_progress_bar.lock().inc(1);
         }
-        log::info!("Indexed {:?}", packages_file);
+        //log::info!("Indexed {:?}", packages_file);
+        // Resolve dependencies in batches.
+        progress_bar.lock().inc_length(packages.len() as u64);
+        let batch_size = 1_000;
+        let mut packages = packages;
+        while !packages.is_empty() {
+            let batch = packages.split_off(packages.len() - batch_size.min(packages.len()));
+            let repo_name = repo_name.clone();
+            let db_conn = db_conn.clone();
+            let progress_bar = progress_bar.clone();
+            dependency_resolution_tasks.lock().push(Box::new(move || {
+                if let Err(e) = Self::resolve_dependencies(
+                    &batch,
+                    repo_name.clone(),
+                    db_conn.clone(),
+                    progress_bar.clone(),
+                ) {
+                    log::error!("Failed to resolve dependencies: {e}");
+                }
+            }));
+        }
+        Ok(())
+    }
+
+    fn resolve_dependencies(
+        packages: &[deb::ExtendedPackage],
+        repo_name: String,
+        db_conn: ConnectionArc,
+        progress_bar: Arc<Mutex<ProgressBar>>,
+    ) -> Result<(), Error> {
+        // Per-task read-only connection to make queries in parallel.
+        let ro_conn = db_conn.lock().clone_read_only()?;
+        let ro_conn = ro_conn.lock();
+        for package in packages.iter() {
+            for dep in package.inner.depends.iter() {
+                let matches = ro_conn.select_deb_dependencies(&repo_name, dep)?;
+                if matches.len() != 1 {
+                    continue;
+                }
+                db_conn.lock().insert_deb_dependency(
+                    &repo_name,
+                    &package.inner.name,
+                    matches[0].id,
+                )?;
+            }
+            progress_bar.lock().inc(1);
+        }
         Ok(())
     }
 }
@@ -182,6 +251,38 @@ impl Repo for DebRepo {
         let threads = threadpool::Builder::new()
             .thread_name("Indexer".into())
             .build();
+        let progress = MultiProgress::new();
+        let downloading_progress_bar = Arc::new(Mutex::new(
+            progress.add(
+                ProgressBar::with_draw_target(Some(0), ProgressDrawTarget::stderr())
+                    .with_message("Downloading metadata")
+                    .with_style(
+                        ProgressStyle::with_template(
+                            "{msg} {wide_bar} {binary_bytes}/{binary_total_bytes}",
+                        )
+                        .expect("Template is correct"),
+                    ),
+            ),
+        ));
+        let indexing_progress_bar = Arc::new(Mutex::new(
+            progress.add(
+                ProgressBar::with_draw_target(Some(0), ProgressDrawTarget::stderr())
+                    .with_message("Indexing packages")
+                    .with_style(
+                        ProgressStyle::with_template("{msg} {wide_bar} {pos}/{len}")
+                            .expect("Template is correct"),
+                    ),
+            ),
+        ));
+        let progress_bar = Arc::new(Mutex::new(
+            ProgressBar::with_draw_target(Some(0), ProgressDrawTarget::hidden())
+                .with_message("Resolving dependencies")
+                .with_style(
+                    ProgressStyle::with_template("{msg} {wide_bar} {pos}/{len}")
+                        .expect("Template is correct"),
+                ),
+        ));
+        let dependency_resolution_tasks = Arc::new(Mutex::new(Vec::new()));
         let db_conn = Connection::new(config)?;
         let arch = Self::native_arch()?;
         #[allow(clippy::never_loop)]
@@ -197,6 +298,7 @@ impl Repo for DebRepo {
                     None,
                     db_conn.clone(),
                     config,
+                    Some(downloading_progress_bar.clone()),
                 )
                 .await?;
                 if self.config.verify {
@@ -207,6 +309,7 @@ impl Repo for DebRepo {
                         None,
                         db_conn.clone(),
                         config,
+                        Some(downloading_progress_bar.clone()),
                     )
                     .await?;
                     let message = std::fs::read(&release_file)?;
@@ -258,12 +361,17 @@ impl Repo for DebRepo {
                                 Some(hash),
                                 db_conn.clone(),
                                 config,
+                                Some(downloading_progress_bar.clone()),
                             )
                             .await
                             {
                                 Ok(..) => {
                                     let db_conn = db_conn.clone();
                                     let base_url = base_url.into();
+                                    let name = name.to_string();
+                                    let tasks = dependency_resolution_tasks.clone();
+                                    let progress_bar = progress_bar.clone();
+                                    let indexing_progress_bar = indexing_progress_bar.clone();
                                     threads.execute(move || {
                                         if let Err(e) = Self::index_packages(
                                             &packages_file,
@@ -271,6 +379,10 @@ impl Repo for DebRepo {
                                             base_url,
                                             component_id,
                                             db_conn,
+                                            tasks,
+                                            name,
+                                            indexing_progress_bar,
+                                            progress_bar,
                                         ) {
                                             log::error!("Failed to index packages: {}", e)
                                         }
@@ -287,7 +399,48 @@ impl Repo for DebRepo {
             // TODO Only one URL is used.
             break;
         }
+        downloading_progress_bar.lock().finish();
         threads.join();
+        indexing_progress_bar.lock().finish();
+        {
+            let progress_bar = progress_bar.lock();
+            progress_bar.reset_elapsed();
+            progress_bar.set_draw_target(ProgressDrawTarget::stderr());
+            //progress_bar.set_message("Resolving dependencies");
+        }
+        for task in Arc::into_inner(dependency_resolution_tasks)
+            .expect("All indexing threads have finished")
+            .into_inner()
+            .into_iter()
+        {
+            //task();
+            threads.execute(task);
+        }
+        threads.join();
+        let progress_bar = progress_bar.lock();
+        progress_bar.finish();
+        log::info!(
+            "Resolved dependencies of {} packages in {:.2}s",
+            progress_bar.length().unwrap_or(0),
+            progress_bar.elapsed().as_secs_f32()
+        );
+        Ok(())
+    }
+
+    fn resolve(
+        &mut self,
+        config: &Config,
+        name: &str,
+        dependencies: Vec<String>,
+    ) -> Result<(), Error> {
+        let db_conn = Connection::new(config)?;
+        let db_conn = db_conn.lock();
+        let mut matches = Vec::new();
+        for dep in dependencies.into_iter() {
+            let dep: deb::DependencyChoice = dep.parse()?;
+            matches.extend(db_conn.select_deb_dependencies(name, &dep)?);
+        }
+        print_table(matches.iter(), std::io::stdout())?;
         Ok(())
     }
 
@@ -352,8 +505,30 @@ impl Repo for DebRepo {
             }
             // Add dependencies.
             let mut dependencies = VecDeque::new();
-            //dependencies.extend(matches[0].0.inner.pre_depends.clone().into_inner());
-            dependencies.extend(matches[0].depends.clone().into_inner());
+            // Select dependencies that has already been resolved on repository pull.
+            let resolved_dependencies = db_conn
+                .lock()
+                .select_resolved_deb_dependencies(name, &package_name)?;
+            // Remove the resolved dependencies from the package dependencies.
+            let mut depends = matches[0].depends.clone().into_inner();
+            for resolved in resolved_dependencies.into_iter() {
+                let version: deb::Version = resolved.version.parse()?;
+                let i = depends
+                    .iter()
+                    .position(|dep| dep.version_matches(&resolved.name, &version));
+                if let Some(i) = i {
+                    let dep = depends.remove(i);
+                    log::info!(
+                        "Already resolved \"{}\" as {}({})",
+                        dep,
+                        resolved.name,
+                        resolved.version
+                    );
+                    matches.push(resolved);
+                }
+            }
+            // Add the remaining unresolved dependencies to the queue.
+            dependencies.extend(depends);
             let mut visited = HashSet::new();
             'outer: while let Some(dep) = dependencies.pop_front() {
                 log::info!("Resolving {}", dep);
@@ -421,6 +596,7 @@ impl Repo for DebRepo {
                     package.hash.clone(),
                     db_conn.clone(),
                     config,
+                    None,
                 )
                 .await
                 {
@@ -522,6 +698,24 @@ impl ToRow<3> for DebMatch {
         ])
     }
 }
+
+impl ToRow<3> for DebDependencyMatch {
+    fn to_row(&self) -> Row<'_, 3> {
+        Row([
+            self.name.as_str().into(),
+            self.version.as_str().into(),
+            self.description
+                .as_str()
+                .lines()
+                .next()
+                .map(|line| line.trim())
+                .unwrap_or_default()
+                .into(),
+        ])
+    }
+}
+
+type Task = Box<dyn FnMut() + Send>;
 
 #[cfg(test)]
 mod tests {

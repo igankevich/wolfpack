@@ -118,6 +118,12 @@ impl DependencyChoice {
     pub fn matches(&self, package: &Package) -> bool {
         self.0.iter().any(|dep| dep.matches(package))
     }
+
+    pub fn version_matches(&self, package_name: &str, package_version: &Version) -> bool {
+        self.0
+            .iter()
+            .any(|dep| dep.version_matches(package_name, package_version))
+    }
 }
 
 impl Display for DependencyChoice {
@@ -178,6 +184,18 @@ impl Dependency {
         if let Some(version) = self.version.as_ref() {
             // Check versions.
             return version.matches(&package.version);
+        }
+        true
+    }
+
+    pub fn version_matches(&self, package_name: &str, package_version: &Version) -> bool {
+        if self.name.as_str() != package_name {
+            // Name doesn't match.
+            return false;
+        }
+        if let Some(version) = self.version.as_ref() {
+            // Check versions.
+            return version.matches(package_version);
         }
         true
     }
@@ -316,7 +334,7 @@ impl FromStr for DependencyVersion {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 pub enum DependencyVersionOp {
     /// `<<`

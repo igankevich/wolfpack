@@ -39,6 +39,37 @@ CREATE TABLE deb_packages (
         ON UPDATE CASCADE
 );
 
+CREATE INDEX deb_packages_name ON deb_packages(name);
+CREATE INDEX deb_packages_provides ON deb_packages(provides);
+
+-- DEB package dependencies that resolve to packages unambigously.
+CREATE TABLE deb_dependencies (
+    -- Dependent.
+    child INTEGER NOT NULL
+        REFERENCES deb_packages(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
+    -- Dependency.
+    parent INTEGER NOT NULL
+        REFERENCES deb_packages(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
+    PRIMARY KEY (child, parent)
+);
+
+-- DEB package provisions.
+CREATE TABLE deb_provisions (
+    package_id INTEGER NOT NULL
+        REFERENCES deb_packages(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
+    name TEXT NOT NULL,
+    version TEXT,
+    PRIMARY KEY (package_id, name)
+);
+
+CREATE INDEX deb_provisions_name ON deb_provisions(name);
+
 -- Full-text search for DEB packages. {{{
 CREATE VIRTUAL TABLE deb_packages_fts
 USING fts5(

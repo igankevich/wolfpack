@@ -32,6 +32,18 @@ enum Command {
     /// Find packages.
     Search(SearchArgs),
     Install(InstallArgs),
+    Resolve(ResolveArgs),
+}
+
+#[derive(clap::Args)]
+struct SearchArgs {
+    /// Search query.
+    #[clap(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        value_name = "KEYWORD"
+    )]
+    query: Vec<String>,
 }
 
 #[derive(clap::Args)]
@@ -45,14 +57,13 @@ struct InstallArgs {
 }
 
 #[derive(clap::Args)]
-struct SearchArgs {
-    /// Search query.
+struct ResolveArgs {
     #[clap(
         trailing_var_arg = true,
         allow_hyphen_values = true,
-        value_name = "KEYWORD"
+        value_name = "DEPENDENCY"
     )]
-    query: Vec<String>,
+    dependencies: Vec<String>,
 }
 
 fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
@@ -67,11 +78,12 @@ fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Command::Pull => pull(config),
         Command::Search(more_args) => search(config, more_args),
         Command::Install(more_args) => install(config, more_args),
+        Command::Resolve(more_args) => resolve(config, more_args),
     }
 }
 
 fn pull(mut config: Config) -> Result<ExitCode, Box<dyn std::error::Error>> {
-    let rt = tokio::runtime::Builder::new_current_thread()
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .thread_name("tokio")
         .enable_all()
         .build()?;
@@ -104,6 +116,20 @@ fn install(mut config: Config, args: InstallArgs) -> Result<ExitCode, Box<dyn st
         for (name, repo) in repos.iter_mut() {
             repo.install(&config, name.as_str(), args.packages.clone())
                 .await?;
+        }
+        Ok(ExitCode::SUCCESS)
+    })
+}
+
+fn resolve(mut config: Config, args: ResolveArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let _guard = rt.enter();
+    rt.block_on(async {
+        let mut repos = config.take_repos();
+        for (name, repo) in repos.iter_mut() {
+            repo.resolve(&config, name.as_str(), args.dependencies.clone())?;
         }
         Ok(ExitCode::SUCCESS)
     })

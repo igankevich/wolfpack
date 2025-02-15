@@ -8,12 +8,15 @@ use rusqlite::types::FromSqlResult;
 use rusqlite::types::ToSql;
 use rusqlite::types::ToSqlOutput;
 use rusqlite::types::ValueRef;
+use rusqlite::DatabaseName;
 use rusqlite::OptionalExtension;
 use rusqlite_migration::{Migrations, M};
 use sql_minifier::macros::load_sql;
 use std::cmp::Ordering;
 use std::ffi::OsString;
 use std::fs::create_dir_all;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -40,11 +43,25 @@ impl Connection {
             create_dir_all(dirname)?;
         }
         let mut conn = rusqlite::Connection::open(&path)?;
-        conn.set_prepared_statement_cache_capacity(MAX_CACHED_QUERIES);
         conn.execute_batch(PREAMBLE)?;
         let migrations = Migrations::new(MIGRATIONS.into());
         migrations.to_latest(&mut conn)?;
         conn.execute_batch(POST_MIGRATIONS)?;
+        Self::configure(&conn)?;
+        Ok(Arc::new(Mutex::new(Self { inner: conn })))
+    }
+
+    pub fn clone_read_only(&self) -> Result<ConnectionArc, Error> {
+        let conn = rusqlite::Connection::open_with_flags(
+            self.inner.path().expect("Was created with path"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        Self::configure(&conn)?;
+        Ok(Arc::new(Mutex::new(Self { inner: conn })))
+    }
+
+    fn configure(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
+        conn.set_prepared_statement_cache_capacity(MAX_CACHED_QUERIES);
         conn.create_scalar_function(
             "deb_version_compare",
             2,
@@ -81,39 +98,7 @@ impl Connection {
                 Ok(ret)
             },
         )?;
-        conn.create_scalar_function(
-            "deb_provides_matches",
-            2,
-            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
-            move |ctx| {
-                use rusqlite::Error::UserFunctionError;
-                debug_assert_eq!(ctx.len(), 2);
-                let provides = ctx
-                    .get_raw(0)
-                    .as_str()
-                    .map_err(|e| UserFunctionError(e.into()))?
-                    .parse::<deb::Provides>()
-                    .map_err(|e| UserFunctionError(e.into()))?;
-                let matches = match ctx.get_raw(1) {
-                    ValueRef::Integer(address) => {
-                        let ptr = address as *const deb::Dependency;
-                        unsafe { ptr.as_ref() }
-                            .map(|dependency| provides.matches(dependency))
-                            .unwrap_or(false)
-                    }
-                    other => {
-                        let dependency = other
-                            .as_str()
-                            .map_err(|e| UserFunctionError(e.into()))?
-                            .parse::<deb::Dependency>()
-                            .map_err(|e| UserFunctionError(e.into()))?;
-                        provides.matches(&dependency)
-                    }
-                };
-                Ok(matches)
-            },
-        )?;
-        Ok(Arc::new(Mutex::new(Self { inner: conn })))
+        Ok(())
     }
 
     pub fn select_downloaded_file(&self, url: &str) -> Result<Option<DownloadedFile>, Error> {
@@ -214,32 +199,51 @@ impl Connection {
         component_id: Id,
     ) -> Result<(), Error> {
         let hash = package.hash();
-        self.inner
+        let id = self
+            .inner
             .prepare_cached(
                 "INSERT INTO deb_packages(name, version, architecture, description, \
-                installed_size, provides, depends, url, filename, hash, homepage, component_id) \
-                VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
-                ON CONFLICT(url) DO NOTHING",
+                installed_size, depends, url, filename, hash, homepage, component_id) \
+                VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
+                ON CONFLICT(url) DO NOTHING
+                RETURNING id",
             )?
-            .execute((
-                package.inner.name.as_str(),
-                package.inner.version.to_string(),
-                package.inner.architecture.as_str(),
-                package.inner.description.as_str(),
-                package.inner.installed_size.map(|s| s.saturating_mul(1024)), // Convert from KiB.
-                package.inner.provides.as_ref().map(|x| x.to_string()),
-                if !package.inner.depends.is_empty() {
-                    Some(package.inner.depends.to_string())
-                } else {
-                    None
+            .query_row(
+                (
+                    package.inner.name.as_str(),
+                    package.inner.version.to_string(),
+                    package.inner.architecture.as_str(),
+                    package.inner.description.as_str(),
+                    package.inner.installed_size.map(|s| s.saturating_mul(1024)), // Convert from KiB.
+                    if !package.inner.depends.is_empty() {
+                        Some(package.inner.depends.to_string())
+                    } else {
+                        None
+                    },
+                    url,
+                    filename.as_bytes(),
+                    hash.as_ref().map(|x| x.as_bytes()).ok_or(Error::NoHash)?,
+                    package.inner.homepage.as_ref(),
+                    component_id,
+                ),
+                |row| {
+                    let id: Id = row.get(0)?;
+                    Ok(id)
                 },
-                url,
-                filename.as_bytes(),
-                hash.as_ref().map(|x| x.as_bytes()).ok_or(Error::NoHash)?,
-                package.inner.homepage.as_ref(),
-                component_id,
-            ))
+            )
             .optional()?;
+        if let Some(id) = id {
+            if let Some(provides) = package.inner.provides.as_ref() {
+                for dep in provides.iter() {
+                    self.inner
+                        .prepare_cached(
+                            "INSERT INTO deb_provisions(package_id, name, version) VALUES(?1, ?2, ?3) ON CONFLICT DO NOTHING",
+                        )?
+                        .execute((id, dep.name.as_str(), dep.version.as_ref().map(|v| v.version.to_string())))
+                        .optional()?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -277,7 +281,7 @@ impl Connection {
         name: &str,
     ) -> Result<Vec<DebDependencyMatch>, Error> {
         self.inner
-            .prepare_cached("SELECT name, version, description, depends, url ,filename, hash
+            .prepare_cached("SELECT name, version, description, depends, url ,filename, hash, id
                 FROM deb_packages
                 WHERE name=?1
                   AND EXISTS(SELECT repo_name FROM deb_components WHERE component_id=id AND repo_name=?2)
@@ -291,6 +295,7 @@ impl Connection {
                     url: row.get(4)?,
                     filename: PathBuf::from_bytes(row.get::<usize, Vec<u8>>(5)?),
                     hash: row.get::<usize, OptionAnyHash>(6)?.0,
+                    id: row.get(7)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()
@@ -298,6 +303,21 @@ impl Connection {
     }
 
     pub fn select_deb_dependencies(
+        &self,
+        repo_name: &str,
+        choices: &deb::DependencyChoice,
+    ) -> Result<Vec<DebDependencyMatch>, Error> {
+        let mut matches = self.select_deb_dependencies_by_name(repo_name, choices)?;
+        //if !matches.is_empty() {
+        //    return Ok(matches);
+        //}
+        matches.extend(self.select_deb_dependencies_by_provision(repo_name, choices)?);
+        matches.sort_unstable_by_key(|dep| dep.id);
+        matches.dedup();
+        Ok(matches)
+    }
+
+    pub fn select_deb_dependencies_by_name(
         &self,
         repo_name: &str,
         choices: &deb::DependencyChoice,
@@ -315,14 +335,7 @@ impl Connection {
             // Compare name.
             let _ = write!(&mut condition, "(name = ?{}", params.len());
             if let Some(version) = dep.version.as_ref() {
-                //params.push(version.version.to_string());
-                let operator = match version.operator {
-                    deb::DependencyVersionOp::Lesser => " < 0",
-                    deb::DependencyVersionOp::LesserEqual => " <= 0",
-                    deb::DependencyVersionOp::Equal => " = 0",
-                    deb::DependencyVersionOp::Greater => " > 0",
-                    deb::DependencyVersionOp::GreaterEqual => " >= 0",
-                };
+                let operator = dependency_operator_to_sql(version.operator);
                 let _ = write!(
                     &mut condition,
                     " AND deb_version_compare(version, {}){}",
@@ -330,19 +343,12 @@ impl Connection {
                 );
             }
             let _ = write!(&mut condition, ")");
-            // Compare `provides`.
-            let _ = write!(
-                &mut condition,
-                " OR (provides IS NOT NULL AND deb_provides_matches(provides, {}))",
-                // Pass as pointer.
-                dep as *const deb::Dependency as i64
-            );
         }
         trace!("Condition: {:?}", condition);
         trace!("Params: {:?}", params);
         self.inner
             .prepare(
-                &format!("SELECT name, version, description, depends, url, filename, hash
+                &format!("SELECT name, version, description, depends, url, filename, hash, id
                 FROM deb_packages
                 WHERE EXISTS(SELECT repo_name FROM deb_components WHERE component_id=id AND repo_name=?1)
                   AND ({})
@@ -357,15 +363,132 @@ impl Connection {
                     url: row.get(4)?,
                     filename: PathBuf::from_bytes(row.get::<usize, Vec<u8>>(5)?),
                     hash: row.get::<usize, OptionAnyHash>(6)?.0,
+                    id: row.get(7)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()
             .map_err(Into::into)
     }
+
+    pub fn select_deb_dependencies_by_provision(
+        &self,
+        repo_name: &str,
+        choices: &deb::DependencyChoice,
+    ) -> Result<Vec<DebDependencyMatch>, Error> {
+        use std::fmt::Write;
+        // Convert choices to string.
+        let mut condition = String::new();
+        let mut params = Vec::new();
+        params.push(repo_name.to_string());
+        let _ = write!(
+            &mut condition,
+            " id IN (SELECT package_id FROM deb_provisions WHERE"
+        );
+        for (i, dep) in choices.iter().enumerate() {
+            if i != 0 {
+                let _ = write!(&mut condition, " OR");
+            }
+            params.push(dep.name.to_string());
+            let _ = write!(&mut condition, " (deb_provisions.name = ?{}", params.len(),);
+            if let Some(version) = dep.version.as_ref() {
+                let operator = dependency_operator_to_sql(version.operator);
+                let _ = write!(
+                    &mut condition,
+                    " AND version IS NOT NULL AND deb_version_compare(version, {}){}",
+                    &version.version as *const deb::Version as i64, operator
+                );
+            }
+            let _ = write!(&mut condition, ")");
+        }
+        let _ = write!(&mut condition, ")");
+        trace!("Condition: {:?}", condition);
+        trace!("Params: {:?}", params);
+        self.inner
+            .prepare(
+                &format!("SELECT name, version, description, depends, url, filename, hash, id
+                FROM deb_packages
+                WHERE EXISTS(SELECT repo_name FROM deb_components WHERE component_id=id AND repo_name=?1)
+                  AND ({})
+                ORDER BY name ASC, version DESC", condition)
+            )?
+            .query_map(params_from_iter(params.into_iter()), |row| {
+                Ok(DebDependencyMatch {
+                    name: row.get(0)?,
+                    version: row.get(1)?,
+                    description: row.get(2)?,
+                    depends: row.get::<usize, DebDependencies>(3)?.0,
+                    url: row.get(4)?,
+                    filename: PathBuf::from_bytes(row.get::<usize, Vec<u8>>(5)?),
+                    hash: row.get::<usize, OptionAnyHash>(6)?.0,
+                    id: row.get(7)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    pub fn select_resolved_deb_dependencies(
+        &self,
+        repo_name: &str,
+        package_name: &str,
+    ) -> Result<Vec<DebDependencyMatch>, Error> {
+        self.inner
+            .prepare_cached(
+                "SELECT name, version, description, depends, url, filename, hash, id
+                FROM deb_packages
+                WHERE id IN (
+                    SELECT parent AS dependency
+                    FROM deb_dependencies
+                    WHERE child IN (
+                        SELECT id
+                        FROM deb_packages
+                        WHERE name=?1 AND component_id IN
+                            (SELECT component_id FROM deb_components WHERE repo_name=?2)))",
+            )?
+            .query_map((package_name, repo_name), |row| {
+                Ok(DebDependencyMatch {
+                    name: row.get(0)?,
+                    version: row.get(1)?,
+                    description: row.get(2)?,
+                    depends: row.get::<usize, DebDependencies>(3)?.0,
+                    url: row.get(4)?,
+                    filename: PathBuf::from_bytes(row.get::<usize, Vec<u8>>(5)?),
+                    hash: row.get::<usize, OptionAnyHash>(6)?.0,
+                    id: row.get(7)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    pub fn insert_deb_dependency(
+        &self,
+        repo_name: &str,
+        child: &str,
+        parent: Id,
+    ) -> Result<(), Error> {
+        self.inner
+            .prepare_cached(
+                "INSERT INTO deb_dependencies(child, parent)
+                VALUES(
+                    (SELECT id FROM deb_packages
+                     WHERE component_id IN (SELECT component_id FROM deb_components WHERE repo_name=?1)
+                       AND name=?2),
+                    ?3
+                )
+                ON CONFLICT DO NOTHING",
+            )?
+            .execute((repo_name, child, parent))
+            .optional()?;
+        Ok(())
+    }
 }
 
 impl Drop for Connection {
     fn drop(&mut self) {
+        if self.inner.is_readonly(DatabaseName::Main).unwrap_or(true) {
+            return;
+        }
         if let Err(e) = self.inner.execute_batch(POSTAMBLE) {
             error!("Failed to execute SQL postamble: {e}");
         }
@@ -440,6 +563,7 @@ pub struct DebMatch {
 }
 
 pub struct DebDependencyMatch {
+    pub id: Id,
     pub name: String,
     pub version: String,
     pub description: String,
@@ -447,6 +571,23 @@ pub struct DebDependencyMatch {
     pub url: String,
     pub filename: PathBuf,
     pub hash: Option<AnyHash>,
+}
+
+impl PartialEq for DebDependencyMatch {
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id)
+    }
+}
+
+impl Eq for DebDependencyMatch {}
+
+impl Hash for DebDependencyMatch {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
+        self.id.hash(state);
+    }
 }
 
 pub trait PathAsBytes {
@@ -475,6 +616,16 @@ impl PathFromBytes for PathBuf {
         // TODO windows version
         use std::os::unix::ffi::OsStringExt;
         OsString::from_vec(data).into()
+    }
+}
+
+const fn dependency_operator_to_sql(operator: deb::DependencyVersionOp) -> &'static str {
+    match operator {
+        deb::DependencyVersionOp::Lesser => " < 0",
+        deb::DependencyVersionOp::LesserEqual => " <= 0",
+        deb::DependencyVersionOp::Equal => " = 0",
+        deb::DependencyVersionOp::Greater => " > 0",
+        deb::DependencyVersionOp::GreaterEqual => " >= 0",
     }
 }
 

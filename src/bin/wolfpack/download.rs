@@ -1,4 +1,5 @@
-use futures_util::StreamExt;
+use indicatif::ProgressBar;
+use parking_lot::Mutex;
 use reqwest::header::HeaderValue;
 use reqwest::header::AGE;
 use reqwest::header::CACHE_CONTROL;
@@ -15,6 +16,7 @@ use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 use wolfpack::hash::AnyHash;
@@ -37,8 +39,9 @@ pub async fn download_file<P: AsRef<Path>>(
     hash: Option<AnyHash>,
     conn: ConnectionArc,
     config: &Config,
+    progress_bar: Option<Arc<Mutex<ProgressBar>>>,
 ) -> Result<(), Error> {
-    do_download_file(url, path, hash, conn, config)
+    do_download_file(url, path, hash, conn, config, progress_bar)
         .await
         .inspect_err(|e| log::error!("Failed to download {}: {}", url, e))
 }
@@ -49,12 +52,13 @@ async fn do_download_file<P: AsRef<Path>>(
     hash: Option<AnyHash>,
     conn: ConnectionArc,
     config: &Config,
+    progress_bar: Option<Arc<Mutex<ProgressBar>>>,
 ) -> Result<(), Error> {
     let path = path.as_ref();
     let downloaded_file = conn.lock().select_downloaded_file(url)?;
     let client = reqwest::Client::builder().build()?;
     let mut externally_modified = false;
-    let response = loop {
+    let mut response = loop {
         let mut metadata = None;
         let builder = client.get(url).header(USER_AGENT, &WOLFPACK_UA);
         let builder = if !externally_modified {
@@ -134,12 +138,18 @@ async fn do_download_file<P: AsRef<Path>>(
         .and_then(|s| s.parse().ok());
     conn.lock()
         .insert_downloaded_file(url, etag, last_modified, real_max_age, content_length)?;
-    let mut stream = response.bytes_stream();
     let mut file = File::create(path)?;
     let mut hasher = hash.as_ref().map(|h| h.hasher());
     log::info!("Downloading {} to {}", url, path.display());
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
+    if let Some(progress_bar) = progress_bar.as_ref() {
+        if let Some(content_length) = content_length {
+            progress_bar.lock().inc_length(content_length);
+        }
+    }
+    while let Some(chunk) = response.chunk().await? {
+        if let Some(progress_bar) = progress_bar.as_ref() {
+            progress_bar.lock().inc(chunk.len() as u64);
+        }
         if let Some(ref mut hasher) = hasher {
             hasher.update(&chunk);
         }

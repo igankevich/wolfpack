@@ -79,7 +79,7 @@ impl Chars {
         let mut s = String::with_capacity(len);
         for _ in 0..len {
             s.push(self.arbitrary_char(u)?);
-            if s.as_bytes().len() > len {
+            if s.len() > len {
                 s.pop();
                 break;
             }

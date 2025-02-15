@@ -28,7 +28,7 @@ impl Fields {
     pub fn remove_any(&mut self, name: &'static str) -> Result<Value, Error> {
         self.fields
             .remove(&FieldName::new_unchecked(name))
-            .ok_or_else(|| Error::MissingField(name))
+            .ok_or(Error::MissingField(name))
     }
 
     pub fn remove<T: FromStr>(&mut self, name: &'static str) -> Result<T, Error>
@@ -38,7 +38,7 @@ impl Fields {
         let value = self
             .fields
             .remove(&FieldName::new_unchecked(name))
-            .ok_or_else(|| Error::MissingField(name))?;
+            .ok_or(Error::MissingField(name))?;
         value
             .as_str()
             .parse::<T>()

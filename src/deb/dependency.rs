@@ -238,7 +238,7 @@ impl Display for Dependency {
 impl FromStr for Dependency {
     type Err = Error;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let n = value.as_bytes().len();
+        let n = value.len();
         let (version, version_range) = {
             let range = if value.ends_with(')') {
                 value

@@ -23,13 +23,13 @@ pub struct SigningKeyDer<'a> {
     key: SecretData,
 }
 
-impl<'a> SigningKeyDer<'a> {
+impl SigningKeyDer<'_> {
     pub fn signing_key(&self) -> Result<SigningKey, Error> {
         self.key.signing_key()
     }
 }
 
-impl<'a> SigningKeyDer<'a> {
+impl SigningKeyDer<'_> {
     pub fn new(signing_key: &SigningKey) -> der::Result<Self> {
         Ok(Self {
             application: Utf8StringRef::new(PKG_APPLICATION)?,
@@ -59,7 +59,7 @@ impl<'a> DecodeValue<'a> for SigningKeyDer<'a> {
     }
 }
 
-impl<'a> EncodeValue for SigningKeyDer<'a> {
+impl EncodeValue for SigningKeyDer<'_> {
     fn value_len(&self) -> der::Result<Length> {
         self.application.encoded_len()?
             + self.version.encoded_len()?

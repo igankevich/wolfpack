@@ -22,8 +22,8 @@ use std::time::SystemTime;
 use wolfpack::hash::AnyHash;
 use wolfpack::hash::Hasher;
 
+use crate::db::ConnectionArc;
 use crate::Config;
-use crate::ConnectionArc;
 use crate::Error;
 
 pub struct DownloadedFile {
@@ -126,7 +126,9 @@ async fn do_download_file<P: AsRef<Path>>(
         .and_then(|age| age.to_str().ok())
         .and_then(|s| s.parse().ok());
     let real_max_age = max_age.map(|max_age| {
-        let max_age_secs = max_age.saturating_sub(age.unwrap_or(0)).min(config.max_age);
+        let max_age_secs = max_age
+            .saturating_sub(age.unwrap_or(0))
+            .min(config.max_age().as_secs());
         Duration::from_secs(max_age_secs)
     });
     let etag = response.headers().get(ETAG).map(|x| x.as_bytes());

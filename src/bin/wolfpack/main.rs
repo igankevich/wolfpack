@@ -1,15 +1,17 @@
 mod config;
 mod db;
+mod deb;
 mod download;
 mod error;
 mod logger;
+mod repo;
 mod table;
 
 use self::config::*;
-use self::db::*;
 use self::download::*;
 use self::error::*;
 use self::logger::*;
+use self::repo::*;
 use self::table::*;
 
 use clap::Parser;

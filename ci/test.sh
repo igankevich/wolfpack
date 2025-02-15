@@ -4,8 +4,8 @@ install_dependencies() {
     if test "$GITHUB_ACTIONS" != "true"; then
         return
     fi
-    apt-get update -qq
-    apt-get install -y moreutils
+    sudo --non-interactive apt-get update -qq
+    sudo --non-interactive apt-get install -y moreutils
 }
 
 test_integration() {

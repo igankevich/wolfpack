@@ -20,7 +20,7 @@ silent() {
     fi
 }
 
-lint() {
+cargo_lints() {
     cargo deny check
     cargo fmt --all --check
     cargo clippy --all-targets --all-features --workspace -- -D warnings
@@ -55,7 +55,7 @@ cargo_test_all() {
 main() {
     . ./ci/preamble.sh
     install_dependencies
-    lints
+    cargo_lints
     cargo_test_all
 }
 

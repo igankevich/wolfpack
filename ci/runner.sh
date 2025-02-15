@@ -38,6 +38,7 @@ docker run \
     --volume "$workdir":/wolfpack \
     --volume "$PWD":/src \
     --privileged \
-    --env ARBTEST_BUDGET_MS="$ARBTEST_BUDGET_MS" \
+    --env ARBTEST_BUDGET_MS \
+    --env RUST_TEST_THREADS \
     "$image" \
     /wolfpack/"$filename" "$@"

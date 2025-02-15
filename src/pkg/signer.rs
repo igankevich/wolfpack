@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use blake2b_simd::blake2b;
 use der::asn1::Any;
 use der::asn1::BitString;
@@ -6,7 +8,6 @@ use der::Encode;
 use pkcs8::ObjectIdentifier;
 use pkcs8::SubjectPublicKeyInfo;
 use rand::rngs::OsRng;
-use secp256k1::ecdsa::Signature;
 use secp256k1::generate_keypair;
 use secp256k1::hashes::sha256;
 use secp256k1::hashes::Hash;
@@ -53,7 +54,7 @@ impl SigningKey {
     pub fn sign_data(&self, message: &[u8]) -> Result<Signature, Error> {
         let message = sha256::Hash::hash(message);
         let message = Message::from_digest(message.to_byte_array());
-        Ok(self.0.sign_ecdsa(message))
+        Ok(self.0.sign_ecdsa(message).into())
     }
 }
 
@@ -103,7 +104,10 @@ impl VerifyingKey {
     pub fn verify_data(&self, message: &[u8], signature: &Signature) -> Result<(), Error> {
         let message = sha256::Hash::hash(message);
         let message = Message::from_digest(message.to_byte_array());
-        signature.verify(&message, &self.0).map_err(|_| Error)?;
+        signature.verify(&message, &self.0).map_err(|e| {
+            eprintln!("{e}");
+            Error
+        })?;
         Ok(())
     }
 }
@@ -114,12 +118,41 @@ impl From<secp256k1::PublicKey> for VerifyingKey {
     }
 }
 
+pub struct Signature(pub(crate) secp256k1::ecdsa::Signature);
+
+impl Signature {
+    pub fn new(signature: secp256k1::ecdsa::Signature) -> Self {
+        Self(signature)
+    }
+
+    pub fn from_der(der: &[u8]) -> Result<Self, Error> {
+        let mut signature = secp256k1::ecdsa::Signature::from_der(der).map_err(|_| Error)?;
+        // FreeBSD's `pkg key --sign` sometimes produces denormalized signatures.
+        signature.normalize_s();
+        Ok(Self(signature))
+    }
+}
+
+impl From<secp256k1::ecdsa::Signature> for Signature {
+    fn from(other: secp256k1::ecdsa::Signature) -> Self {
+        Self(other)
+    }
+}
+
+impl Deref for Signature {
+    type Target = secp256k1::ecdsa::Signature;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
     use std::process::Command;
     use std::process::Stdio;
 
+    use arbtest::arbtest;
     use tempfile::TempDir;
 
     use super::*;
@@ -200,27 +233,31 @@ mod tests {
     #[ignore = "Needs FreeBSD's `pkg`"]
     #[test]
     fn freebsd_pkg_key_sign() {
-        let (signing_key, verifying_key) = SigningKey::generate();
-        let workdir = TempDir::new().unwrap();
-        let private_key_file = workdir.path().join("private-key");
-        std::fs::write(private_key_file.as_path(), signing_key.to_der().unwrap()).unwrap();
-        let mut child = Command::new("pkg")
-            .arg("key")
-            .arg("--sign")
-            .arg("-t")
-            .arg("ecdsa")
-            .arg(private_key_file.as_path())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let message = b"hello world";
-        {
-            let mut stdin = child.stdin.take().unwrap();
-            stdin.write_all(message).unwrap();
-        }
-        let signature = child.wait_with_output().unwrap().stdout;
-        let signature = Signature::from_der(&signature[..]).unwrap();
-        verifying_key.verify_data(message, &signature).unwrap();
+        arbtest(|_u| {
+            let (signing_key, verifying_key) = SigningKey::generate();
+            let workdir = TempDir::new().unwrap();
+            let private_key_file = workdir.path().join("private-key");
+            std::fs::write(private_key_file.as_path(), signing_key.to_der().unwrap()).unwrap();
+            let mut child = Command::new("pkg")
+                .arg("key")
+                .arg("--sign")
+                .arg("-t")
+                .arg("ecdsa")
+                .arg(private_key_file.as_path())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let message = b"hello world";
+            {
+                let mut stdin = child.stdin.take().unwrap();
+                stdin.write_all(message).unwrap();
+            }
+            let output = child.wait_with_output().unwrap();
+            let signature = output.stdout;
+            let signature = Signature::from_der(&signature[..]).unwrap();
+            verifying_key.verify_data(message, &signature).unwrap();
+            Ok(())
+        });
     }
 }

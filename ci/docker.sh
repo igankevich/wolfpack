@@ -16,21 +16,33 @@ LABEL org.opencontainers.image.source=https://github.com/igankevich/wolfpack
 LABEL org.opencontainers.image.description="CI image"
 EOF
     docker build --tag "$image" "$workdir"
-    docker push $image
+    docker push "$image"
+}
+
+build_with_suffix() {
+    suffix="$1"
+    image=ghcr.io/igankevich/wolfpack-ci"$suffix":latest
+    docker build --tag "$image" - <ci/Dockerfile"$suffix"
+    docker push "$image"
 }
 
 build_other() {
-    for suffix in '-lib' '-debian' '-freebsd' '-darling' '-wine'; do
-        image=ghcr.io/igankevich/wolfpack-ci"$suffix":latest
-        docker build --tag "$image" - <ci/Dockerfile"$suffix"
-        docker push $image
-    done
+    if test "$1" = "all"; then
+        for suffix in '-lib' '-debian' '-freebsd' '-darling' '-wine'; do
+            build_with_suffix "$suffix"
+        done
+    else
+        build_with_suffix "$1"
+    fi
 }
 
 main() {
     . ./ci/preamble.sh
-    build_openwrt
-    build_other
+    suffix="$1"
+    case "$suffix" in
+    openwrt) build_openwrt ;;
+    *) build_other "$suffix" ;;
+    esac
 }
 
-main
+main "$@"

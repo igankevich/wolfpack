@@ -1,11 +1,23 @@
 #!/bin/sh
 
+apt_get() {
+    sudo --non-interactive env DEBIAN_FRONTEND=noninteractive apt-get "$@"
+}
+
 install_dependencies() {
     if test "$GITHUB_ACTIONS" != "true"; then
         return
     fi
-    sudo --non-interactive apt-get update -qq
-    sudo --non-interactive apt-get install -y moreutils
+    apt_get update -qq
+    apt_get install -y moreutils
+}
+
+silent() {
+    if test "$GITHUB_ACTIONS" = "true"; then
+        chronic "$@"
+    else
+        "$@"
+    fi
 }
 
 test_integration() {
@@ -13,7 +25,7 @@ test_integration() {
 }
 
 cargo_test_lib() {
-    chronic cargo test \
+    silent cargo test \
         --workspace \
         --no-fail-fast \
         --lib \
@@ -29,6 +41,7 @@ cargo_test_all() {
     export RUST_TEST_THREADS=1
     DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-openwrt-2:latest" cargo_test_lib --nocapture --ignored opkg
     DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-debian:latest" cargo_test_lib --nocapture --ignored dpkg apt
+    DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-freebsd:latest" cargo_test_lib --nocapture --ignored bsd_pkg
     unset ARBTEST_BUDGET_MS
     unset RUST_TEST_THREADS
 }

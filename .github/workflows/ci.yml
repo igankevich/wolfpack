@@ -1,0 +1,29 @@
+---
+name: CI
+on: [push]
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/igankevich/wolfpack-ci:latest
+      options: --cap-add SYS_PTRACE
+    env:
+      TZ: Europe/Berlin
+      RUST_BACKTRACE: 1
+      CIJAIL_ENDPOINTS: |
+        https://github.com/lyz-code/yamlfix/
+        https://pypi.org/simple/
+        https://files.pythonhosted.org/packages/
+        https://static.crates.io/crates/
+        https://index.crates.io/
+        https://github.com/rustsec/advisory-db
+        https://static.rust-lang.org/dist/
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.4
+      - name: Test
+        run: ./ci/test.sh
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: ./ci/publish.sh

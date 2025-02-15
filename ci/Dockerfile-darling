@@ -1,0 +1,25 @@
+FROM debian:bookworm
+
+# https://docs.darlinghq.org/build-instructions.html
+RUN export DEBIAN_FRONTEND=noninteractive \
+    && apt-get -qq update \
+    && apt-get -qq install -y \
+    cmake clang bison flex xz-utils libfuse-dev libudev-dev pkg-config \
+    libc6-dev-i386 libcap2-bin git git-lfs libglu1-mesa-dev libcairo2-dev \
+    libgl1-mesa-dev libtiff5-dev libfreetype6-dev libxml2-dev libegl1-mesa-dev libfontconfig1-dev \
+    libbsd-dev libxrandr-dev libxcursor-dev libgif-dev libpulse-dev libavformat-dev libavcodec-dev \
+    libswresample-dev libdbus-1-dev libxkbfile-dev libssl-dev llvm-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN export GIT_CLONE_PROTECTION_ACTIVE=false \
+    && git clone --recursive --branch=master --depth=1 https://github.com/darlinghq/darling.git /tmp/darling \
+    && mkdir -p /tmp/darling/build \
+    && cd /tmp/darling/build \
+    && cmake -DDCMAKE_BUILD_TYPE=Release .. \
+    && make -j$(nproc) \
+    && make install \
+    && cd / \
+    && rm -rf /tmp/*
+
+LABEL org.opencontainers.image.source=https://github.com/igankevich/wolfpack
+LABEL org.opencontainers.image.description="CI image"

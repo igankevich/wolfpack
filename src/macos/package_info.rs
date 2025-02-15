@@ -1,5 +1,5 @@
-use std::io::Write;
 use std::io::Error;
+use std::io::Write;
 use std::path::PathBuf;
 
 use quick_xml::se::to_writer;
@@ -152,10 +152,11 @@ pub mod xml {
     }
 
     #[derive(Serialize, Deserialize, Debug)]
-    #[serde(rename = "auth", rename_all = "kebab-case")]
+    #[serde(rename = "auth", rename_all = "lowercase")]
     pub enum Auth {
-        // TODO ignore case
+        #[serde(alias = "NONE")]
         None,
+        #[serde(alias = "ROOT")]
         Root,
     }
 

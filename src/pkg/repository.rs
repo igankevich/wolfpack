@@ -33,7 +33,6 @@ impl Repository {
     {
         let mut packages = Vec::new();
         let mut push_package = |directory: &Path, path: &Path| -> Result<(), std::io::Error> {
-            eprintln!("reading {}", path.display());
             let relative_path = Path::new(".").join(
                 path.strip_prefix(directory)
                     .map_err(std::io::Error::other)?
@@ -321,7 +320,6 @@ type TarXzFile = TarBuilder<XzFile>;
 mod tests {
     use std::fs::create_dir_all;
     use std::process::Command;
-    use std::time::Duration;
 
     use arbtest::arbtest;
     use tempfile::TempDir;
@@ -346,7 +344,7 @@ mod tests {
         });
     }
 
-    #[ignore]
+    #[ignore = "Needs FreeBSD's `pkg`"]
     #[test]
     fn freebsd_pkg_adds_repo() {
         let _guard = prevent_concurrency("freebsd-pkg");
@@ -412,7 +410,6 @@ mod tests {
                 package
             );
             Ok(())
-        })
-        .budget(Duration::from_secs(5));
+        });
     }
 }

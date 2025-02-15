@@ -175,7 +175,7 @@ impl<'a, R: 'a + Read> ArchiveRead<'a, R> for tar::Archive<R> {
     }
 }
 
-impl<'a, R: Read> ArchiveEntry for tar::Entry<'a, R> {
+impl<R: Read> ArchiveEntry for tar::Entry<'_, R> {
     fn normalized_path(&self) -> Result<PathBuf, Error> {
         Ok(self.path()?.normalize())
     }

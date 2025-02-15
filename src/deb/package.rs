@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::io::Read;
@@ -6,37 +5,41 @@ use std::io::Write;
 use std::path::Path;
 use std::str::FromStr;
 
+use deko::bufread::AnyDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use normalize_path::NormalizePath;
 
 use crate::archive::ArchiveRead;
 use crate::archive::ArchiveWrite;
-use crate::compress::AnyDecoder;
+use crate::deb::Dependencies;
 use crate::deb::Error;
-use crate::deb::FieldName;
+use crate::deb::Fields;
 use crate::deb::MultilineValue;
 use crate::deb::PackageName;
 use crate::deb::PackageSigner;
 use crate::deb::PackageVerifier;
-use crate::deb::PackageVersion;
+use crate::deb::Provides;
 use crate::deb::SimpleValue;
-use crate::deb::Value;
+use crate::deb::Version;
 use crate::deb::DEBIAN_BINARY_CONTENTS;
 use crate::deb::DEBIAN_BINARY_FILE_NAME;
 use crate::sign::Signer;
 use crate::sign::Verifier;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
 pub struct Package {
     pub name: PackageName,
-    pub version: PackageVersion,
+    pub version: Version,
     pub license: SimpleValue,
     pub architecture: SimpleValue,
     pub maintainer: SimpleValue,
     pub description: MultilineValue,
     pub installed_size: Option<u64>,
+    pub provides: Provides,
+    pub depends: Dependencies,
+    pub homepage: Option<SimpleValue>,
     pub other: Fields,
 }
 
@@ -72,9 +75,13 @@ impl Package {
         Ok(())
     }
 
-    pub fn read_control<R: Read>(reader: R, verifier: &PackageVerifier) -> Result<Package, Error> {
+    pub fn read<R: Read>(
+        reader: R,
+        verifier: &PackageVerifier,
+    ) -> Result<(Package, Vec<u8>), Error> {
         let mut reader = ar::Archive::new(reader);
         let mut control: Option<Vec<u8>> = None;
+        let mut data: Option<Vec<u8>> = None;
         let mut message_parts: [Vec<u8>; 3] = [Vec::new(), Vec::new(), Vec::new()];
         let mut signatures: Vec<Vec<u8>> = Vec::new();
         reader.find(|entry| {
@@ -94,8 +101,13 @@ impl Package {
                     control = Some(buf);
                 }
                 Some(path) if path.starts_with("data.tar") => {
-                    message_parts[2].clear();
-                    entry.read_to_end(&mut message_parts[2])?;
+                    if data.is_some() {
+                        return Err(std::io::Error::other("multiple `data.tar*` files"));
+                    }
+                    let mut buf = Vec::new();
+                    entry.read_to_end(&mut buf)?;
+                    message_parts[2] = buf.clone();
+                    data = Some(buf);
                 }
                 Some(path) if path.starts_with("_gpg") => {
                     let mut buf = Vec::new();
@@ -120,6 +132,7 @@ impl Package {
         {
             return Err(Error::other("signature verification failed"));
         }
+        let data = data.ok_or_else(|| Error::MissingFile("data.tar*".into()))?;
         let mut tar_archive = tar::Archive::new(AnyDecoder::new(&control[..]));
         for entry in tar_archive.entries()? {
             let mut entry = entry?;
@@ -127,10 +140,15 @@ impl Package {
             if path == Path::new("control") {
                 let mut buf = String::with_capacity(4096);
                 entry.read_to_string(&mut buf)?;
-                return buf.parse::<Package>();
+                return Ok((buf.parse::<Package>()?, data));
             }
         }
         Err(Error::MissingFile("control.tar*".into()))
+    }
+
+    pub fn find(&self, keyword: &str) -> bool {
+        self.name.as_str().to_lowercase().contains(keyword)
+            || self.description.as_str().to_lowercase().contains(keyword)
     }
 }
 
@@ -144,7 +162,16 @@ impl Display for Package {
         if let Some(installed_size) = self.installed_size.as_ref() {
             writeln!(f, "Installed-Size: {}", installed_size)?;
         }
-        for (name, value) in self.other.fields.iter() {
+        if !self.provides.is_empty() {
+            writeln!(f, "Provides: {}", self.provides)?;
+        }
+        if !self.depends.is_empty() {
+            writeln!(f, "Depends: {}", self.depends)?;
+        }
+        if let Some(homepage) = self.homepage.as_ref() {
+            writeln!(f, "Homepage: {}", homepage)?;
+        }
+        for (name, value) in self.other.iter() {
             writeln!(f, "{}: {}", name, value)?;
         }
         writeln!(f, "Description: {}", self.description)?;
@@ -155,127 +182,21 @@ impl Display for Package {
 impl FromStr for Package {
     type Err = Error;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let mut state = ParserStatus::Initial;
-        let mut fields = Fields::new();
-        for line in value.lines() {
-            if line.starts_with('#') {
-                continue;
-            }
-            if line.chars().all(char::is_whitespace) {
-                return Err(Error::Package("empty line".into()));
-            }
-            state = state.advance(Some(line), &mut fields)?;
-        }
-        state.advance(None, &mut fields)?;
+        let mut fields: Fields = value.parse()?;
         let control = Package {
-            name: fields.remove("package")?.try_into()?,
-            version: fields.remove("version")?.try_into()?,
-            license: fields.remove("license")?.try_into()?,
-            architecture: fields.remove("architecture")?.try_into()?,
-            description: fields.remove("description")?.try_into()?,
-            maintainer: fields.remove("maintainer")?.try_into()?,
-            installed_size: {
-                let option = fields.remove("installed-size").ok().map(|x| {
-                    let value: String = x.to_string();
-                    value.parse::<u64>().map_err(|_| Error::FieldValue(value))
-                });
-                match option {
-                    Some(result) => Some(result?),
-                    None => None,
-                }
-            },
+            name: fields.remove_any("package")?.try_into()?,
+            version: fields.remove_any("version")?.try_into()?,
+            license: fields.remove_some("license")?.unwrap_or_default(),
+            architecture: fields.remove_any("architecture")?.try_into()?,
+            description: fields.remove_any("description")?.try_into()?,
+            maintainer: fields.remove_any("maintainer")?.try_into()?,
+            installed_size: fields.remove_some("installed-size")?,
+            provides: fields.remove_some("provides")?.unwrap_or_default(),
+            depends: fields.remove_some("depends")?.unwrap_or_default(),
+            homepage: fields.remove_some("homepage")?,
             other: fields,
         };
         Ok(control)
-    }
-}
-
-enum ParserStatus {
-    Initial,
-    Reading(FieldName, String, usize, bool),
-}
-
-impl ParserStatus {
-    fn advance(self, line: Option<&str>, fields: &mut Fields) -> Result<Self, Error> {
-        let state = match (self, line) {
-            (ParserStatus::Initial, Some(line)) => {
-                let mut iter = line.splitn(2, ':');
-                let name = iter.next().ok_or_else(|| Error::Package(line.into()))?;
-                let value = iter.next().ok_or_else(|| Error::Package(line.into()))?;
-                let value = value.trim_start();
-                let name: FieldName = name.parse()?;
-                if !value.is_empty() {
-                    ParserStatus::Reading(name, value.into(), 1, false)
-                } else {
-                    ParserStatus::Initial
-                }
-            }
-            (ParserStatus::Reading(name, mut value, num_lines, has_empty_lines), Some(line))
-                if line.starts_with([' ', '\t']) =>
-            {
-                let has_empty_lines = has_empty_lines || line == " ." || line == "\t.";
-                value.push('\n');
-                value.push_str(line);
-                ParserStatus::Reading(name, value, num_lines + 1, has_empty_lines)
-            }
-            (ParserStatus::Reading(name, value, num_lines, has_empty_lines), line) => {
-                let value = if num_lines == 1 {
-                    Value::Simple(value.parse()?)
-                } else if has_empty_lines || is_multiline(&name) {
-                    Value::Multiline(value.into())
-                } else {
-                    Value::Folded(value.try_into()?)
-                };
-                use std::collections::hash_map::Entry;
-                match fields.fields.entry(name) {
-                    Entry::Occupied(o) => return Err(Error::DuplicateField(o.key().to_string())),
-                    Entry::Vacant(v) => {
-                        v.insert(value);
-                    }
-                }
-                if line.is_some() {
-                    ParserStatus::Initial.advance(line, fields)?
-                } else {
-                    ParserStatus::Initial
-                }
-            }
-            (state @ ParserStatus::Initial, None) => state,
-        };
-        Ok(state)
-    }
-}
-
-fn is_multiline(name: &FieldName) -> bool {
-    name == "description"
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
-pub struct Fields {
-    fields: HashMap<FieldName, Value>,
-}
-
-impl Fields {
-    pub fn new() -> Self {
-        Self {
-            fields: Default::default(),
-        }
-    }
-
-    pub fn remove(&mut self, name: &'static str) -> Result<Value, Error> {
-        self.fields
-            .remove(&FieldName::new_unchecked(name))
-            .ok_or_else(|| Error::MissingField(name))
-    }
-
-    pub fn clear(&mut self) {
-        self.fields.clear();
-    }
-}
-
-impl Default for Fields {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -292,7 +213,6 @@ mod tests {
     use std::fs::File;
     use std::process::Command;
     use std::process::Stdio;
-    use std::time::Duration;
 
     use arbtest::arbtest;
     use pgp::types::PublicKeyTrait;
@@ -302,6 +222,7 @@ mod tests {
     use crate::deb::PackageSigner;
     use crate::deb::PackageVerifier;
     use crate::deb::SigningKey;
+    use crate::deb::Value;
     use crate::test::DirectoryOfFiles;
     use crate::test::UpperHex;
 
@@ -324,12 +245,10 @@ mod tests {
             let actual: Package = string
                 .parse()
                 .unwrap_or_else(|_| panic!("string = {:?}", string));
-            assert_eq!(expected, actual, "string = {:?}", string);
+            similar_asserts::assert_eq!(expected, actual, "string = {:?}", string);
             Ok(())
         });
     }
-
-    // TODO display object difference, i.e. assert_eq_diff, DebugDiff trait
 
     #[test]
     fn write_read() {
@@ -341,13 +260,13 @@ mod tests {
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let mut buf: Vec<u8> = Vec::new();
             control.write(directory.path(), &mut buf, &signer).unwrap();
-            let actual = Package::read_control(&buf[..], &verifier).unwrap();
-            assert_eq!(control, actual);
+            let (actual, ..) = Package::read(&buf[..], &verifier).unwrap();
+            similar_asserts::assert_eq!(control, actual);
             Ok(())
         });
     }
 
-    #[ignore]
+    #[ignore = "Needs `dpkg`"]
     #[test]
     fn dpkg_installs_random_packages() {
         let (signing_key, verifying_key) = SigningKey::generate("wolfpack-pgp-id".into()).unwrap();
@@ -364,6 +283,7 @@ mod tests {
         arbtest(|u| {
             let mut control: Package = u.arbitrary()?;
             control.architecture = "all".parse().unwrap();
+            control.depends.clear();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let path = workdir.path().join("test.deb");
             let _ = remove_dir_all(root.as_path());
@@ -453,7 +373,6 @@ mod tests {
                 control
             );
             Ok(())
-        })
-        .budget(Duration::from_secs(10));
+        });
     }
 }

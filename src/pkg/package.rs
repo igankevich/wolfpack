@@ -49,7 +49,6 @@ impl Package {
             if absolute_path == Path::new("/") {
                 continue;
             }
-            eprintln!("path {:?}", absolute_path.display());
             if entry.file_type().is_dir() {
                 if read_dir(entry.path())?.count() == 0 {
                     directories.insert(absolute_path.clone(), "y".to_string());
@@ -76,7 +75,6 @@ impl Package {
         };
         package.add_regular_file("+MANIFEST", manifest.to_string())?;
         for (path, (metadata, contents)) in file_contents.into_iter() {
-            eprintln!("file path {:?}", path.display());
             package.add_regular_file_with_metadata(path, &metadata, contents)?;
         }
         package.into_inner()?.finish()?;
@@ -105,7 +103,6 @@ const COMPRESSION_LEVEL: i32 = 22;
 #[cfg(test)]
 mod tests {
     use std::process::Command;
-    use std::time::Duration;
 
     use arbtest::arbtest;
     use tempfile::TempDir;
@@ -130,7 +127,7 @@ mod tests {
         });
     }
 
-    #[ignore]
+    #[ignore = "Needs FreeBSD's `pkg`"]
     #[test]
     fn freebsd_pkg_installs_random_packages() {
         let _guard = prevent_concurrency("freebsd-pkg");
@@ -167,7 +164,6 @@ mod tests {
                 package
             );
             Ok(())
-        })
-        .budget(Duration::from_secs(5));
+        });
     }
 }

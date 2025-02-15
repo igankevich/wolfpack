@@ -1,12 +1,14 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fs::File;
+use std::io::BufReader;
 use std::io::Read;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::path::Path;
 use std::path::PathBuf;
 
+use deko::bufread::AnyDecoder;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -14,7 +16,6 @@ use normalize_path::NormalizePath;
 
 use crate::archive::ArchiveRead;
 use crate::archive::ArchiveWrite;
-use crate::compress::AnyDecoder;
 use crate::deb;
 use crate::deb::DEBIAN_BINARY_CONTENTS;
 use crate::deb::DEBIAN_BINARY_FILE_NAME;
@@ -24,8 +25,8 @@ use crate::ipk::PackageVerifier;
 use crate::sign::SignatureWriter;
 use crate::sign::VerifyingReader;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
 pub struct Package(deb::Package);
 
 impl Package {
@@ -69,7 +70,8 @@ impl Package {
             .find(|entry| {
                 let path = entry.normalized_path()?;
                 if matches!(path.to_str(), Some(path) if path.starts_with("control.tar")) {
-                    let mut tar_archive = tar::Archive::new(AnyDecoder::new(entry));
+                    // TODO remove `BufReader` when deko supports it
+                    let mut tar_archive = tar::Archive::new(AnyDecoder::new(BufReader::new(entry)));
                     for entry in tar_archive.entries()? {
                         let mut entry = entry?;
                         let path = entry.path()?.normalize();
@@ -136,13 +138,13 @@ fn to_signature_path(mut path: PathBuf) -> PathBuf {
 mod tests {
 
     use std::process::Command;
-    use std::time::Duration;
 
     use arbtest::arbtest;
     use tempfile::TempDir;
 
     use super::*;
     use crate::ipk::SigningKey;
+    use crate::test::prevent_concurrency;
     use crate::test::DirectoryOfFiles;
 
     #[test]
@@ -172,9 +174,10 @@ mod tests {
         });
     }
 
-    #[ignore]
+    #[ignore = "Needs `opkg`"]
     #[test]
     fn opkg_installs_random_packages() {
+        let _guard = prevent_concurrency("opkg");
         let workdir = TempDir::new().unwrap();
         let signing_key = SigningKey::generate(Some("wolfpack".into()));
         let _verifying_key = signing_key.to_verifying_key();
@@ -182,6 +185,7 @@ mod tests {
             let mut package: Package = u.arbitrary()?;
             package.architecture = "all".parse().unwrap();
             package.installed_size = Some(100);
+            package.depends.clear();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let package_path = workdir.path().join("test.ipk");
             package
@@ -208,7 +212,6 @@ mod tests {
                 package
             );
             Ok(())
-        })
-        .budget(Duration::from_secs(10));
+        });
     }
 }

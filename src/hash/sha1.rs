@@ -21,6 +21,7 @@ impl Hasher for Sha1 {
 pub type Sha1 = sha1::Sha1;
 pub type Sha1Hash = HashArray<20>;
 pub type Sha1Reader<R> = HashingReader<R, Sha1>;
+pub type Sha1Hasher = Sha1;
 
 #[cfg(test)]
 mod tests {

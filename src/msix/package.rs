@@ -15,6 +15,7 @@ use crate::msix::xml;
 
 #[derive(Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Debug))]
+#[allow(unused)]
 pub struct Package {
     pub name: String,
     pub description: String,
@@ -25,6 +26,7 @@ pub struct Package {
 }
 
 impl Package {
+    #[allow(unused)]
     pub fn write<P2: AsRef<Path>, P: AsRef<Path>>(
         &self,
         file: P2,
@@ -33,7 +35,7 @@ impl Package {
     ) -> Result<(), Error> {
         let file = file.as_ref();
         let directory = directory.as_ref();
-        let mut writer = ZipWriter::new(File::create(&file)?);
+        let mut writer = ZipWriter::new(File::create(file)?);
         for entry in WalkDir::new(directory).into_iter() {
             let entry = entry?;
             let entry_path = entry
@@ -54,7 +56,7 @@ impl Package {
             }
         }
         writer.finish()?;
-        let mut archive = ZipArchive::new(File::open(&file)?)?;
+        let mut archive = ZipArchive::new(File::open(file)?)?;
         let mut files = Vec::with_capacity(archive.len());
         for i in 0..archive.len() {
             // TODO raw affects size or not ???
@@ -126,7 +128,7 @@ impl Package {
             },
         };
         let mut writer =
-            ZipWriter::new_append(OpenOptions::new().read(true).write(true).open(&file)?)?;
+            ZipWriter::new_append(OpenOptions::new().read(true).write(true).open(file)?)?;
         writer.start_file_from_path("AppxBlockMap.xml", SimpleFileOptions::default())?;
         block_map.write(writer.by_ref())?;
         writer.start_file_from_path("[Content_Types].xml", SimpleFileOptions::default())?;
@@ -142,7 +144,6 @@ impl Package {
 mod tests {
 
     use std::process::Command;
-    use std::time::Duration;
 
     use arbtest::arbtest;
     use tempfile::TempDir;
@@ -151,7 +152,7 @@ mod tests {
     use crate::test::prevent_concurrency;
     use crate::test::DirectoryOfFiles;
 
-    #[ignore]
+    #[ignore = "Needs `msixmgr`"]
     #[test]
     fn msixmgr_installs_random_package() {
         let _guard = prevent_concurrency("wine");
@@ -182,7 +183,6 @@ mod tests {
                 package
             );
             Ok(())
-        })
-        .budget(Duration::from_secs(5));
+        });
     }
 }

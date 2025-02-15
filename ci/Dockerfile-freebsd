@@ -9,3 +9,6 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && make \
     && make install \
     && rm -rf /var/lib/apt/lists/* /tmp/pkg
+
+LABEL org.opencontainers.image.source=https://github.com/igankevich/wolfpack
+LABEL org.opencontainers.image.description="CI image"

@@ -21,6 +21,7 @@ impl Hasher for Sha512 {
 pub type Sha512 = sha2::Sha512;
 pub type Sha512Hash = HashArray<64>;
 pub type Sha512Reader<R> = HashingReader<R, Sha512>;
+pub type Sha512Hasher = Sha512;
 
 #[cfg(test)]
 mod tests {

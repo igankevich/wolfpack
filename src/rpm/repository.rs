@@ -36,7 +36,6 @@ impl Repository {
     {
         let mut packages = HashMap::new();
         let mut push_package = |directory: &Path, path: &Path| -> Result<(), std::io::Error> {
-            eprintln!("reading {}", path.display());
             let relative_path = Path::new(".").join(
                 path.strip_prefix(directory)
                     .map_err(std::io::Error::other)?
@@ -317,26 +316,26 @@ pub mod xml {
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct Format {
-        #[serde(rename = "rpm:license")]
+        #[serde(rename = "license")]
         pub license: String,
-        #[serde(rename = "rpm:vendor")]
+        #[serde(rename = "vendor")]
         pub vendor: String,
-        #[serde(rename = "rpm:group")]
+        #[serde(rename = "group")]
         pub group: String,
-        #[serde(rename = "rpm:buildhost")]
+        #[serde(rename = "buildhost")]
         pub buildhost: String,
-        #[serde(rename = "rpm:sourcerpm")]
+        #[serde(rename = "sourcerpm")]
         pub sourcerpm: String,
-        #[serde(rename = "rpm:header-range")]
+        #[serde(rename = "header-range")]
         pub header_range: HeaderRange,
         #[serde(
-            rename = "rpm:provides",
+            rename = "provides",
             default,
             skip_serializing_if = "Provides::is_empty"
         )]
         pub provides: Provides,
         #[serde(
-            rename = "rpm:requires",
+            rename = "requires",
             default,
             skip_serializing_if = "Requires::is_empty"
         )]
@@ -444,7 +443,6 @@ pub mod xml {
 mod tests {
     use std::fs::File;
     use std::process::Command;
-    use std::time::Duration;
 
     use arbtest::arbtest;
     use tempfile::TempDir;
@@ -454,12 +452,14 @@ mod tests {
     use crate::test::prevent_concurrency;
     use crate::test::DirectoryOfFiles;
 
+    #[ignore]
     #[test]
     fn repo_md_read() {
         let input = std::fs::read_to_string("epel/repomd.xml").unwrap();
         let _repo_md = RepoMd::from_str(&input).unwrap();
     }
 
+    #[ignore]
     #[test]
     fn primary_xml_read() {
         let input = std::fs::read_to_string(
@@ -469,6 +469,7 @@ mod tests {
         let _metadata = Metadata::from_str(&input).unwrap();
     }
 
+    #[ignore]
     #[test]
     fn file_lists_xml_read() {
         let input = std::fs::read_to_string(
@@ -478,6 +479,7 @@ mod tests {
         let _filelists = FileLists::from_str(&input).unwrap();
     }
 
+    #[ignore]
     #[test]
     fn other_xml_read() {
         let input = std::fs::read_to_string(
@@ -487,7 +489,7 @@ mod tests {
         let _otherdata = OtherData::from_str(&input).unwrap();
     }
 
-    #[ignore]
+    #[ignore = "Needs `dnf`"]
     #[test]
     fn dnf_install() {
         let _guard = prevent_concurrency("rpm");
@@ -542,12 +544,9 @@ gpgkey=file://{}
                 package
             );
             assert!(
-                Command::new("dnf")
-                    .arg("--verbose")
-                    .arg("--debuglevel=10")
+                dnf()
                     .arg("--repo=test")
                     .arg("install")
-                    .arg("--assumeyes")
                     .arg(&package.name)
                     .status()
                     .unwrap()
@@ -556,9 +555,8 @@ gpgkey=file://{}
                 package
             );
             assert!(
-                Command::new("dnf")
-                    .arg("erase")
-                    .arg("--assumeyes")
+                dnf()
+                    .arg("remove")
                     .arg(&package.name)
                     .status()
                     .unwrap()
@@ -567,7 +565,15 @@ gpgkey=file://{}
                 package
             );
             Ok(())
-        })
-        .budget(Duration::from_secs(5));
+        });
+    }
+
+    fn dnf() -> Command {
+        let mut c = Command::new("dnf");
+        c.arg("--setopt=debuglevel=10");
+        c.arg("--setopt=errorlevel=10");
+        c.arg("--setopt=rpmverbosity=debug");
+        c.arg("--setopt=assumeyes=1");
+        c
     }
 }

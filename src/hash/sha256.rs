@@ -21,6 +21,7 @@ impl Hasher for Sha256 {
 pub type Sha256 = sha2::Sha256;
 pub type Sha256Hash = HashArray<32>;
 pub type Sha256Reader<R> = HashingReader<R, Sha256>;
+pub type Sha256Hasher = Sha256;
 
 #[cfg(test)]
 mod tests {

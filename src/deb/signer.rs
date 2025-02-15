@@ -1,20 +1,20 @@
-use std::io::Write;
-use std::ops::Deref;
-
 use pgp::composed::KeyType;
 use pgp::crypto::hash::HashAlgorithm;
 use pgp::packet::SignatureType;
 use pgp::types::SecretKeyTrait;
 use pgp::SecretKeyParamsBuilder;
-use pgp::SignedPublicKey;
 use pgp::SignedSecretKey;
 use rand::rngs::OsRng;
 
 use crate::sign::Error;
+use crate::sign::PgpSignature;
 use crate::sign::PgpSigner;
-use crate::sign::PgpVerifier;
 use crate::sign::Signer;
 use crate::sign::Verifier;
+use crate::sign::VerifierV2;
+
+pub use crate::sign::PgpSignature as Signature;
+pub use crate::sign::PgpVerifyingKey as VerifyingKey;
 
 pub struct PackageSigner {
     inner: PgpSigner,
@@ -39,20 +39,53 @@ impl Signer for PackageSigner {
 }
 
 pub struct PackageVerifier {
-    inner: PgpVerifier,
+    verifying_keys: Vec<VerifyingKey>,
+    no_verify: bool,
 }
 
 impl PackageVerifier {
     pub fn new(verifying_key: VerifyingKey) -> Self {
+        Self::new_v2(vec![verifying_key])
+    }
+
+    pub fn new_v2(verifying_keys: Vec<VerifyingKey>) -> Self {
         Self {
-            inner: PgpVerifier::new(verifying_key.into()),
+            verifying_keys,
+            no_verify: false,
+        }
+    }
+
+    pub fn none() -> Self {
+        Self {
+            verifying_keys: Default::default(),
+            no_verify: true,
         }
     }
 }
 
 impl Verifier for PackageVerifier {
     fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
-        self.inner.verify(message, signature)
+        if self.no_verify {
+            return Ok(());
+        }
+        let signature = PgpSignature::read_armored_one(signature).map_err(|_| Error)?;
+        VerifyingKey::verify_against_any(self.verifying_keys.iter(), message, &signature)
+    }
+
+    fn verify_any<I, S>(&self, message: &[u8], signatures: I) -> Result<(), Error>
+    where
+        I: Iterator<Item = S>,
+        S: AsRef<[u8]>,
+    {
+        if self.no_verify {
+            return Ok(());
+        }
+        for sig in signatures {
+            if self.verify(message, sig.as_ref()).is_ok() {
+                return Ok(());
+            }
+        }
+        Err(Error)
     }
 }
 
@@ -90,33 +123,6 @@ impl SigningKey {
             .public_key()
             .sign(OsRng, &signed_secret_key, String::new)
             .map_err(|_| Error)?;
-        Ok((
-            SigningKey(signed_secret_key),
-            VerifyingKey(signed_public_key),
-        ))
-    }
-}
-
-#[derive(Clone)]
-pub struct VerifyingKey(SignedPublicKey);
-
-impl VerifyingKey {
-    pub fn write_armored<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
-        self.0
-            .to_armored_writer(writer.by_ref(), Default::default())
-            .map_err(std::io::Error::other)
-    }
-}
-
-impl From<VerifyingKey> for SignedPublicKey {
-    fn from(other: VerifyingKey) -> Self {
-        other.0
-    }
-}
-
-impl Deref for VerifyingKey {
-    type Target = SignedPublicKey;
-    fn deref(&self) -> &Self::Target {
-        &self.0
+        Ok((SigningKey(signed_secret_key), signed_public_key.into()))
     }
 }

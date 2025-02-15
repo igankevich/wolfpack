@@ -58,7 +58,7 @@ impl FromStr for Md5Sums {
             if line.is_empty() || line.chars().all(char::is_whitespace) {
                 continue;
             }
-            let i = line.find(SEPARATOR).ok_or_else(|| Error::Md5Sums)?;
+            let i = line.find(SEPARATOR).ok_or(Error::Md5Sums)?;
             let hash = &line[..i];
             let path = &line[(i + SEPARATOR.len())..];
             let hash: Md5Hash = hash.parse().map_err(|_| Error::Md5Sums)?;

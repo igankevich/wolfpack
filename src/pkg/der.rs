@@ -1,3 +1,4 @@
+use crate::sign::Error;
 use der::asn1::BitStringRef;
 use der::asn1::Sequence;
 use der::asn1::Utf8StringRef;
@@ -22,13 +23,13 @@ pub struct SigningKeyDer<'a> {
     key: SecretData,
 }
 
-impl<'a> SigningKeyDer<'a> {
-    pub fn signing_key(&self) -> SigningKey {
+impl SigningKeyDer<'_> {
+    pub fn signing_key(&self) -> Result<SigningKey, Error> {
         self.key.signing_key()
     }
 }
 
-impl<'a> SigningKeyDer<'a> {
+impl SigningKeyDer<'_> {
     pub fn new(signing_key: &SigningKey) -> der::Result<Self> {
         Ok(Self {
             application: Utf8StringRef::new(PKG_APPLICATION)?,
@@ -58,7 +59,7 @@ impl<'a> DecodeValue<'a> for SigningKeyDer<'a> {
     }
 }
 
-impl<'a> EncodeValue for SigningKeyDer<'a> {
+impl EncodeValue for SigningKeyDer<'_> {
     fn value_len(&self) -> der::Result<Length> {
         self.application.encoded_len()?
             + self.version.encoded_len()?
@@ -105,14 +106,14 @@ impl SecretData {
         })
     }
 
-    fn signing_key(&self) -> SigningKey {
-        secp256k1::SecretKey::from_byte_array(
+    fn signing_key(&self) -> Result<SigningKey, Error> {
+        Ok(secp256k1::SecretKey::from_byte_array(
             self.data[(self.data.len() - SECRET_KEY_SIZE)..]
                 .try_into()
-                .unwrap(),
+                .expect("The slice length is `SECRET_KEY_SIZE`"),
         )
-        .unwrap()
-        .into()
+        .map_err(|_| Error)?
+        .into())
     }
 }
 

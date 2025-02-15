@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::CString;
+use std::io::BufReader;
 use std::io::Error;
 use std::io::Read;
 use std::io::Write;
@@ -7,16 +8,13 @@ use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::path::PathBuf;
 
-use cpio::newc::Reader as CpioReader;
+use deko::bufread::AnyDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use normalize_path::NormalizePath;
 use walkdir::WalkDir;
 
 //use zstd::stream::write::Encoder as ZstdEncoder;
-use crate::archive::ArchiveWrite;
-use crate::archive::CpioBuilder;
-use crate::compress::AnyDecoder;
 use crate::hash::Hasher;
 use crate::hash::Sha256Hash;
 use crate::hash::Sha256Reader;
@@ -35,7 +33,7 @@ use crate::rpm::Tag;
 use crate::rpm::ALIGN;
 
 #[derive(Debug)]
-#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Clone))]
+#[cfg_attr(test, derive(PartialEq, Eq, Clone))]
 pub struct Package {
     pub name: String,
     pub version: String,
@@ -58,8 +56,7 @@ impl Package {
         W: Write,
         P: AsRef<Path>,
     {
-        let lead = Lead::new(CString::new(self.name.clone()).unwrap());
-        eprintln!("write {lead:?}");
+        let lead = Lead::new(CString::new(self.name.clone()).map_err(Error::other)?);
         lead.write(writer.by_ref())?;
         let mut basenames = Vec::<CString>::new();
         let mut dirnames = Vec::<CString>::new();
@@ -83,7 +80,7 @@ impl Package {
                 continue;
             }
             //let entry_path = Path::new(".").join(entry_path);
-            let entry_path = Path::new("/tmp/rpm").join(entry_path);
+            //let entry_path = Path::new("/tmp/rpm").join(entry_path);
             let meta = entry.metadata()?;
             if let (Some(file_name), Some(parent)) = (
                 entry_path.file_name().and_then(|x| x.to_str()),
@@ -95,8 +92,8 @@ impl Package {
                     format!("{}/", parent)
                 };
                 let i = basenames.len();
-                basenames.push(CString::new(file_name).unwrap());
-                dirnames.push(CString::new(parent).unwrap());
+                basenames.push(CString::new(file_name).map_err(Error::other)?);
+                dirnames.push(CString::new(parent).map_err(Error::other)?);
                 dirindices.push(i as u32);
                 usernames.push(c"root".into());
                 groupnames.push(c"root".into());
@@ -107,10 +104,10 @@ impl Package {
                 } else {
                     sha2::Sha256::compute(&std::fs::read(path)?).to_string()
                 };
-                filedigests.push(CString::new(hash).unwrap());
+                filedigests.push(CString::new(hash).map_err(Error::other)?);
             }
         }
-        let mut header2 = Header::new(self.into());
+        let mut header2 = Header::new(self.try_into()?);
         header2.insert(Entry::BaseNames(basenames.try_into()?));
         header2.insert(Entry::DirNames(dirnames.try_into()?));
         header2.insert(Entry::DirIndexes(dirindices.try_into()?));
@@ -120,14 +117,17 @@ impl Package {
         header2.insert(Entry::FileDigests(filedigests.try_into()?));
         header2.insert(Entry::FileModes(filemodes.try_into()?));
         header2.insert(Entry::FileSizes(filesizes.try_into()?));
+        header2.insert(Entry::SourceRpm(c"(none)".into()));
         let mut payload = Vec::new();
-        CpioBuilder::from_directory(
-            directory,
-            GzEncoder::new(&mut payload, Compression::best()),
+        {
+            let writer = GzEncoder::new(&mut payload, Compression::best());
             // TODO
             //ZstdEncoder::new(&mut payload, COMPRESSION_LEVEL)?,
-        )?
-        .finish()?;
+            let mut archive = cpio::Builder::new(writer);
+            archive.set_format(cpio::Format::Newc);
+            archive.append_dir_all(directory)?;
+            archive.finish()?.finish()?;
+        }
         let payload_sha256 = sha2::Sha256::compute(&payload);
         header2.insert(Entry::PayloadDigestAlgo(HashAlgorithm::Sha256));
         header2.insert(Entry::PayloadDigest(payload_sha256.clone()));
@@ -137,22 +137,21 @@ impl Package {
         // sign second header without the leading padding
         let signature_v4 = signer
             .sign(&header2)
-            .map_err(|_| Error::other("failed to sign rpm"))?
+            .map_err(|_| Error::other("Failed to sign RPM"))?
             .to_binary()?;
         header2.extend(payload);
         // sign second header without the leading padding and the rest of the file
         let signature_v3 = signer
             .sign(&header2)
-            .map_err(|_| Error::other("failed to sign rpm"))?
+            .map_err(|_| Error::other("Failed to sign RPM"))?
             .to_binary()?;
-        eprintln!("header2 len {}", header2.len());
         let header1 = Header::new(
             Signatures {
                 signature_v3,
                 signature_v4,
                 header_sha256,
             }
-            .into(),
+            .try_into()?,
         );
         let header1 = header1.to_vec()?;
         writer.write_all(&header1)?;
@@ -171,20 +170,12 @@ impl Package {
         let _lead = Lead::read(reader.by_ref())?;
         let _header1 = Header::<SignatureEntry>::read(reader.by_ref())?;
         let (header2, _offset) = Header::<Entry>::read(reader.by_ref())?;
-        let mut decoder = AnyDecoder::new(reader.by_ref());
+        // TODO remove BufReader when deko supports that
+        let decoder = AnyDecoder::new(BufReader::new(reader.by_ref()));
         let mut files = Vec::new();
-        loop {
-            let cpio = CpioReader::new(decoder)?;
-            if cpio.entry().is_trailer() {
-                break;
-            }
-            files.push(cpio.entry().name().into());
-            //eprintln!(
-            //    "{} ({} bytes)",
-            //    cpio.entry().name(),
-            //    cpio.entry().file_size()
-            //);
-            decoder = cpio.finish()?;
+        let mut cpio = cpio::Archive::new(decoder);
+        while let Some(entry) = cpio.read_entry()? {
+            files.push(entry.path.clone());
         }
         let (sha256, _size) = reader.digest()?;
         let package: Package = header2.try_into()?;
@@ -233,23 +224,24 @@ impl Package {
     }
 }
 
-impl From<Package> for HashMap<Tag, Entry> {
-    fn from(other: Package) -> Self {
+impl TryFrom<Package> for HashMap<Tag, Entry> {
+    type Error = Error;
+    fn try_from(other: Package) -> Result<Self, Self::Error> {
         use Entry::*;
-        [
-            Name(CString::new(other.name).unwrap()).into(),
-            Version(CString::new(other.version).unwrap()).into(),
+        Ok([
+            Name(CString::new(other.name).map_err(Error::other)?).into(),
+            Version(CString::new(other.version).map_err(Error::other)?).into(),
             Release(c"1".into()).into(),
-            Summary(CString::new(other.summary).unwrap()).into(),
-            Description(CString::new(other.description).unwrap()).into(),
-            License(CString::new(other.license).unwrap()).into(),
-            Url(CString::new(other.url).unwrap()).into(),
+            Summary(CString::new(other.summary).map_err(Error::other)?).into(),
+            Description(CString::new(other.description).map_err(Error::other)?).into(),
+            License(CString::new(other.license).map_err(Error::other)?).into(),
+            Url(CString::new(other.url).map_err(Error::other)?).into(),
             Os(c"linux".into()).into(),
-            Arch(CString::new(other.arch).unwrap()).into(),
+            Arch(CString::new(other.arch).map_err(Error::other)?).into(),
             PayloadFormat(c"cpio".into()).into(),
             PayloadCompressor(c"gzip".into()).into(),
         ]
-        .into()
+        .into())
     }
 }
 
@@ -309,15 +301,16 @@ pub struct Signatures {
     pub header_sha256: Sha256Hash,
 }
 
-impl From<Signatures> for HashMap<SignatureTag, SignatureEntry> {
-    fn from(other: Signatures) -> Self {
+impl TryFrom<Signatures> for HashMap<SignatureTag, SignatureEntry> {
+    type Error = Error;
+    fn try_from(other: Signatures) -> Result<Self, Self::Error> {
         use SignatureEntry::*;
-        [
-            Gpg(other.signature_v3.try_into().unwrap()).into(),
-            Dsa(other.signature_v4.try_into().unwrap()).into(),
+        Ok([
+            Gpg(other.signature_v3.try_into().map_err(Error::other)?).into(),
+            Dsa(other.signature_v4.try_into().map_err(Error::other)?).into(),
             Sha256(other.header_sha256).into(),
         ]
-        .into()
+        .into())
     }
 }
 
@@ -327,17 +320,22 @@ const _COMPRESSION_LEVEL: i32 = 22;
 mod tests {
     use std::fs::File;
     use std::process::Command;
-    use std::time::Duration;
 
+    use arbitrary::Arbitrary;
+    use arbitrary::Unstructured;
     use arbtest::arbtest;
+    use rand::Rng;
+    use rand_mt::Mt64;
     use tempfile::TempDir;
 
     use super::*;
     use crate::rpm::SigningKey;
     use crate::test::prevent_concurrency;
+    use crate::test::Chars;
     use crate::test::DirectoryOfFiles;
+    use crate::test::CONTROL;
+    use crate::test::UNICODE;
 
-    /*
     #[test]
     fn package_write_read() {
         let (signing_key, _verifying_key) = SigningKey::generate("wolfpack".into()).unwrap();
@@ -346,17 +344,17 @@ mod tests {
             let expected: Package = u.arbitrary()?;
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let mut buf = Vec::new();
-            expected.clone()
+            expected
+                .clone()
                 .write(&mut buf, directory.path(), &signer)
                 .unwrap();
-            let actual = Lead::read(&buf).unwrap();
+            let (actual, ..) = Package::read(&buf[..]).unwrap();
             assert_eq!(expected, actual);
             Ok(())
         });
     }
-    */
 
-    #[ignore]
+    #[ignore = "Needs `rpm`"]
     #[test]
     fn rpm_installs_random_package() {
         let _guard = prevent_concurrency("rpm");
@@ -465,8 +463,38 @@ mod tests {
                 package
             );
             Ok(())
-        })
-        .budget(Duration::from_secs(5));
+        });
+    }
+
+    impl<'a> Arbitrary<'a> for Package {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let seed: u64 = u.arbitrary()?;
+            let mut rng = Mt64::new(seed);
+            let valid_chars = Chars::from(UNICODE).difference(CONTROL);
+            let len = rng.gen_range(1..=10);
+            let name = valid_chars.random_string(&mut rng, len);
+            let len = rng.gen_range(1..=10);
+            let version = valid_chars.random_string(&mut rng, len);
+            let len = rng.gen_range(1..=10);
+            let summary = valid_chars.random_string(&mut rng, len);
+            let len = rng.gen_range(1..=10);
+            let description = valid_chars.random_string(&mut rng, len);
+            let len = rng.gen_range(1..=10);
+            let license = valid_chars.random_string(&mut rng, len);
+            let len = rng.gen_range(1..=10);
+            let url = valid_chars.random_string(&mut rng, len);
+            let len = rng.gen_range(1..=10);
+            let arch = valid_chars.random_string(&mut rng, len);
+            Ok(Self {
+                name,
+                version,
+                summary,
+                description,
+                license,
+                url,
+                arch,
+            })
+        }
     }
 
     //const RPM: &str = "/home/igankevich/workspace/etd/rpm/tmp/tools/rpm";

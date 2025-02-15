@@ -5,6 +5,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fs::create_dir_all;
 use std::fs::File;
+use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
@@ -40,17 +41,16 @@ impl Repository {
     {
         let mut packages: HashMap<SimpleValue, PerArchPackages> = HashMap::new();
         let mut push_package = |path: &Path| -> Result<(), Error> {
-            eprintln!("reading {}", path.display());
             let mut reader = Sha256Reader::new(File::open(path)?);
             let control = Package::read_control(reader.by_ref(), path, verifier)?;
             let (hash, size) = reader.digest()?;
             let mut filename = PathBuf::new();
             filename.push(hash.to_string());
             create_dir_all(output_dir.as_ref().join(&filename))?;
-            filename.push(path.file_name().unwrap());
+            filename.push(path.file_name().ok_or(ErrorKind::InvalidData)?);
             let new_path = output_dir.as_ref().join(&filename);
             std::fs::rename(path, new_path)?;
-            let control = ExtendedControlData {
+            let control = ExtendedPackage {
                 control,
                 size,
                 hash,
@@ -127,7 +127,7 @@ impl Display for Repository {
 }
 
 pub struct PerArchPackages {
-    packages: Vec<ExtendedControlData>,
+    packages: Vec<ExtendedPackage>,
 }
 
 impl Display for PerArchPackages {
@@ -139,14 +139,14 @@ impl Display for PerArchPackages {
     }
 }
 
-pub struct ExtendedControlData {
+pub struct ExtendedPackage {
     pub control: Package,
     hash: Sha256Hash,
     filename: PathBuf,
-    size: usize,
+    size: u64,
 }
 
-impl Display for ExtendedControlData {
+impl Display for ExtendedPackage {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "{}", self.control)?;
         writeln!(f, "Filename: {}", self.filename.display())?;
@@ -161,18 +161,19 @@ mod tests {
 
     use std::fs::remove_dir_all;
     use std::process::Command;
-    use std::time::Duration;
 
     use arbtest::arbtest;
     use tempfile::TempDir;
 
     use super::*;
     use crate::ipk::SigningKey;
+    use crate::test::prevent_concurrency;
     use crate::test::DirectoryOfFiles;
 
-    #[ignore]
+    #[ignore = "Needs `opkg`"]
     #[test]
     fn opkg_installs_from_repo() {
+        let _guard = prevent_concurrency("opkg");
         let workdir = TempDir::new().unwrap();
         let repo_dir = workdir.path().join("repo");
         let signing_key = SigningKey::generate(Some("wolfpack".into()));
@@ -182,6 +183,7 @@ mod tests {
         arbtest(|u| {
             let mut package: Package = u.arbitrary()?;
             package.architecture = "all".parse().unwrap();
+            package.depends.clear();
             package.installed_size = Some(100);
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let package_path = workdir.path().join("test.ipk");
@@ -209,10 +211,6 @@ mod tests {
             Command::new("sh")
                 .arg("-c")
                 .arg("cat /etc/opkg/keys/*")
-                .status()
-                .unwrap();
-            Command::new("cat")
-                .arg(repo_dir.join("meta/Packages.sig"))
                 .status()
                 .unwrap();
             assert!(
@@ -246,7 +244,6 @@ mod tests {
                 package
             );
             Ok(())
-        })
-        .budget(Duration::from_secs(5));
+        });
     }
 }

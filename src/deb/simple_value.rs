@@ -1,6 +1,12 @@
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::io::ErrorKind;
+use std::path::PathBuf;
 use std::str::FromStr;
+
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::deb::Error;
 use crate::deb::FoldedValue;
@@ -8,7 +14,8 @@ use crate::deb::MultilineValue;
 use crate::deb::PackageName;
 use crate::deb::Value;
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize, Default)]
+#[serde(transparent)]
 pub struct SimpleValue(String);
 
 impl SimpleValue {
@@ -38,6 +45,22 @@ impl FromStr for SimpleValue {
 impl From<SimpleValue> for String {
     fn from(other: SimpleValue) -> String {
         other.0
+    }
+}
+
+impl From<SimpleValue> for PathBuf {
+    fn from(other: SimpleValue) -> PathBuf {
+        other.0.into()
+    }
+}
+
+impl From<SimpleValue> for HashSet<SimpleValue> {
+    fn from(other: SimpleValue) -> HashSet<SimpleValue> {
+        other
+            .0
+            .split_whitespace()
+            .map(|x| SimpleValue(x.to_string()))
+            .collect()
     }
 }
 
@@ -98,13 +121,13 @@ impl TryFrom<&str> for SimpleValue {
 
 fn validate_simple_value(value: &str) -> Result<(), Error> {
     if !value.as_bytes().iter().all(is_valid_char) {
-        return Err(Error::FieldValue(value.to_string()));
+        return Err(ErrorKind::InvalidData.into());
     }
     if value.is_empty() || value.chars().all(char::is_whitespace) {
-        return Err(Error::FieldValue(value.to_string()));
+        return Err(ErrorKind::InvalidData.into());
     }
     if value.chars().next().iter().all(|ch| ch.is_whitespace()) {
-        return Err(Error::FieldValue(value.to_string()));
+        return Err(ErrorKind::InvalidData.into());
     }
     Ok(())
 }

@@ -1,8 +1,5 @@
 pub mod archive;
-pub mod compress;
-pub mod cpio;
 pub mod deb;
-pub mod error;
 pub mod hash;
 pub mod ipk;
 pub mod macos;
@@ -12,4 +9,3 @@ pub mod rpm;
 pub mod sign;
 #[cfg(test)]
 pub mod test;
-pub mod xar;

@@ -22,6 +22,43 @@ pub trait Verifier {
     }
 }
 
+pub trait VerifierV2 {
+    type Signature;
+
+    fn verify_v2(&self, message: &[u8], signature: &Self::Signature) -> Result<(), Error>;
+
+    fn verify_any_v2<'a, I>(&self, message: &[u8], signatures: I) -> Result<(), Error>
+    where
+        I: Iterator<Item = &'a Self::Signature>,
+        Self::Signature: 'a,
+    {
+        for s in signatures {
+            if self.verify_v2(message, s).is_ok() {
+                return Ok(());
+            }
+        }
+        Err(Error)
+    }
+
+    // One signature, many keys.
+    fn verify_against_any<'a, I>(
+        verifiers: I,
+        message: &[u8],
+        signature: &Self::Signature,
+    ) -> Result<(), Error>
+    where
+        I: Iterator<Item = &'a Self>,
+        Self: 'a,
+    {
+        for verifier in verifiers {
+            if verifier.verify_v2(message, signature).is_ok() {
+                return Ok(());
+            }
+        }
+        Err(Error)
+    }
+}
+
 /// Opaque error.
 #[derive(Debug)]
 pub struct Error;

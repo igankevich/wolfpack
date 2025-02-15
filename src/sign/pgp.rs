@@ -1,12 +1,16 @@
+use std::io::Read;
 use std::io::Write;
+use std::ops::Deref;
 use std::time::SystemTime;
 
 use pgp::cleartext::CleartextSignedMessage;
+use pgp::composed::signed_key::SignedPublicKeyParser;
 use pgp::composed::StandaloneSignature;
 use pgp::crypto::{hash::HashAlgorithm, public_key::PublicKeyAlgorithm};
 use pgp::packet::*;
 use pgp::types::public::PublicParams;
 use pgp::types::PublicKeyTrait;
+use pgp::Deserializable;
 use pgp::SignedPublicKey;
 use pgp::SignedSecretKey;
 use rand::rngs::OsRng;
@@ -14,6 +18,7 @@ use rand::rngs::OsRng;
 use crate::sign::Error;
 use crate::sign::Signer;
 use crate::sign::Verifier;
+use crate::sign::VerifierV2;
 
 pub struct PgpSigner {
     signing_key: SignedSecretKey,
@@ -122,6 +127,75 @@ impl Verifier for PgpVerifier {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct PgpVerifyingKey(SignedPublicKey);
+
+impl PgpVerifyingKey {
+    pub fn write_armored<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        self.0
+            .to_armored_writer(writer.by_ref(), Default::default())
+            .map_err(std::io::Error::other)
+    }
+
+    pub fn read_armored_one<R: Read>(reader: R) -> Result<Self, std::io::Error> {
+        let (public_key, _headers) =
+            SignedPublicKey::from_reader_single(reader).map_err(std::io::Error::other)?;
+        Ok(Self(public_key))
+    }
+
+    pub fn read_binary_all<R: Read>(reader: R) -> Result<Vec<Self>, std::io::Error> {
+        let mut public_keys = Vec::new();
+        let parser = PacketParser::new(reader);
+        let parser = SignedPublicKeyParser::from_packets(parser.peekable());
+        for packet in parser {
+            let packet = packet.map_err(std::io::Error::other)?;
+            public_keys.push(Self(packet));
+        }
+        Ok(public_keys)
+    }
+}
+
+impl VerifierV2 for PgpVerifyingKey {
+    type Signature = PgpSignature;
+
+    fn verify_v2(&self, message: &[u8], signature: &Self::Signature) -> Result<(), Error> {
+        if self.0.is_signing_key() && signature.0.verify(&self.0, message).is_ok() {
+            return Ok(());
+        }
+        for public_subkey in self
+            .0
+            .public_subkeys
+            .iter()
+            .filter(|pk| pk.is_signing_key())
+        {
+            if signature.0.verify(public_subkey, message).is_ok() {
+                return Ok(());
+            }
+        }
+        Err(Error)
+    }
+}
+
+impl From<SignedPublicKey> for PgpVerifyingKey {
+    fn from(other: SignedPublicKey) -> Self {
+        Self(other)
+    }
+}
+
+impl From<PgpVerifyingKey> for SignedPublicKey {
+    fn from(other: PgpVerifyingKey) -> Self {
+        other.0
+    }
+}
+
+impl Deref for PgpVerifyingKey {
+    type Target = SignedPublicKey;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Debug)]
 pub struct PgpSignature(Signature);
 
 impl PgpSignature {
@@ -140,6 +214,27 @@ impl PgpSignature {
         signature
             .to_armored_writer(writer.by_ref(), Default::default())
             .map_err(std::io::Error::other)
+    }
+
+    pub fn read_armored_one<R: Read>(reader: R) -> Result<Self, std::io::Error> {
+        let (signature, _headers) =
+            StandaloneSignature::from_reader_single(reader).map_err(std::io::Error::other)?;
+        Ok(Self(signature.signature))
+    }
+
+    pub fn read_binary_all<R: Read>(reader: R) -> Result<Vec<Self>, std::io::Error> {
+        let mut signatures = Vec::new();
+        let parser = PacketParser::new(reader);
+        for packet in parser {
+            let packet = packet.map_err(std::io::Error::other)?;
+            let signature = match packet {
+                Packet::Signature(signature) => signature,
+                // skip other packets
+                _ => continue,
+            };
+            signatures.push(Self(signature));
+        }
+        Ok(signatures)
     }
 
     pub fn into_inner(self) -> Signature {
@@ -194,7 +289,6 @@ fn get_public_key_algorithm<P: PublicKeyTrait>(
         EdDSALegacy { .. } => Ok(PublicKeyAlgorithm::EdDSALegacy),
         Ed25519 { .. } => Ok(PublicKeyAlgorithm::Ed25519),
         X25519 { .. } => Ok(PublicKeyAlgorithm::X25519),
-        X448 { .. } => Ok(PublicKeyAlgorithm::X448),
         Unknown { .. } => Err(Error),
     }
 }

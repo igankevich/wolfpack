@@ -9,14 +9,14 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::deb::PackageName;
-use crate::deb::PackageVersion;
+use crate::deb::Version;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct CompactManifest {
     pub name: PackageName,
     pub origin: String,
-    pub version: PackageVersion,
+    pub version: Version,
     pub comment: String,
     pub maintainer: String,
     pub www: String,
@@ -48,7 +48,11 @@ impl Display for CompactManifest {
 
 impl Debug for CompactManifest {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        f.write_str(serde_json::to_string(self).unwrap().as_str())
+        f.write_str(
+            serde_json::to_string(self)
+                .map_err(|_| std::fmt::Error)?
+                .as_str(),
+        )
     }
 }
 
@@ -119,12 +123,16 @@ impl FromStr for PackageMeta {
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Dependency {
     pub origin: String,
-    pub version: PackageVersion,
+    pub version: Version,
 }
 
 impl Debug for Dependency {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        f.write_str(serde_json::to_string(self).unwrap().as_str())
+        f.write_str(
+            serde_json::to_string(self)
+                .map_err(|_| std::fmt::Error)?
+                .as_str(),
+        )
     }
 }
 

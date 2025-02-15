@@ -62,7 +62,7 @@ impl<'a, R: 'a + Read> ArchiveRead<'a, R> for ar::Archive<R> {
     }
 }
 
-impl<'a, R: Read> ArchiveEntry for ar::Entry<'a, R> {
+impl<R: Read> ArchiveEntry for ar::Entry<'_, R> {
     #[cfg(unix)]
     fn normalized_path(&self) -> Result<PathBuf, Error> {
         use std::ffi::OsStr;

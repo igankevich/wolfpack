@@ -5,22 +5,20 @@ use std::path::Path;
 
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
+use stuckliste::receipt::ReceiptBuilder;
 use tempfile::TempDir;
+pub use zar::RsaSigner as PackageSigner;
 
-use crate::cpio::CpioBuilder;
 use crate::macos::xml;
-use crate::macos::Bom;
-use crate::macos::PackageSigner;
-use crate::xar::SignedXarBuilder;
-use crate::xar::XarCompression;
 
-#[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Clone, Debug))]
+#[cfg_attr(test, derive(PartialEq, Eq, Clone, Debug))]
 pub struct Package {
     pub identifier: String,
     pub version: String,
 }
 
 impl Package {
+    #[allow(unused)]
     pub fn write<W: Write, P: AsRef<Path>>(
         &self,
         writer: W,
@@ -52,24 +50,24 @@ impl Package {
         let package_info_file = workdir.path().join("PackageInfo");
         info.write(File::create(&package_info_file)?)?;
         let directory = directory.as_ref();
-        let bom = Bom::from_directory(directory)?;
+        let bom = ReceiptBuilder::new().create(directory)?;
         let bom_file = workdir.path().join("Bom");
         bom.write(File::create(&bom_file)?)?;
         let payload_file = workdir.path().join("Payload");
-        CpioBuilder::from_directory(
-            ZlibEncoder::new(File::create(&payload_file)?, Compression::best()),
-            directory,
-        )?
-        .finish()?;
-        let mut xar = SignedXarBuilder::new(writer, signer);
-        xar.add_file_by_path(
-            "PackageInfo".into(),
-            &package_info_file,
-            XarCompression::Gzip,
+        {
+            let writer = ZlibEncoder::new(File::create(&payload_file)?, Compression::best());
+            let mut archive = cpio::Builder::new(writer);
+            archive.set_format(cpio::Format::Odc);
+            archive.append_dir_all(directory)?;
+            archive.finish()?.finish()?;
+        }
+        let mut xar = zar::Builder::new(writer, Some(signer));
+        xar.append_dir_all(
+            workdir.path(),
+            zar::Compression::Gzip,
+            zar::no_extra_contents,
         )?;
-        xar.add_file_by_path("Bom".into(), &bom_file, XarCompression::Gzip)?;
-        xar.add_file_by_path("Payload".into(), &payload_file, XarCompression::None)?;
-        xar.sign(signer)?;
+        xar.finish()?;
         Ok(())
     }
 }
@@ -78,20 +76,27 @@ impl Package {
 mod tests {
     use std::fs::File;
     use std::process::Command;
-    use std::time::Duration;
 
+    use arbitrary::Arbitrary;
+    use arbitrary::Unstructured;
     use arbtest::arbtest;
+    use rand::rngs::OsRng;
+    use rand::Rng;
+    use rand_mt::Mt64;
     use tempfile::TempDir;
+    use zar::rsa::RsaPrivateKey;
+    use zar::ChecksumAlgo;
 
     use super::*;
-    use crate::macos::PackageSigner;
-    use crate::macos::SigningKey;
     use crate::test::prevent_concurrency;
+    use crate::test::Chars;
     use crate::test::DirectoryOfFiles;
+    use crate::test::CONTROL;
+    use crate::test::UNICODE;
 
-    #[ignore]
+    #[ignore = "Needs `darling`"]
     #[test]
-    fn macos_installer_installs_random_package() {
+    fn darling_installer_installs_random_package() {
         assert!(Command::new("mount")
             .arg("-t")
             .arg("tmpfs")
@@ -101,14 +106,10 @@ mod tests {
             .unwrap()
             .success());
         let _guard = prevent_concurrency("macos");
-        let (signing_key, _verifying_key) = SigningKey::generate("wolfpack".into()).unwrap();
-        let signer = PackageSigner::new(signing_key);
+        let signing_key = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
+        let signer = PackageSigner::new(ChecksumAlgo::Sha1, signing_key, Vec::new()).unwrap();
         let workdir = TempDir::new().unwrap();
         let package_file = workdir.path().join("test.pkg");
-        //let verifying_key_file = workdir.path().join("verifying-key");
-        //verifying_key
-        //    .write_armored(File::create(verifying_key_file.as_path()).unwrap())
-        //    .unwrap();
         arbtest(|u| {
             let package: Package = u.arbitrary()?;
             let directory: DirectoryOfFiles = u.arbitrary()?;
@@ -148,7 +149,22 @@ mod tests {
                 package
             );
             Ok(())
-        })
-        .budget(Duration::from_secs(5));
+        });
+    }
+
+    impl<'a> Arbitrary<'a> for Package {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let seed: u64 = u.arbitrary()?;
+            let mut rng = Mt64::new(seed);
+            let valid_chars = Chars::from(UNICODE).difference(CONTROL);
+            let len = rng.gen_range(1..=10);
+            let identifier = valid_chars.random_string(&mut rng, len);
+            let len = rng.gen_range(1..=10);
+            let version = valid_chars.random_string(&mut rng, len);
+            Ok(Self {
+                identifier,
+                version,
+            })
+        }
     }
 }

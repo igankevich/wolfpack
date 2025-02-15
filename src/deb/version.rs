@@ -3,6 +3,8 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::io::ErrorKind;
+use std::str::FromStr;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -11,50 +13,50 @@ use crate::deb::Error;
 use crate::deb::SimpleValue;
 use crate::deb::Value;
 
-pub type Epoch = u16;
+pub type Epoch = u64;
 
 /// https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-pub struct PackageVersion {
+pub struct Version {
     epoch: Epoch,
     upstream_version: UpstreamVersion,
-    debian_revision: DebianRevision,
+    revision: Revision,
 }
 
-impl PackageVersion {
+impl Version {
     pub fn new(version: &str) -> Result<Self, Error> {
-        Self::do_new(version).map_err(|version| Error::PackageVersion(version.to_string()))
+        Self::do_new(version).map_err(|version| Error::Version(version.to_string()))
     }
 
     fn do_new(version: &str) -> Result<Self, &str> {
-        let (epoch, version) = match version.find(|ch| ch == ':') {
+        let (epoch, version) = match version.find(':') {
             Some(i) => (
                 version[..i].parse().map_err(|_| version)?,
                 &version[(i + 1)..],
             ),
             None => (0, version),
         };
-        let (debian_revision, version, has_debian_revision) = match version.rfind(|ch| ch == '-') {
+        let (revision, version, has_revision) = match version.rfind('-') {
             Some(i) => (version[(i + 1)..].to_string(), &version[..i], true),
             None => (String::new(), version, false),
         };
         Ok(Self {
             epoch,
-            upstream_version: UpstreamVersion::new(version.to_string(), has_debian_revision)
+            upstream_version: UpstreamVersion::new(version.to_string(), has_revision)
                 .map_err(|_| version)?,
-            debian_revision: DebianRevision::new(debian_revision).map_err(|_| version)?,
+            revision: Revision::new(revision).map_err(|_| version)?,
         })
     }
 }
 
-impl PartialOrd for PackageVersion {
+impl PartialOrd for Version {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for PackageVersion {
+impl Ord for Version {
     fn cmp(&self, other: &Self) -> Ordering {
         let ret = self.epoch.cmp(&other.epoch);
         if ret != Ordering::Equal {
@@ -64,7 +66,7 @@ impl Ord for PackageVersion {
         if ret != Ordering::Equal {
             return ret;
         }
-        let ret = self.debian_revision.cmp(&other.debian_revision);
+        let ret = self.revision.cmp(&other.revision);
         if ret != Ordering::Equal {
             return ret;
         }
@@ -72,27 +74,27 @@ impl Ord for PackageVersion {
     }
 }
 
-impl Display for PackageVersion {
+impl Display for Version {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         if self.epoch != 0 {
             write!(f, "{}:", self.epoch)?;
         }
         f.write_str(&self.upstream_version.0)?;
-        if !self.debian_revision.0.is_empty() {
-            write!(f, "-{}", self.debian_revision.0)?;
+        if !self.revision.0.is_empty() {
+            write!(f, "-{}", self.revision.0)?;
         }
         Ok(())
     }
 }
 
-impl TryFrom<SimpleValue> for PackageVersion {
+impl TryFrom<SimpleValue> for Version {
     type Error = Error;
     fn try_from(other: SimpleValue) -> Result<Self, Self::Error> {
         Self::new(other.as_str())
     }
 }
 
-impl TryFrom<Value> for PackageVersion {
+impl TryFrom<Value> for Version {
     type Error = Error;
 
     fn try_from(other: Value) -> Result<Self, Self::Error> {
@@ -105,26 +107,33 @@ impl TryFrom<Value> for PackageVersion {
     }
 }
 
-impl From<PackageVersion> for String {
-    fn from(other: PackageVersion) -> Self {
+impl From<Version> for String {
+    fn from(other: Version) -> Self {
         other.to_string()
     }
 }
 
-impl TryFrom<String> for PackageVersion {
+impl TryFrom<String> for Version {
     type Error = Error;
     fn try_from(other: String) -> Result<Self, Self::Error> {
         Self::new(other.as_str())
     }
 }
 
-#[derive(Clone, Debug)]
-struct DebianRevision(String);
+impl FromStr for Version {
+    type Err = Error;
+    fn from_str(other: &str) -> Result<Self, Self::Err> {
+        Self::new(other)
+    }
+}
 
-impl DebianRevision {
-    fn new(s: String) -> Result<Self, String> {
+#[derive(Clone, Debug)]
+struct Revision(String);
+
+impl Revision {
+    fn new(s: String) -> Result<Self, Error> {
         if !s.chars().all(is_valid_char) {
-            return Err(s);
+            return Err(ErrorKind::InvalidData.into());
         }
         Ok(Self(s))
     }
@@ -138,15 +147,15 @@ impl DebianRevision {
     }
 }
 
-impl PartialEq for DebianRevision {
+impl PartialEq for Revision {
     fn eq(&self, other: &Self) -> bool {
         self.to_str().eq(other.to_str())
     }
 }
 
-impl Eq for DebianRevision {}
+impl Eq for Revision {}
 
-impl Hash for DebianRevision {
+impl Hash for Revision {
     fn hash<H>(&self, state: &mut H)
     where
         H: Hasher,
@@ -155,15 +164,28 @@ impl Hash for DebianRevision {
     }
 }
 
-impl PartialOrd for DebianRevision {
+impl PartialOrd for Revision {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for DebianRevision {
+impl Ord for Revision {
     fn cmp(&self, other: &Self) -> Ordering {
         version_cmp(self.to_str(), other.to_str())
+    }
+}
+
+impl FromStr for Revision {
+    type Err = Error;
+    fn from_str(other: &str) -> Result<Self, Self::Err> {
+        Self::new(other.into())
+    }
+}
+
+impl Display for Revision {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -171,8 +193,8 @@ impl Ord for DebianRevision {
 struct UpstreamVersion(String);
 
 impl UpstreamVersion {
-    fn new(s: String, has_debian_revision: bool) -> Result<Self, String> {
-        let is_valid_char_v2 = if has_debian_revision {
+    fn new(s: String, has_revision: bool) -> Result<Self, String> {
+        let is_valid_char_v2 = if has_revision {
             is_valid_char_with_hyphen
         } else {
             is_valid_char
@@ -193,6 +215,12 @@ impl PartialOrd for UpstreamVersion {
 impl Ord for UpstreamVersion {
     fn cmp(&self, other: &Self) -> Ordering {
         version_cmp(self.0.as_str(), other.0.as_str())
+    }
+}
+
+impl Display for UpstreamVersion {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -220,7 +248,18 @@ fn version_cmp(mut s1: &str, mut s2: &str) -> Ordering {
             .chars()
             .position(|ch| !ch.is_ascii_digit())
             .unwrap_or(s2.len());
-        let ret = numerical_cmp(s1.chars().take(n1), s2.chars().take(n2));
+        let (i1, i2) = if n1 < n2 {
+            (
+                std::iter::repeat('0').take(n2 - n1),
+                std::iter::repeat('0').take(0),
+            )
+        } else {
+            (
+                std::iter::repeat('0').take(0),
+                std::iter::repeat('0').take(n1 - n2),
+            )
+        };
+        let ret = numerical_cmp(i1.chain(s1.chars().take(n1)), i2.chain(s2.chars().take(n2)));
         if ret != Ordering::Equal {
             return ret;
         }
@@ -303,6 +342,7 @@ mod tests {
     use arbtest::arbtest;
 
     use super::*;
+    use crate::test::to_string_parse_symmetry;
 
     #[test]
     fn test_version_cmp() {
@@ -321,37 +361,71 @@ mod tests {
         assert!(v3 < v4);
         assert!(v3 < v5);
         assert!(v4 < v5);
+        assert!(UpstreamVersion("3.0.7".into()) <= UpstreamVersion("3.0.15".into()))
     }
 
     #[test]
-    fn valid_package_version() {
+    fn package_version_symmetry() {
+        to_string_parse_symmetry::<Version>();
+    }
+
+    #[test]
+    fn upstream_version_symmetry() {
         arbtest(|u| {
-            let _value: PackageVersion = u.arbitrary()?;
+            let ArbitraryUpstreamVersion(expected, has_revision) = u.arbitrary()?;
+            let string = expected.to_string();
+            let actual = UpstreamVersion::new(string.clone(), has_revision)
+                .inspect_err(|e| {
+                    panic!(
+                        "Failed to parse `{}` as `{}`: {:?}",
+                        string,
+                        std::any::type_name::<UpstreamVersion>(),
+                        e
+                    )
+                })
+                .unwrap();
+            assert_eq!(
+                expected, actual,
+                "expected = {expected:?}, actual = {actual:?}, string = {string:?}"
+            );
             Ok(())
         });
     }
 
     #[test]
-    fn debian_revisions() {
-        assert!(DebianRevision::new("#".into()).is_err());
-        assert!(DebianRevision::new("0-".into()).is_err());
-        assert!(DebianRevision::new("".into()).is_ok());
+    fn revision_symmetry() {
+        to_string_parse_symmetry::<Revision>();
+    }
+
+    #[test]
+    fn valid_package_version() {
+        arbtest(|u| {
+            let _value: Version = u.arbitrary()?;
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn revisions() {
+        assert!(Revision::new("#".into()).is_err());
+        assert!(Revision::new("0-".into()).is_err());
+        assert!(Revision::new("".into()).is_ok());
         assert_eq!(
-            DebianRevision::new("".into()).unwrap(),
-            DebianRevision::new("0".into()).unwrap()
+            Revision::new("".into()).unwrap(),
+            Revision::new("0".into()).unwrap()
         );
         assert_eq!(
             Ordering::Equal,
-            DebianRevision::new("".into())
+            Revision::new("".into())
                 .unwrap()
-                .cmp(&DebianRevision::new("0".into()).unwrap())
+                .cmp(&Revision::new("0".into()).unwrap())
         );
     }
 
     #[test]
-    fn valid_debian_revisions() {
+    fn valid_revisions() {
         arbtest(|u| {
-            let _value: DebianRevision = u.arbitrary()?;
+            let _value: Revision = u.arbitrary()?;
             Ok(())
         });
     }
@@ -371,26 +445,26 @@ mod tests {
         });
     }
 
-    impl<'a> Arbitrary<'a> for PackageVersion {
+    impl<'a> Arbitrary<'a> for Version {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            let ArbitraryUpstreamVersion(upstream_version, has_debian_revision) = u.arbitrary()?;
+            let ArbitraryUpstreamVersion(upstream_version, has_revision) = u.arbitrary()?;
             let version = Self {
-                epoch: u.arbitrary()?,
+                epoch: u.int_in_range(0..=u16::MAX as Epoch)?,
                 upstream_version,
-                debian_revision: if has_debian_revision {
+                revision: if has_revision {
                     u.arbitrary()?
                 } else {
-                    DebianRevision::new(String::new()).unwrap()
+                    Revision::new(String::new()).unwrap()
                 },
             };
             Ok(version)
         }
     }
 
-    impl<'a> Arbitrary<'a> for DebianRevision {
+    impl<'a> Arbitrary<'a> for Revision {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             let valid_chars = get_valid_chars();
-            let len = u.arbitrary_len::<char>()?.min(1);
+            let len = u.arbitrary_len::<char>()?.max(1);
             let mut string = String::with_capacity(len);
             for _ in 0..len {
                 string.push(*u.choose(&valid_chars)?);
@@ -404,9 +478,9 @@ mod tests {
 
     impl<'a> Arbitrary<'a> for ArbitraryUpstreamVersion {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-            let has_debian_revision: bool = u.arbitrary()?;
+            let has_revision: bool = u.arbitrary()?;
             let valid_first_chars: Vec<_> = ('0'..='9').collect();
-            let valid_chars = if has_debian_revision {
+            let valid_chars = if has_revision {
                 get_valid_chars_with_hyphen()
             } else {
                 get_valid_chars()
@@ -418,8 +492,8 @@ mod tests {
                 string.push(*u.choose(&valid_chars)?);
             }
             Ok(Self(
-                UpstreamVersion::new(string, has_debian_revision).unwrap(),
-                has_debian_revision,
+                UpstreamVersion::new(string, has_revision).unwrap(),
+                has_revision,
             ))
         }
     }

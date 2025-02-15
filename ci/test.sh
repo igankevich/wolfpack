@@ -1,11 +1,19 @@
 #!/bin/sh
 
+install_dependencies() {
+    if test "$GITHUB_ACTIONS" != "true"; then
+        return
+    fi
+    apt-get update -qq
+    apt-get install -y moreutils
+}
+
 test_integration() {
     cargo test-deb
 }
 
 cargo_test_lib() {
-    cargo test \
+    chronic cargo test \
         --workspace \
         --no-fail-fast \
         --lib \
@@ -13,14 +21,22 @@ cargo_test_lib() {
         -- "$@"
 }
 
-main() {
-    . ./ci/preamble.sh
+cargo_test_all() {
     export ARBTEST_BUDGET_MS=2000
+    unset RUST_TEST_THREADS
     DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-lib:latest" cargo_test_lib --nocapture
     export ARBTEST_BUDGET_MS=10000
     export RUST_TEST_THREADS=1
     DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-openwrt-2:latest" cargo_test_lib --nocapture --ignored opkg
     DOCKER_IMAGE="ghcr.io/igankevich/wolfpack-ci-debian:latest" cargo_test_lib --nocapture --ignored dpkg apt
+    unset ARBTEST_BUDGET_MS
+    unset RUST_TEST_THREADS
+}
+
+main() {
+    . ./ci/preamble.sh
+    install_dependencies
+    cargo_test_all
     #test_integration
 }
 

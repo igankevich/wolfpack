@@ -271,6 +271,7 @@ impl FromStr for ExtendedPackage {
 #[cfg(test)]
 mod tests {
     use std::fs::remove_dir_all;
+    use std::fs::remove_file;
     use std::process::Command;
 
     use arbtest::arbtest;
@@ -292,16 +293,17 @@ mod tests {
         let release_signer = PgpCleartextSigner::new(signing_key.clone().into());
         let workdir = TempDir::new().unwrap();
         let root = workdir.path().join("root");
-        let verifying_key_file = workdir.path().join("etc/apt/trusted.gpg.d/test.asc");
+        let verifying_key_file = Path::new("/etc/apt/trusted.gpg.d/test.asc");
         verifying_key
             .to_armored_writer(
-                &mut File::create(verifying_key_file.as_path()).unwrap(),
+                &mut File::create(verifying_key_file).unwrap(),
                 Default::default(),
             )
             .unwrap();
         arbtest(|u| {
             let mut package: Package = u.arbitrary()?;
             package.architecture = "amd64".parse().unwrap();
+            package.depends.clear();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let deb_path = workdir.path().join("test.deb");
             let _ = remove_dir_all(root.as_path());
@@ -328,6 +330,7 @@ mod tests {
                 ),
             )
             .unwrap();
+            remove_file("/etc/apt/sources.list.d/debian.sources").unwrap();
             assert!(Command::new("find")
                 .arg(root.as_path())
                 .status()

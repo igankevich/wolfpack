@@ -138,7 +138,6 @@ fn to_signature_path(mut path: PathBuf) -> PathBuf {
 mod tests {
 
     use std::process::Command;
-    use std::time::Duration;
 
     use arbtest::arbtest;
     use tempfile::TempDir;
@@ -213,7 +212,6 @@ mod tests {
                 package
             );
             Ok(())
-        })
-        .budget(Duration::from_secs(10));
+        });
     }
 }

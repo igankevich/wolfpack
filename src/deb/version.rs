@@ -346,7 +346,6 @@ mod tests {
 
     #[test]
     fn test_version_cmp() {
-        /*
         let v1 = UpstreamVersion("~~".into());
         let v2 = UpstreamVersion("~~a".into());
         let v3 = UpstreamVersion("~".into());
@@ -362,7 +361,6 @@ mod tests {
         assert!(v3 < v4);
         assert!(v3 < v5);
         assert!(v4 < v5);
-        */
         assert!(UpstreamVersion("3.0.7".into()) <= UpstreamVersion("3.0.15".into()))
     }
 
@@ -451,7 +449,7 @@ mod tests {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
             let ArbitraryUpstreamVersion(upstream_version, has_revision) = u.arbitrary()?;
             let version = Self {
-                epoch: u.arbitrary()?,
+                epoch: u.int_in_range(0..=u16::MAX as Epoch)?,
                 upstream_version,
                 revision: if has_revision {
                     u.arbitrary()?

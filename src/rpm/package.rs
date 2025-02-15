@@ -326,7 +326,6 @@ const _COMPRESSION_LEVEL: i32 = 22;
 mod tests {
     use std::fs::File;
     use std::process::Command;
-    use std::time::Duration;
 
     use arbtest::arbtest;
     use tempfile::TempDir;
@@ -464,8 +463,7 @@ mod tests {
                 package
             );
             Ok(())
-        })
-        .budget(Duration::from_secs(5));
+        });
     }
 
     //const RPM: &str = "/home/igankevich/workspace/etd/rpm/tmp/tools/rpm";

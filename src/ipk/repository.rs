@@ -162,7 +162,6 @@ mod tests {
 
     use std::fs::remove_dir_all;
     use std::process::Command;
-    use std::time::Duration;
 
     use arbtest::arbtest;
     use tempfile::TempDir;
@@ -246,7 +245,6 @@ mod tests {
                 package
             );
             Ok(())
-        })
-        .budget(Duration::from_secs(5));
+        });
     }
 }

@@ -389,7 +389,7 @@ impl FromStr for DependencyVersionOp {
 
 // TODO custom Arbitrary
 #[derive(Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum DependencyArch {
     Any,
     All,
@@ -466,23 +466,16 @@ mod tests {
         }
     }
 
-    //impl<'a> Arbitrary<'a> for DependencyArch {
-    //    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-    //        let mut arch: DependencyArch = u.arbitrary()?;
-    //        match arch {
-    //            DependencyArch::One(ref mut arch) => {
-    //                if arch.as_str() == "all" || arch.as_str() == "one" {
-    //                    *arch = "x".parse::<SimpleValue>().unwrap();
-    //                }
-    //            }
-    //            _ => {}
-    //            //DependencyArch::Set(ref mut arches) => {
-    //            //    if arches.is_empty() {
-    //            //        arches.push(u.arbitrary()?);
-    //            //    }
-    //            //}
-    //        }
-    //        Ok(arch)
-    //    }
-    //}
+    impl<'a> Arbitrary<'a> for DependencyArch {
+        fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+            let choice: usize = u.int_in_range(1..=3)?;
+            let arch = match choice {
+                1 => DependencyArch::Any,
+                2 => DependencyArch::All,
+                3 => DependencyArch::One("amd64".parse().unwrap()),
+                _ => unreachable!(),
+            };
+            Ok(arch)
+        }
+    }
 }

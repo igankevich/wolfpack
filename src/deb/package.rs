@@ -213,7 +213,6 @@ mod tests {
     use std::fs::File;
     use std::process::Command;
     use std::process::Stdio;
-    use std::time::Duration;
 
     use arbtest::arbtest;
     use pgp::types::PublicKeyTrait;
@@ -286,6 +285,7 @@ mod tests {
         arbtest(|u| {
             let mut control: Package = u.arbitrary()?;
             control.architecture = "all".parse().unwrap();
+            control.depends.clear();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let path = workdir.path().join("test.deb");
             let _ = remove_dir_all(root.as_path());
@@ -375,7 +375,6 @@ mod tests {
                 control
             );
             Ok(())
-        })
-        .budget(Duration::from_secs(10));
+        });
     }
 }

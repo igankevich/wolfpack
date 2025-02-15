@@ -81,7 +81,7 @@ impl Package {
                 continue;
             }
             //let entry_path = Path::new(".").join(entry_path);
-            let entry_path = Path::new("/tmp/rpm").join(entry_path);
+            //let entry_path = Path::new("/tmp/rpm").join(entry_path);
             let meta = entry.metadata()?;
             if let (Some(file_name), Some(parent)) = (
                 entry_path.file_name().and_then(|x| x.to_str()),

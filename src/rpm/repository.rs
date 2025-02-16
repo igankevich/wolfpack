@@ -21,6 +21,7 @@ use walkdir::WalkDir;
 
 use crate::hash::Hasher;
 use crate::hash::Sha256Hash;
+use crate::rpm::Arch;
 use crate::rpm::Package;
 use crate::rpm::PackageSigner;
 
@@ -273,7 +274,7 @@ pub mod xml {
         #[serde(rename = "@type")]
         pub kind: String,
         pub name: String,
-        pub arch: String,
+        pub arch: Arch,
         pub version: Version,
         pub checksum: Checksum,
         pub summary: String,
@@ -504,7 +505,7 @@ mod tests {
                 .write_armored(File::create(verifying_key_file.as_path()).unwrap())
                 .unwrap();
             let mut package: Package = u.arbitrary()?;
-            package.arch = "x86_64".into();
+            package.arch = Arch::X86_64;
             package.name = "test".into();
             package.version = "1.0.0".into();
             let directory: DirectoryOfFiles = u.arbitrary()?;

@@ -22,7 +22,7 @@ silent() {
 
 cargo_lints() {
     cargo fmt --all --check
-    cargo clippy --all-targets --all-features --workspace -- -D warnings
+    cargo clippy --quiet --all-targets --all-features --workspace -- -D warnings
 }
 
 cargo_test_lib() {

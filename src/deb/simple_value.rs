@@ -15,13 +15,17 @@ use crate::deb::PackageName;
 use crate::deb::Value;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize, Default)]
-#[serde(transparent)]
+#[serde(try_from = "String", into = "String")]
 pub struct SimpleValue(String);
 
 impl SimpleValue {
     pub fn new(value: String) -> Result<Self, Error> {
         validate_simple_value(&value)?;
         Ok(Self(value))
+    }
+
+    pub(crate) unsafe fn new_unchecked(value: String) -> Self {
+        Self(value)
     }
 
     pub fn as_str(&self) -> &str {
@@ -39,6 +43,13 @@ impl FromStr for SimpleValue {
     type Err = Error;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Self::new(value.to_string())
+    }
+}
+
+impl TryFrom<String> for SimpleValue {
+    type Error = Error;
+    fn try_from(other: String) -> Result<Self, Self::Error> {
+        other.parse()
     }
 }
 

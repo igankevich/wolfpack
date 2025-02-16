@@ -12,6 +12,7 @@ use std::time::SystemTime;
 use chrono::DateTime;
 use chrono::Utc;
 
+use crate::deb::Arch;
 use crate::deb::Error;
 use crate::deb::Fields;
 use crate::deb::Repository;
@@ -27,7 +28,7 @@ use crate::hash::Sha256Hash;
 pub struct Release {
     date: Option<SystemTime>,
     valid_until: Option<SystemTime>,
-    architectures: HashSet<SimpleValue>,
+    architectures: HashSet<Arch>,
     components: HashSet<SimpleValue>,
     suite: SimpleValue,
     md5: HashMap<PathBuf, (Md5Hash, u64)>,

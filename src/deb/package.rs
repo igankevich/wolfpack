@@ -9,9 +9,12 @@ use deko::bufread::AnyDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use normalize_path::NormalizePath;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::archive::ArchiveRead;
 use crate::archive::ArchiveWrite;
+use crate::deb::Arch;
 use crate::deb::Dependencies;
 use crate::deb::Error;
 use crate::deb::Fields;
@@ -26,20 +29,26 @@ use crate::deb::DEBIAN_BINARY_CONTENTS;
 use crate::deb::DEBIAN_BINARY_FILE_NAME;
 use crate::sign::Signer;
 use crate::sign::Verifier;
+use crate::wolf;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
 pub struct Package {
     pub name: PackageName,
     pub version: Version,
     pub license: SimpleValue,
-    pub architecture: SimpleValue,
+    pub architecture: Arch,
     pub maintainer: SimpleValue,
     pub description: MultilineValue,
+    #[serde(default)]
     pub installed_size: Option<u64>,
+    #[serde(default)]
     pub provides: Provides,
+    #[serde(default)]
     pub depends: Dependencies,
+    #[serde(default)]
     pub homepage: Option<SimpleValue>,
+    #[serde(flatten)]
     pub other: Fields,
 }
 
@@ -150,6 +159,10 @@ impl Package {
         self.name.as_str().to_lowercase().contains(keyword)
             || self.description.as_str().to_lowercase().contains(keyword)
     }
+
+    pub fn file_name(&self) -> String {
+        format!("{}_{}_{}.deb", self.name, self.version, self.architecture)
+    }
 }
 
 impl Display for Package {
@@ -187,7 +200,7 @@ impl FromStr for Package {
             name: fields.remove_any("package")?.try_into()?,
             version: fields.remove_any("version")?.try_into()?,
             license: fields.remove_some("license")?.unwrap_or_default(),
-            architecture: fields.remove_any("architecture")?.try_into()?,
+            architecture: fields.remove_any("architecture")?.as_str().parse()?,
             description: fields.remove_any("description")?.try_into()?,
             maintainer: fields.remove_any("maintainer")?.try_into()?,
             installed_size: fields.remove_some("installed-size")?,
@@ -197,6 +210,25 @@ impl FromStr for Package {
             other: fields,
         };
         Ok(control)
+    }
+}
+
+impl TryFrom<wolf::Metadata> for Package {
+    type Error = Error;
+    fn try_from(other: wolf::Metadata) -> Result<Self, Self::Error> {
+        Ok(Self {
+            name: other.name.parse()?,
+            version: other.version.parse()?,
+            architecture: other.arch.parse()?,
+            description: other.description.into(),
+            homepage: Some(other.homepage.parse()?),
+            license: other.license.parse()?,
+            depends: Default::default(),
+            provides: Default::default(),
+            maintainer: Default::default(),
+            other: Default::default(),
+            installed_size: Default::default(),
+        })
     }
 }
 

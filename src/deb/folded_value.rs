@@ -5,10 +5,14 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::io::ErrorKind;
 
+use serde::Deserialize;
+use serde::Serialize;
+
 use crate::deb::Error;
 use crate::deb::SimpleValue;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct FoldedValue(String);
 
 impl FoldedValue {

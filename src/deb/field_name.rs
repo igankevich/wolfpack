@@ -5,9 +5,14 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::str::FromStr;
 
-use crate::deb::Error;
+use serde::Deserialize;
+use serde::Serialize;
 
-#[derive(Clone, Debug)]
+use crate::deb::Error;
+use crate::macros::define_try_from_string_from_string;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct FieldName(String);
 
 impl FieldName {
@@ -73,6 +78,8 @@ impl FromStr for FieldName {
         Self::try_from(value.to_string())
     }
 }
+
+define_try_from_string_from_string!(FieldName);
 
 fn is_valid_char(ch: &u8) -> bool {
     (b'!'..=b'9').contains(ch) || (b';'..=b'~').contains(ch)

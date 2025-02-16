@@ -1,3 +1,4 @@
+mod arch;
 mod entry;
 mod header;
 mod package;
@@ -7,6 +8,7 @@ mod signer;
 mod test;
 mod value;
 
+pub use self::arch::*;
 pub use self::entry::*;
 pub use self::header::*;
 pub use self::package::*;

@@ -1,3 +1,4 @@
+mod builder;
 mod config;
 mod db;
 mod deb;
@@ -7,6 +8,7 @@ mod logger;
 mod repo;
 mod table;
 
+use self::builder::*;
 use self::config::*;
 use self::download::*;
 use self::error::*;
@@ -16,6 +18,7 @@ use self::table::*;
 
 use clap::Parser;
 use clap::Subcommand;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -33,8 +36,12 @@ enum Command {
     Pull,
     /// Find packages.
     Search(SearchArgs),
+    /// Install an existing package.
     Install(InstallArgs),
+    /// Resolve dependencies.
     Resolve(ResolveArgs),
+    /// Build a new package.
+    Build(BuildArgs),
 }
 
 #[derive(clap::Args)]
@@ -68,6 +75,21 @@ struct ResolveArgs {
     dependencies: Vec<String>,
 }
 
+#[derive(clap::Args)]
+struct BuildArgs {
+    /// Package metadata file.
+    #[clap(value_name = "METADATA-FILE")]
+    metadata_file: PathBuf,
+
+    /// Directory with package contents.
+    #[clap(value_name = "ROOTFS-DIRECTORY")]
+    rootfs_dir: PathBuf,
+
+    /// Output directory.
+    #[clap(value_name = "OUTPUT-DIRECTORY")]
+    output_dir: PathBuf,
+}
+
 fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
     do_main().inspect_err(|e| eprintln!("{e}"))
 }
@@ -81,11 +103,12 @@ fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Command::Search(more_args) => search(config, more_args),
         Command::Install(more_args) => install(config, more_args),
         Command::Resolve(more_args) => resolve(config, more_args),
+        Command::Build(more_args) => build(config, more_args),
     }
 }
 
 fn pull(mut config: Config) -> Result<ExitCode, Box<dyn std::error::Error>> {
-    let rt = tokio::runtime::Builder::new_multi_thread()
+    let rt = tokio::runtime::Builder::new_current_thread()
         .thread_name("tokio")
         .enable_all()
         .build()?;
@@ -133,6 +156,18 @@ fn resolve(mut config: Config, args: ResolveArgs) -> Result<ExitCode, Box<dyn st
         for (name, repo) in repos.iter_mut() {
             repo.resolve(&config, name.as_str(), args.dependencies.clone())?;
         }
+        Ok(ExitCode::SUCCESS)
+    })
+}
+
+fn build(_config: Config, args: BuildArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let _guard = rt.enter();
+    rt.block_on(async {
+        let builder = PackageBuilder::new(HashSet::from_iter(PackageFormat::all().iter().copied()));
+        builder.build(&args.metadata_file, &args.rootfs_dir, &args.output_dir)?;
         Ok(ExitCode::SUCCESS)
     })
 }

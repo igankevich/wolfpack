@@ -13,6 +13,7 @@ use std::str::FromStr;
 
 use walkdir::WalkDir;
 
+use crate::deb::Arch;
 use crate::deb::DependencyChoice;
 use crate::deb::Error;
 use crate::deb::Package;
@@ -27,7 +28,7 @@ use crate::hash::Sha256Hash;
 use crate::sign::PgpCleartextSigner;
 
 pub struct Repository {
-    packages: HashMap<SimpleValue, PerArchPackages>,
+    packages: HashMap<Arch, PerArchPackages>,
 }
 
 impl Repository {
@@ -41,7 +42,7 @@ impl Repository {
         P: AsRef<Path>,
         P2: AsRef<Path>,
     {
-        let mut packages: HashMap<SimpleValue, PerArchPackages> = HashMap::new();
+        let mut packages: HashMap<Arch, PerArchPackages> = HashMap::new();
         let mut push_package = |path: &Path| -> Result<(), Error> {
             let mut reader = MultiHashReader::new(File::open(path)?);
             let (package, _data) = Package::read(reader.by_ref(), verifier)?;
@@ -62,7 +63,7 @@ impl Repository {
                 filename,
             };
             packages
-                .entry(package.inner.architecture.clone())
+                .entry(package.inner.architecture)
                 .or_insert_with(|| PerArchPackages {
                     packages: Vec::new(),
                 })
@@ -125,12 +126,12 @@ impl Repository {
         Ok(())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&SimpleValue, &PerArchPackages)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&Arch, &PerArchPackages)> {
         self.packages.iter()
     }
 
-    pub fn architectures(&self) -> HashSet<SimpleValue> {
-        self.packages.keys().cloned().collect()
+    pub fn architectures(&self) -> HashSet<Arch> {
+        self.packages.keys().copied().collect()
     }
 }
 

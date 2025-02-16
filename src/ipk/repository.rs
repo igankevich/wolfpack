@@ -57,7 +57,7 @@ impl Repository {
                 filename,
             };
             packages
-                .entry(control.control.architecture.clone())
+                .entry(control.control.architecture.into())
                 .or_insert_with(|| PerArchPackages {
                     packages: Vec::new(),
                 })

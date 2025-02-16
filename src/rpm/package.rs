@@ -21,6 +21,7 @@ use crate::hash::Sha256Reader;
 use crate::rpm::get_zeroes;
 use crate::rpm::pad;
 use crate::rpm::xml;
+use crate::rpm::Arch;
 use crate::rpm::Entry;
 use crate::rpm::EntryIo;
 use crate::rpm::HashAlgorithm;
@@ -41,7 +42,7 @@ pub struct Package {
     pub description: String,
     pub license: String,
     pub url: String,
-    pub arch: String,
+    pub arch: Arch,
 }
 
 impl Package {
@@ -237,7 +238,7 @@ impl TryFrom<Package> for HashMap<Tag, Entry> {
             License(CString::new(other.license).map_err(Error::other)?).into(),
             Url(CString::new(other.url).map_err(Error::other)?).into(),
             Os(c"linux".into()).into(),
-            Arch(CString::new(other.arch).map_err(Error::other)?).into(),
+            Arch(CString::new(other.arch.as_str()).map_err(Error::other)?).into(),
             PayloadFormat(c"cpio".into()).into(),
             PayloadCompressor(c"gzip".into()).into(),
         ]
@@ -270,7 +271,8 @@ impl TryFrom<Header<Entry>> for Package {
                 .map_err(Error::other)?,
             arch: get_entry!(entries, Arch)
                 .into_string()
-                .map_err(Error::other)?,
+                .map_err(Error::other)?
+                .parse()?,
         })
     }
 }
@@ -383,7 +385,7 @@ mod tests {
         eprintln!("added public key");
         arbtest(|u| {
             let mut package: Package = u.arbitrary()?;
-            package.arch = "x86_64".into();
+            package.arch = Arch::X86_64;
             package.name = "test".into();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             package
@@ -483,8 +485,6 @@ mod tests {
             let license = valid_chars.random_string(&mut rng, len);
             let len = rng.gen_range(1..=10);
             let url = valid_chars.random_string(&mut rng, len);
-            let len = rng.gen_range(1..=10);
-            let arch = valid_chars.random_string(&mut rng, len);
             Ok(Self {
                 name,
                 version,
@@ -492,7 +492,7 @@ mod tests {
                 description,
                 license,
                 url,
-                arch,
+                arch: u.arbitrary()?,
             })
         }
     }

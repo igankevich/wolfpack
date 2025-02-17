@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::wolf::Arch;
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Metadata {
@@ -9,5 +11,5 @@ pub struct Metadata {
     pub description: String,
     pub homepage: String,
     pub license: String,
-    pub arch: String,
+    pub arch: Arch,
 }

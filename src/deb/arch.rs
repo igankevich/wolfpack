@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use crate::deb::SimpleValue;
 use crate::deb::Value;
 use crate::macros::define_arch_enum;
+use crate::macros::define_arch_from;
 
 define_arch_enum! {
     Arch,
@@ -15,6 +16,20 @@ define_arch_enum! {
     (Mipsel, "mipsel"),
     (Ppc64el, "ppc64el"),
     (S390x, "s390x"),
+}
+
+define_arch_from! {
+    crate::wolf::Arch,
+    Arch,
+    (Amd64, Amd64),
+    (Arm64, Arm64),
+    (Armel, Armel),
+    (Armhf, Armhf),
+    (I386, I386),
+    (Mips64el, Mips64el),
+    (Mipsel, Mipsel),
+    (Ppc64el, Ppc64el),
+    (S390x, S390x),
 }
 
 impl TryFrom<Value> for HashSet<Arch> {

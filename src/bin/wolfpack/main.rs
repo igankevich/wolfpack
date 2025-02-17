@@ -4,6 +4,7 @@ mod db;
 mod deb;
 mod download;
 mod error;
+mod key;
 mod logger;
 mod repo;
 mod table;
@@ -12,10 +13,13 @@ use self::builder::*;
 use self::config::*;
 use self::download::*;
 use self::error::*;
+use self::key::*;
 use self::logger::*;
 use self::repo::*;
 use self::table::*;
 
+use base58::FromBase58;
+use base58::ToBase58;
 use clap::Parser;
 use clap::Subcommand;
 use std::collections::HashSet;
@@ -42,6 +46,8 @@ enum Command {
     Resolve(ResolveArgs),
     /// Build a new package.
     Build(BuildArgs),
+    /// Generate signing key.
+    Key(KeyArgs),
 }
 
 #[derive(clap::Args)]
@@ -90,6 +96,9 @@ struct BuildArgs {
     output_dir: PathBuf,
 }
 
+#[derive(clap::Args)]
+struct KeyArgs {}
+
 fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
     do_main().inspect_err(|e| eprintln!("{e}"))
 }
@@ -104,6 +113,7 @@ fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Command::Install(more_args) => install(config, more_args),
         Command::Resolve(more_args) => resolve(config, more_args),
         Command::Build(more_args) => build(config, more_args),
+        Command::Key(more_args) => key(config, more_args),
     }
 }
 
@@ -161,13 +171,47 @@ fn resolve(mut config: Config, args: ResolveArgs) -> Result<ExitCode, Box<dyn st
 }
 
 fn build(_config: Config, args: BuildArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    let entropy = read_entropy()?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     let _guard = rt.enter();
     rt.block_on(async {
+        let gen = SigningKeyGenerator::new(&entropy);
         let builder = PackageBuilder::new(HashSet::from_iter(PackageFormat::all().iter().copied()));
-        builder.build(&args.metadata_file, &args.rootfs_dir, &args.output_dir)?;
+        builder.build(
+            &args.metadata_file,
+            &args.rootfs_dir,
+            &args.output_dir,
+            &gen,
+        )?;
         Ok(ExitCode::SUCCESS)
     })
 }
+
+fn key(_config: Config, _args: KeyArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    let entropy = generate_entropy()?;
+    println!("{}", entropy.to_base58());
+    Ok(ExitCode::SUCCESS)
+}
+
+fn read_entropy() -> Result<Entropy, Box<dyn std::error::Error>> {
+    use std::env::VarError::*;
+    let s = match std::env::var(ENTROPY_ENV) {
+        Ok(value) => value,
+        Err(NotPresent) => {
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line)?;
+            line
+        }
+        Err(e @ NotUnicode(..)) => return Err(e.into()),
+    };
+    let entropy = s
+        .from_base58()
+        .map_err(|_| "Invalid entropy string")?
+        .try_into()
+        .map_err(|_| "Invalid entropy string")?;
+    Ok(entropy)
+}
+
+const ENTROPY_ENV: &str = "WOLFPACK_ENTROPY";

@@ -16,6 +16,7 @@ include = ["**/*.rs", "**/*.sql", "Cargo.toml", "README.md", "LICENSE"]
 ar = "0.9.0"
 async-trait = "0.1.86"
 base16ct = { version = "0.2.0", features = ["std"] }
+base58 = "0.2.0"
 base64ct = { version = "1.6.0", features = ["std"] }
 blake2b_simd = "1.0.3"
 bzip2 = "0.5.1"
@@ -26,11 +27,13 @@ cpio = { version = "0.2.4", package = "kpea" }
 crc = "3.2.1"
 deko = "0.4.0"
 der = { version = "0.7.9", features = ["std", "zeroize"], default-features = false }
+ed25519-dalek = "2.1.1"
 elf = "0.7.4"
 flate2 = "1.0.35"
 futures = "0.3.31"
 futures-util = "0.3.31"
 hex = "0.4.3"
+hkdf = "0.12.4"
 indicatif = "0.17.11"
 ksign = "0.3.0"
 log = "0.4.25"

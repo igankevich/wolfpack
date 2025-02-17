@@ -219,7 +219,7 @@ impl TryFrom<wolf::Metadata> for Package {
         Ok(Self {
             name: other.name.parse()?,
             version: other.version.parse()?,
-            architecture: other.arch.parse()?,
+            architecture: other.arch.into(),
             description: other.description.into(),
             homepage: Some(other.homepage.parse()?),
             license: other.license.parse()?,

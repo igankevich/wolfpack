@@ -18,8 +18,6 @@ use self::logger::*;
 use self::repo::*;
 use self::table::*;
 
-use base58::FromBase58;
-use base58::ToBase58;
 use clap::Parser;
 use clap::Subcommand;
 use std::collections::HashSet;
@@ -171,13 +169,13 @@ fn resolve(mut config: Config, args: ResolveArgs) -> Result<ExitCode, Box<dyn st
 }
 
 fn build(_config: Config, args: BuildArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
-    let entropy = read_entropy()?;
+    let master_secret_key = read_entropy()?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     let _guard = rt.enter();
     rt.block_on(async {
-        let gen = SigningKeyGenerator::new(&entropy);
+        let gen = SigningKeyGenerator::new(&master_secret_key);
         let builder = PackageBuilder::new(HashSet::from_iter(PackageFormat::all().iter().copied()));
         builder.build(
             &args.metadata_file,
@@ -190,28 +188,25 @@ fn build(_config: Config, args: BuildArgs) -> Result<ExitCode, Box<dyn std::erro
 }
 
 fn key(_config: Config, _args: KeyArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
-    let entropy = generate_entropy()?;
-    println!("{}", entropy.to_base58());
+    let master_secret_key = MasterSecretKey::generate();
+    println!("{}", master_secret_key);
     Ok(ExitCode::SUCCESS)
 }
 
-fn read_entropy() -> Result<Entropy, Box<dyn std::error::Error>> {
-    use std::env::VarError::*;
-    let s = match std::env::var(ENTROPY_ENV) {
-        Ok(value) => value,
-        Err(NotPresent) => {
+fn read_entropy() -> Result<MasterSecretKey, Box<dyn std::error::Error>> {
+    let s = match std::env::var_os(WOLFPACK_SECRET_KEY_FILE_ENV) {
+        Some(file) => std::fs::read_to_string(&file).map_err(|e| Error::file_read(file, e))?,
+        None => {
             let mut line = String::new();
             std::io::stdin().read_line(&mut line)?;
             line
         }
-        Err(e @ NotUnicode(..)) => return Err(e.into()),
     };
-    let entropy = s
-        .from_base58()
-        .map_err(|_| "Invalid entropy string")?
-        .try_into()
-        .map_err(|_| "Invalid entropy string")?;
-    Ok(entropy)
+    let master_secret_key: MasterSecretKey = s
+        .trim()
+        .parse()
+        .map_err(|_| "Invalid master secret key string")?;
+    Ok(master_secret_key)
 }
 
-const ENTROPY_ENV: &str = "WOLFPACK_ENTROPY";
+const WOLFPACK_SECRET_KEY_FILE_ENV: &str = "WOLFPACK_SECRET_KEY_FILE";

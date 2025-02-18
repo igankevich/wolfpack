@@ -45,6 +45,14 @@ pub enum Error {
     Join(#[from] tokio::task::JoinError),
     #[error("Signing error")]
     Sign,
+    #[error("Failed to read `{0}`: {1}")]
+    FileRead(PathBuf, std::io::Error),
+}
+
+impl Error {
+    pub fn file_read(file: impl Into<PathBuf>, error: std::io::Error) -> Self {
+        Self::FileRead(file.into(), error)
+    }
 }
 
 impl From<ErrorKind> for Error {

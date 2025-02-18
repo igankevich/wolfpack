@@ -23,6 +23,12 @@ pub type PackageSigner = SigningKey;
 pub struct SigningKey(pub(crate) secp256k1::SecretKey);
 
 impl SigningKey {
+    pub fn from_bytes(bytes: &[u8; 32]) -> Result<Self, Error> {
+        Ok(Self(
+            secp256k1::SecretKey::from_byte_array(bytes).map_err(|_| Error)?,
+        ))
+    }
+
     pub fn generate() -> (Self, PackageVerifier) {
         let (signing_key, verifying_key) = generate_keypair(&mut OsRng);
         (Self(signing_key), VerifyingKey(verifying_key))

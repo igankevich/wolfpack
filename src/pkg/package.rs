@@ -96,6 +96,10 @@ impl Package {
         }
         Err(std::io::Error::other("missing file: +COMPACT_MANIFEST"))
     }
+
+    pub fn file_name(&self) -> String {
+        format!("{}-{}.pkg", self.manifest.name, self.manifest.version)
+    }
 }
 
 const COMPRESSION_LEVEL: i32 = 22;

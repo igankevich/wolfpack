@@ -32,6 +32,7 @@ use crate::rpm::SignatureEntry;
 use crate::rpm::SignatureTag;
 use crate::rpm::Tag;
 use crate::rpm::ALIGN;
+use crate::wolf;
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq, Clone))]
@@ -223,6 +224,10 @@ impl Package {
             },
         }
     }
+
+    pub fn file_name(&self) -> String {
+        format!("{}-{}.{}.rpm", self.name, self.version, self.arch)
+    }
 }
 
 impl TryFrom<Package> for HashMap<Tag, Entry> {
@@ -296,6 +301,21 @@ macro_rules! get_entry {
 }
 
 use get_entry;
+
+impl TryFrom<wolf::Metadata> for Package {
+    type Error = Error;
+    fn try_from(other: wolf::Metadata) -> Result<Self, Self::Error> {
+        Ok(Self {
+            name: other.name,
+            version: other.version,
+            arch: other.arch.try_into()?,
+            summary: other.description.clone(),
+            description: other.description,
+            url: other.homepage,
+            license: other.license,
+        })
+    }
+}
 
 pub struct Signatures {
     pub signature_v3: Vec<u8>,

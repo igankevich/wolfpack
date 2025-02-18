@@ -35,7 +35,8 @@ futures-util = "0.3.31"
 hex = "0.4.3"
 hkdf = "0.12.4"
 indicatif = "0.17.11"
-ksign = "0.3.0"
+#ksign = "0.3.0"
+ksign = { path = "../ksign" }
 log = "0.4.25"
 md5 = "0.7.0"
 normalize-path = "0.2.1"
@@ -44,6 +45,7 @@ pgp = "0.15.0"
 pkcs8 = { version = "0.10.2", features = ["std", "encryption"], default-features = false }
 quick-xml = { version = "0.37.2", features = ["serialize"], default-features = false }
 rand = "0.8.5"
+rand_chacha = "0.3.1"
 rand_mt = "4.2.2"
 reqwest = { version = "0.12.12", features = ["native-tls-vendored"] }
 rusqlite = { version = "0.32.1", features = ["functions"] }

@@ -8,8 +8,10 @@ use std::str::FromStr;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::deb::Error;
 use crate::deb::PackageName;
 use crate::deb::Version;
+use crate::wolf;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
@@ -84,6 +86,32 @@ impl FromStr for Manifest {
     type Err = serde_json::Error;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         serde_json::from_str(value)
+    }
+}
+
+impl TryFrom<wolf::Metadata> for CompactManifest {
+    type Error = Error;
+    fn try_from(other: wolf::Metadata) -> Result<Self, Self::Error> {
+        Ok(Self {
+            name: other.name.parse()?,
+            version: other.version.parse()?,
+            arch: other.arch.to_string(),
+            desc: other.description,
+            www: other.homepage,
+            licenses: vec![other.license],
+            categories: Default::default(),
+            annotations: Default::default(),
+            deps: Default::default(),
+            comment: Default::default(),
+            maintainer: Default::default(),
+            flatsize: Default::default(),
+            origin: Default::default(),
+            prefix: Default::default(),
+            shlibs_provided: Default::default(),
+            shlibs_required: Default::default(),
+            abi: Default::default(),
+            licenselogic: LicenseLogic::Single,
+        })
     }
 }
 

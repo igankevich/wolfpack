@@ -24,6 +24,7 @@ use crate::ipk::PackageSigner;
 use crate::ipk::PackageVerifier;
 use crate::sign::SignatureWriter;
 use crate::sign::VerifyingReader;
+use crate::wolf;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
@@ -32,8 +33,8 @@ pub struct Package(deb::Package);
 impl Package {
     pub fn write<P1: AsRef<Path>, P2: Into<PathBuf>>(
         &self,
-        directory: P1,
         output_file: P2,
+        directory: P1,
         signer: &PackageSigner,
     ) -> Result<(), std::io::Error> {
         let output_file: PathBuf = output_file.into();
@@ -90,8 +91,13 @@ impl Package {
             })?
             .ok_or_else(|| Error::MissingFile("missing control.tar*".into()))
     }
+
+    pub fn file_name(&self) -> String {
+        format!("{}_{}_{}.ipk", self.name, self.version, self.architecture)
+    }
 }
 
+// TODO remove derefs
 impl Deref for Package {
     type Target = deb::Package;
 
@@ -115,6 +121,13 @@ impl Display for Package {
 impl From<deb::Package> for Package {
     fn from(other: deb::Package) -> Self {
         Self(other)
+    }
+}
+
+impl TryFrom<wolf::Metadata> for Package {
+    type Error = Error;
+    fn try_from(other: wolf::Metadata) -> Result<Self, Self::Error> {
+        Ok(Self(other.try_into()?))
     }
 }
 
@@ -158,8 +171,8 @@ mod tests {
             let file_path = workdir.path().join("test.ipk");
             Package::write(
                 &control,
-                directory.path(),
                 file_path.as_path(),
+                directory.path(),
                 &signing_key,
             )
             .unwrap();
@@ -189,7 +202,7 @@ mod tests {
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let package_path = workdir.path().join("test.ipk");
             package
-                .write(directory.path(), package_path.as_path(), &signing_key)
+                .write(package_path.as_path(), directory.path(), &signing_key)
                 .unwrap();
             assert!(
                 Command::new("opkg")

@@ -8,3 +8,5 @@ pub mod xml {
     pub use super::content_types::*;
     pub use super::manifest::*;
 }
+
+pub use self::package::*;

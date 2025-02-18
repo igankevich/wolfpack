@@ -44,7 +44,7 @@ pub enum Error {
     #[error("Task error: {0}")]
     Join(#[from] tokio::task::JoinError),
     #[error("Signing error")]
-    Sign(wolfpack::sign::Error),
+    Sign,
 }
 
 impl From<ErrorKind> for Error {
@@ -60,7 +60,7 @@ impl From<log::SetLoggerError> for Error {
 }
 
 impl From<wolfpack::sign::Error> for Error {
-    fn from(other: wolfpack::sign::Error) -> Self {
-        Self::Sign(other)
+    fn from(_: wolfpack::sign::Error) -> Self {
+        Self::Sign
     }
 }

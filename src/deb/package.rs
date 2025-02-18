@@ -59,8 +59,8 @@ impl Package {
 
     pub fn write<W: Write, P: AsRef<Path>>(
         &self,
-        directory: P,
         writer: W,
+        directory: P,
         signer: &PackageSigner,
     ) -> Result<(), std::io::Error> {
         let data = TarGz::from_directory(directory, gz_writer())?.finish()?;
@@ -291,7 +291,7 @@ mod tests {
             let control: Package = u.arbitrary()?;
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let mut buf: Vec<u8> = Vec::new();
-            control.write(directory.path(), &mut buf, &signer).unwrap();
+            control.write(&mut buf, directory.path(), &signer).unwrap();
             let (actual, ..) = Package::read(&buf[..], &verifier).unwrap();
             similar_asserts::assert_eq!(control, actual);
             Ok(())
@@ -350,8 +350,8 @@ mod tests {
                 .unwrap();
             control
                 .write(
-                    directory.path(),
                     File::create(path.as_path()).unwrap(),
+                    directory.path(),
                     &signer,
                 )
                 .unwrap();

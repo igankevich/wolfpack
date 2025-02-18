@@ -312,8 +312,8 @@ mod tests {
             let package_name = package.name();
             package
                 .write(
-                    directory.path(),
                     File::create(deb_path.as_path()).unwrap(),
+                    directory.path(),
                     &signer,
                 )
                 .unwrap();

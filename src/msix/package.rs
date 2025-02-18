@@ -12,6 +12,7 @@ use zip::write::ZipWriter;
 
 use crate::hash::Sha256Reader;
 use crate::msix::xml;
+use crate::wolf;
 
 #[derive(Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Debug))]
@@ -137,6 +138,25 @@ impl Package {
         manifest.write(writer.by_ref())?;
         writer.finish()?;
         Ok(())
+    }
+
+    pub fn file_name(&self) -> String {
+        // TODO arch?
+        format!("{}_{}.msix", self.name, self.version)
+    }
+}
+
+impl TryFrom<wolf::Metadata> for Package {
+    type Error = Error;
+    fn try_from(other: wolf::Metadata) -> Result<Self, Self::Error> {
+        Ok(Self {
+            name: other.name,
+            version: other.version,
+            description: other.description,
+            publisher: Default::default(),
+            executable: Default::default(),
+            logo: Default::default(),
+        })
     }
 }
 

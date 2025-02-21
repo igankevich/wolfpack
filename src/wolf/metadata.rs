@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use crate::wolf::Arch;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Metadata {
     pub name: String,

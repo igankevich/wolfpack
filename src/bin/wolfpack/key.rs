@@ -125,13 +125,16 @@ impl SigningKeyGenerator {
         self.hkdf
             .expand(&INFO_PKG, &mut signing_key)
             .expect("The length is valid");
-        let (signing_key, verifying_key) = loop {
+        const MAX_ITERATIONS: usize = 1000;
+        for _ in 0..MAX_ITERATIONS {
             if let Ok(signing_key) = pkg::SigningKey::from_bytes(&signing_key) {
                 let verifying_key = signing_key.verifying_key();
-                break (signing_key, verifying_key);
+                return Ok((signing_key, verifying_key));
             }
-        };
-        Ok((signing_key, verifying_key))
+        }
+        Err(Error::Other(format!(
+            "Failed to generate `pkg` secret key after {MAX_ITERATIONS} iterations"
+        )))
     }
 
     pub fn macos(&self) -> Result<(macos::SigningKey, macos::VerifyingKey), Error> {

@@ -16,6 +16,8 @@ define_arch_enum! {
     (Mipsel, "mipsel"),
     (Ppc64el, "ppc64el"),
     (S390x, "s390x"),
+    (All, "all"),
+    (Any, "any"),
 }
 
 define_arch_from! {

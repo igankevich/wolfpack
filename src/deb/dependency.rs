@@ -21,6 +21,10 @@ use crate::macros::define_try_from_string_from_string;
 pub struct Dependencies(Vec<DependencyChoice>);
 
 impl Dependencies {
+    pub fn new(deps: Vec<DependencyChoice>) -> Self {
+        Self(deps)
+    }
+
     pub fn into_inner(self) -> Vec<DependencyChoice> {
         self.0
     }

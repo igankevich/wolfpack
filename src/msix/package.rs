@@ -16,7 +16,6 @@ use crate::wolf;
 
 #[derive(Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Debug))]
-#[allow(unused)]
 pub struct Package {
     pub name: String,
     pub description: String,
@@ -27,7 +26,6 @@ pub struct Package {
 }
 
 impl Package {
-    #[allow(unused)]
     pub fn write<P2: AsRef<Path>, P: AsRef<Path>>(
         &self,
         file: P2,

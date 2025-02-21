@@ -47,6 +47,8 @@ pub enum Error {
     Sign,
     #[error("Failed to read `{0}`: {1}")]
     FileRead(PathBuf, std::io::Error),
+    #[error("{0}")]
+    Other(String),
 }
 
 impl Error {

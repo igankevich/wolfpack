@@ -197,7 +197,7 @@ mod tests {
                 .unwrap();
             Command::new("find").arg(workdir.path()).status().unwrap();
             std::fs::write(
-                "/etc/opkg/customfeeds.conf",
+                "/etc/opkg/test.conf",
                 format!("src/gz test file://{}\n", repo_dir.display()),
             )
             .unwrap();
@@ -205,7 +205,7 @@ mod tests {
                 .write_to_file(format!("/etc/opkg/keys/{}", verifying_key.fingerprint()))
                 .unwrap();
             Command::new("cat")
-                .arg("/etc/opkg/customfeeds.conf")
+                .arg("/etc/opkg/test.conf")
                 .status()
                 .unwrap();
             Command::new("sh")

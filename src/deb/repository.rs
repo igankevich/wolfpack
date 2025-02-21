@@ -11,20 +11,27 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use pgp::types::PublicKeyTrait;
+use tempfile::TempDir;
 use walkdir::WalkDir;
 
 use crate::deb::Arch;
 use crate::deb::DependencyChoice;
 use crate::deb::Error;
+use crate::deb::MultilineValue;
 use crate::deb::Package;
+use crate::deb::PackageSigner;
 use crate::deb::PackageVerifier;
 use crate::deb::Release;
 use crate::deb::SimpleValue;
+use crate::deb::VerifyingKey;
+use crate::deb::Version;
 use crate::hash::AnyHash;
 use crate::hash::Md5Hash;
 use crate::hash::MultiHashReader;
 use crate::hash::Sha1Hash;
 use crate::hash::Sha256Hash;
+use crate::hash::UpperHex;
 use crate::sign::PgpCleartextSigner;
 
 pub struct Repository {
@@ -124,6 +131,63 @@ impl Repository {
             )
             .map_err(|e| Error::other(e.to_string()))?;
         Ok(())
+    }
+
+    pub fn release_package(
+        suite: &SimpleValue,
+        version: Version,
+        description: MultilineValue,
+        verifying_key: &VerifyingKey,
+        url: String,
+        signer: &PackageSigner,
+        output_dir: &Path,
+    ) -> Result<PathBuf, Error> {
+        let workdir = TempDir::new()?;
+        let rootfs_dir = workdir.path();
+        let fingerprint = verifying_key.fingerprint();
+        // Write verifying key.
+        let verifying_key_file = rootfs_dir.join(format!(
+            "etc/apt/trusted.gpg.d/{}-{}.asc",
+            suite,
+            UpperHex(fingerprint.as_bytes())
+        ));
+        create_dir_all(verifying_key_file.parent().expect("Parent dir exists"))?;
+        verifying_key
+            .to_armored_writer(&mut File::create(&verifying_key_file)?, Default::default())
+            .map_err(std::io::Error::other)?;
+        // Write repository configuration.
+        let sources_list_file = rootfs_dir.join(format!("etc/apt/sources.list.d/{}.list", suite));
+        create_dir_all(sources_list_file.parent().expect("Parent dir exists"))?;
+        std::fs::write(
+            &sources_list_file,
+            format!(
+                "deb [signed-by={}] {url} {suite}/\n",
+                UpperHex(fingerprint.as_bytes()),
+            ),
+        )?;
+        // Generate the package.
+        let package = Package {
+            name: format!("{}-repo", suite).parse()?,
+            version,
+            architecture: Arch::All,
+            description,
+            // TODO
+            license: Default::default(),
+            maintainer: Default::default(),
+            installed_size: Default::default(),
+            provides: Default::default(),
+            depends: if url.starts_with("https://") {
+                // TODO add other types
+                "apt-transport-https".parse()?
+            } else {
+                Default::default()
+            },
+            homepage: Default::default(),
+            other: Default::default(),
+        };
+        let repo_package_file = output_dir.join(package.file_name());
+        package.write(File::create(&repo_package_file)?, rootfs_dir, signer)?;
+        Ok(repo_package_file)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&Arch, &PerArchPackages)> {
@@ -276,14 +340,11 @@ mod tests {
     use std::process::Command;
 
     use arbtest::arbtest;
-    use pgp::types::PublicKeyTrait;
-    use tempfile::TempDir;
 
     use super::*;
     use crate::deb::SimpleValue;
     use crate::deb::*;
     use crate::test::DirectoryOfFiles;
-    use crate::test::UpperHex;
 
     #[ignore = "Needs `apt`"]
     #[test]
@@ -294,21 +355,15 @@ mod tests {
         let release_signer = PgpCleartextSigner::new(signing_key.clone().into());
         let workdir = TempDir::new().unwrap();
         let root = workdir.path().join("root");
-        let verifying_key_file = Path::new("/etc/apt/trusted.gpg.d/test.asc");
-        verifying_key
-            .to_armored_writer(
-                &mut File::create(verifying_key_file).unwrap(),
-                Default::default(),
-            )
-            .unwrap();
         remove_file("/etc/apt/sources.list.d/debian.sources").unwrap();
         arbtest(|u| {
             let mut package: Package = u.arbitrary()?;
-            package.architecture = "amd64".parse().unwrap();
+            package.architecture = "all".parse().unwrap();
             package.depends.clear();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let deb_path = workdir.path().join("test.deb");
-            let _ = remove_dir_all(root.as_path());
+            let _ = remove_dir_all(&root);
+            create_dir_all(&root).unwrap();
             let package_name = package.name();
             package
                 .write(
@@ -318,32 +373,27 @@ mod tests {
                 )
                 .unwrap();
             let suite: SimpleValue = "meta".parse().unwrap();
-            Repository::new(root.as_path(), [deb_path.as_path()], &verifier)
-                .unwrap()
-                .write(root.as_path(), suite.clone(), &release_signer)
-                .unwrap();
-            let fingerprint = verifying_key.fingerprint();
-            std::fs::write(
-                "/etc/apt/sources.list.d/test.list",
-                format!(
-                    "deb [signed-by={1}] file://{0} meta/\n",
-                    root.display(),
-                    UpperHex(fingerprint.as_bytes()),
-                ),
+            let repo_package_file = Repository::release_package(
+                &suite,
+                "1.0".parse().unwrap(),
+                "My repo".into(),
+                &verifying_key,
+                format!("file://{}", root.display()),
+                &signer,
+                &root,
             )
             .unwrap();
+            let repo = Repository::new(root.as_path(), [deb_path.as_path()], &verifier).unwrap();
+            repo.write(root.as_path(), suite.clone(), &release_signer)
+                .unwrap();
+            assert!(Command::new("dpkg")
+                .arg("--install")
+                .arg(&repo_package_file)
+                .status()
+                .unwrap()
+                .success());
             assert!(Command::new("find")
                 .arg(root.as_path())
-                .status()
-                .unwrap()
-                .success());
-            assert!(Command::new("cat")
-                .arg(root.join("meta/Release"))
-                .status()
-                .unwrap()
-                .success());
-            assert!(Command::new("cat")
-                .arg(root.join("meta/Packages"))
                 .status()
                 .unwrap()
                 .success());

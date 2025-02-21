@@ -255,8 +255,8 @@ mod tests {
     use crate::deb::PackageVerifier;
     use crate::deb::SigningKey;
     use crate::deb::Value;
+    use crate::hash::UpperHex;
     use crate::test::DirectoryOfFiles;
-    use crate::test::UpperHex;
 
     #[test]
     fn value_eq() {

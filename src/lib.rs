@@ -1,4 +1,6 @@
 pub mod archive;
+pub mod build;
+pub mod cargo;
 pub mod deb;
 pub mod hash;
 pub mod ipk;

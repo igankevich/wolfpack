@@ -47,6 +47,10 @@ pub enum Error {
     Sign,
     #[error("Failed to read `{0}`: {1}")]
     FileRead(PathBuf, std::io::Error),
+    #[error("Ldd tree error: {0}")]
+    LddTree(#[from] lddtree::Error),
+    #[error("Library {0:?} not found")]
+    LibraryNotFound(PathBuf),
     #[error("{0}")]
     Other(String),
 }

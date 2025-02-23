@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Error;
+use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -12,26 +13,57 @@ use std::process::Stdio;
 use serde::Deserialize;
 
 use crate::build;
-use crate::cargo::Arch;
+use crate::cargo::Target;
 
 #[derive(Default)]
 pub struct BuildConfig {
     pub target: Option<String>,
     pub profile: Option<String>,
     pub packages: BTreeSet<String>,
-    pub no_default_features: bool,
+    pub main_package: Option<String>,
+    pub default_features: bool,
     pub features: BTreeSet<String>,
     pub env: BTreeMap<OsString, OsString>,
 }
 
 impl BuildConfig {
-    pub fn arch(&self) -> Option<Arch> {
-        self.target
-            .as_deref()?
-            .split('-')
-            .next()?
-            .parse::<Arch>()
-            .ok()
+    pub fn get_target(&self) -> Result<Target, Error> {
+        let arch = self.get_target_impl()?.parse()?;
+        Ok(arch)
+    }
+
+    fn get_target_impl(&self) -> Result<String, Error> {
+        if let Some(target) = self.target.as_ref() {
+            return Ok(target.clone());
+        }
+        let mut child = Command::new("rustc")
+            .arg("-vV")
+            .stdout(Stdio::piped())
+            .spawn()?;
+        let stdout = child.stdout.take().expect("Stdout exists");
+        let reader = BufReader::new(stdout);
+        let mut target = None;
+        for line in reader.lines() {
+            let line = line?;
+            let mut words = line.splitn(2, ':');
+            let Some(key) = words.next() else {
+                continue;
+            };
+            if key == "host" {
+                let value = words
+                    .next()
+                    .ok_or(std::io::Error::other("Failed to parse target"))?;
+                target = Some(value.trim().to_string());
+            }
+        }
+        let status = child.wait()?;
+        if !status.success() {
+            return Err(std::io::Error::other("`rustc -vV` failed"));
+        }
+        match target {
+            Some(target) => Ok(target),
+            None => Err(std::io::Error::other("Failed to parse `rustc -vV` output")),
+        }
     }
 }
 
@@ -53,7 +85,7 @@ pub fn build_package<P: AsRef<Path>>(
         command.arg("--package");
         command.arg(package.as_str());
     }
-    if config.no_default_features {
+    if !config.default_features {
         command.arg("--no-default-features");
     }
     if !config.features.is_empty() {
@@ -74,7 +106,6 @@ pub fn build_package<P: AsRef<Path>>(
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             let line = line?;
-            eprintln!("line {}", line);
             let Ok(message) = serde_json::from_str::<BuildMessage>(&line) else {
                 continue;
             };
@@ -98,8 +129,46 @@ pub fn build_package<P: AsRef<Path>>(
     if !status.success() {
         return Err(std::io::Error::other("`cargo build` failed"));
     }
-    eprintln!("Outputs {:#?}", output_files);
     Ok(output_files)
+}
+
+pub fn get_package_metadata<P: AsRef<Path>>(
+    name: Option<&str>,
+    project_dir: P,
+) -> Result<Package, Error> {
+    let mut command = Command::new("cargo");
+    command.arg("metadata");
+    command.arg("--format-version=1");
+    command.arg("--no-deps");
+    command.current_dir(project_dir.as_ref());
+    command.stdout(Stdio::piped());
+    let mut child = command.spawn()?;
+    let json = {
+        let mut stdout = child.stdout.take().expect("Stdout exists");
+        let mut json = String::new();
+        stdout.read_to_string(&mut json)?;
+        json
+    };
+    let metadata: Metadata = serde_json::from_str(&json).map_err(Error::other)?;
+    let status = child.wait()?;
+    if !status.success() {
+        return Err(std::io::Error::other("`cargo metadata` failed"));
+    }
+    let mut packages = metadata.packages;
+    let package = match name {
+        Some(name) => packages
+            .into_iter()
+            .find(|package| name == package.name.as_str()),
+        None => {
+            if packages.len() == 1 {
+                packages.pop()
+            } else {
+                None
+            }
+        }
+    }
+    .ok_or(std::io::Error::other("Failed to find package metadata"))?;
+    Ok(package)
 }
 
 #[derive(Deserialize)]
@@ -111,6 +180,24 @@ struct BuildMessage {
 #[derive(Deserialize)]
 struct BuildTarget {
     kind: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct Metadata {
+    packages: Vec<Package>,
+}
+
+#[derive(Deserialize)]
+pub struct Package {
+    pub name: String,
+    pub version: String,
+    pub description: Option<String>,
+    pub homepage: Option<String>,
+    pub repository: Option<String>,
+    pub documentation: Option<String>,
+    pub readme: Option<String>,
+    pub license: Option<String>,
+    pub license_file: Option<String>,
 }
 
 fn join<'a, I>(items: I, separator: &str) -> String

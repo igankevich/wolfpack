@@ -55,7 +55,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             cache_dir: "/var/cache/wolfpack".into(),
-            store_dir: "/wp/store".into(),
+            store_dir: "/wolfpack/store".into(),
             repos: Default::default(),
             max_age: 60 * 60 * 24,
         }

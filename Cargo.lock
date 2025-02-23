@@ -3869,6 +3869,7 @@ dependencies = [
  "ed25519-dalek",
  "elf",
  "flate2",
+ "fs-err",
  "futures",
  "futures-util",
  "gcollections",

@@ -1,0 +1,240 @@
+use elf::abi::*;
+
+define_elf_arch_enum! {
+    Arch,
+    (None, EM_NONE),
+    (M32, EM_M32),
+    (Sparc, EM_SPARC),
+    (Intel386, EM_386),
+    (Mororola68k, EM_68K),
+    (Mororola88k, EM_88K),
+    (Iamcu, EM_IAMCU),
+    (Intel860, EM_860),
+    (Mips, EM_MIPS),
+    (S370, EM_S370),
+    (MipsRs3Le, EM_MIPS_RS3_LE),
+    (Parisc, EM_PARISC),
+    (Vpp500, EM_VPP500),
+    (Sparc32plus, EM_SPARC32PLUS),
+    (Intel960, EM_960),
+    (Ppc, EM_PPC),
+    (Ppc64, EM_PPC64),
+    (S390, EM_S390),
+    (Spu, EM_SPU),
+    (V800, EM_V800),
+    (Fr20, EM_FR20),
+    (Rh32, EM_RH32),
+    (Rce, EM_RCE),
+    (Arm, EM_ARM),
+    (Alpha, EM_ALPHA),
+    (Sh, EM_SH),
+    (Sparcv9, EM_SPARCV9),
+    (Tricore, EM_TRICORE),
+    (Arc, EM_ARC),
+    (H8_300, EM_H8_300),
+    (H8_300h, EM_H8_300H),
+    (H8s, EM_H8S),
+    (H8_500, EM_H8_500),
+    (Ia64, EM_IA_64),
+    (MipsX, EM_MIPS_X),
+    (Coldfire, EM_COLDFIRE),
+    (Mororola68hc12, EM_68HC12),
+    (Mma, EM_MMA),
+    (Pcp, EM_PCP),
+    (Ncpu, EM_NCPU),
+    (Ndr1, EM_NDR1),
+    (Starcore, EM_STARCORE),
+    (Me16, EM_ME16),
+    (St100, EM_ST100),
+    (Tinyj, EM_TINYJ),
+    (X86_64, EM_X86_64),
+    (Pdsp, EM_PDSP),
+    (Pdp10, EM_PDP10),
+    (Pdp11, EM_PDP11),
+    (Fx66, EM_FX66),
+    (St9plus, EM_ST9PLUS),
+    (St7, EM_ST7),
+    (Motorola68hc16, EM_68HC16),
+    (Motorola68hc11, EM_68HC11),
+    (Motorola68hc08, EM_68HC08),
+    (Motorola68hc05, EM_68HC05),
+    (Svx, EM_SVX),
+    (St19, EM_ST19),
+    (Vax, EM_VAX),
+    (Cris, EM_CRIS),
+    (Javelin, EM_JAVELIN),
+    (Firepath, EM_FIREPATH),
+    (Zsp, EM_ZSP),
+    (Mmix, EM_MMIX),
+    (Huany, EM_HUANY),
+    (Prism, EM_PRISM),
+    (Avr, EM_AVR),
+    (Fr30, EM_FR30),
+    (D10v, EM_D10V),
+    (D30v, EM_D30V),
+    (V850, EM_V850),
+    (M32r, EM_M32R),
+    (Mn10300, EM_MN10300),
+    (Mn10200, EM_MN10200),
+    (Pj, EM_PJ),
+    (Openrisc, EM_OPENRISC),
+    (ArcCompact, EM_ARC_COMPACT),
+    (Xtensa, EM_XTENSA),
+    (Videocore, EM_VIDEOCORE),
+    (TmmGpp, EM_TMM_GPP),
+    (Ns32k, EM_NS32K),
+    (Tpc, EM_TPC),
+    (Snp1k, EM_SNP1K),
+    (St200, EM_ST200),
+    (Ip2k, EM_IP2K),
+    (Max, EM_MAX),
+    (Cr, EM_CR),
+    (F2mc16, EM_F2MC16),
+    (Msp430, EM_MSP430),
+    (Blackfin, EM_BLACKFIN),
+    (SeC33, EM_SE_C33),
+    (Sep, EM_SEP),
+    (Arca, EM_ARCA),
+    (Unicore, EM_UNICORE),
+    (Excess, EM_EXCESS),
+    (Dxp, EM_DXP),
+    (AlteraNios2, EM_ALTERA_NIOS2),
+    (Crx, EM_CRX),
+    (Xgate, EM_XGATE),
+    (C166, EM_C166),
+    (M16c, EM_M16C),
+    (Dspic30f, EM_DSPIC30F),
+    (Ce, EM_CE),
+    (M32c, EM_M32C),
+    (Tsk3000, EM_TSK3000),
+    (Rs08, EM_RS08),
+    (Sharc, EM_SHARC),
+    (Ecog2, EM_ECOG2),
+    (Score7, EM_SCORE7),
+    (Dsp24, EM_DSP24),
+    (Videocore3, EM_VIDEOCORE3),
+    (Latticemico32, EM_LATTICEMICO32),
+    (SeC17, EM_SE_C17),
+    (TiC6000, EM_TI_C6000),
+    (TiC2000, EM_TI_C2000),
+    (TiC5500, EM_TI_C5500),
+    (TiArp32, EM_TI_ARP32),
+    (TiPru, EM_TI_PRU),
+    (MmdspPlus, EM_MMDSP_PLUS),
+    (CypressM8c, EM_CYPRESS_M8C),
+    (R32c, EM_R32C),
+    (Trimedia, EM_TRIMEDIA),
+    (Qdsp6, EM_QDSP6),
+    (Intel8051, EM_8051),
+    (Stxp7x, EM_STXP7X),
+    (Nds32, EM_NDS32),
+    (Ecog1, EM_ECOG1),
+    (Maxq30, EM_MAXQ30),
+    (Ximo16, EM_XIMO16),
+    (Manik, EM_MANIK),
+    (Craynv2, EM_CRAYNV2),
+    (Rx, EM_RX),
+    (Metag, EM_METAG),
+    (McstElbrus, EM_MCST_ELBRUS),
+    (Ecog16, EM_ECOG16),
+    (Cr16, EM_CR16),
+    (Etpu, EM_ETPU),
+    (Sle9x, EM_SLE9X),
+    (L10m, EM_L10M),
+    (K10m, EM_K10M),
+    (Aarch64, EM_AARCH64),
+    (Avr32, EM_AVR32),
+    (Stm8, EM_STM8),
+    (Tile64, EM_TILE64),
+    (Tilepro, EM_TILEPRO),
+    (Microblaze, EM_MICROBLAZE),
+    (Cuda, EM_CUDA),
+    (Tilegx, EM_TILEGX),
+    (Cloudshield, EM_CLOUDSHIELD),
+    (Corea1st, EM_COREA_1ST),
+    (Corea2nd, EM_COREA_2ND),
+    (ArcCompact2, EM_ARC_COMPACT2),
+    (Open8, EM_OPEN8),
+    (Rl78, EM_RL78),
+    (Videocore5, EM_VIDEOCORE5),
+    (Renesas78kor, EM_78KOR),
+    (Freescale56800ex, EM_56800EX),
+    (Ba1, EM_BA1),
+    (Ba2, EM_BA2),
+    (Xcore, EM_XCORE),
+    (MchpPic, EM_MCHP_PIC),
+    (Intel205, EM_INTEL205),
+    (Intel206, EM_INTEL206),
+    (Intel207, EM_INTEL207),
+    (Intel208, EM_INTEL208),
+    (Intel209, EM_INTEL209),
+    (Km32, EM_KM32),
+    (Kmx32, EM_KMX32),
+    (Kmx16, EM_KMX16),
+    (Kmx8, EM_KMX8),
+    (Kvarc, EM_KVARC),
+    (Cdp, EM_CDP),
+    (Coge, EM_COGE),
+    (Cool, EM_COOL),
+    (Norc, EM_NORC),
+    (CsrKalimba, EM_CSR_KALIMBA),
+    (Z80, EM_Z80),
+    (Visium, EM_VISIUM),
+    (Ft32, EM_FT32),
+    (Moxie, EM_MOXIE),
+    (Amdgpu, EM_AMDGPU),
+    (Riscv, EM_RISCV),
+    (Bpf, EM_BPF),
+}
+
+macro_rules! define_elf_arch_enum {
+    { $enum:ident, $(($name:ident, $value:ident),)* } => {
+        #[derive(
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Hash,
+            PartialOrd,
+            Ord,
+            Debug,
+        )]
+        #[cfg_attr(test, derive(arbitrary::Arbitrary))]
+        #[repr(u16)]
+        pub enum $enum {
+            $( $name = $value, )*
+        }
+
+        impl $enum {
+            pub const fn as_str(&self) -> &'static str {
+                match self {
+                    $( $enum::$name => stringify!($value), )*
+                }
+            }
+        }
+
+        impl std::fmt::Display for $enum {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "{}", self.as_str())
+            }
+        }
+
+        impl From<$enum> for u16 {
+            fn from(other: $enum) -> u16 {
+                other as u16
+            }
+        }
+
+        impl TryFrom<u16> for $enum {
+            type Error = std::io::Error;
+            fn try_from(other: u16) -> Result<Self, Self::Error> {
+                match other {
+                    $( $value => Ok($enum::$name), )*
+                    _ => Err(std::io::ErrorKind::InvalidData.into()),
+                }
+            }
+        }
+    }
+}
+
+use define_elf_arch_enum;

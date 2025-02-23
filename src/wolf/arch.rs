@@ -7,8 +7,10 @@ define_arch_enum! {
     (Armel, "armel"),
     (Armhf, "armhf"),
     (I386, "i386"),
-    (Mips64el, "mips64el"),
+    (Mips, "mips"),
     (Mipsel, "mipsel"),
+    (Mips64, "mips64"),
+    (Mips64el, "mips64el"),
     (Ppc64el, "ppc64el"),
     (S390x, "s390x"),
 }

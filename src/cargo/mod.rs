@@ -1,5 +1,5 @@
-mod arch;
 mod config;
+mod target;
 
-pub use self::arch::*;
 pub use self::config::*;
+pub use self::target::*;

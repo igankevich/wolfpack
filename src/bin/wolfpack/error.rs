@@ -10,7 +10,9 @@ pub enum Error {
     #[error("Logger error: {0}")]
     Logger(log::SetLoggerError),
     #[error("Toml parse error: {0}")]
-    Toml(#[from] toml::de::Error),
+    TomlParse(#[from] toml::de::Error),
+    #[error("Toml write error: {0}")]
+    TomlToString(#[from] toml::ser::Error),
     #[error("Input/output error: {0}")]
     Io(#[from] std::io::Error),
     #[error("SQLite error: {0}")]

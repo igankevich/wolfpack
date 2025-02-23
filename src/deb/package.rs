@@ -63,6 +63,7 @@ impl Package {
         directory: P,
         signer: &PackageSigner,
     ) -> Result<(), std::io::Error> {
+        let directory = directory.as_ref();
         let data = TarGz::from_directory(directory, gz_writer())?.finish()?;
         let control = TarGz::from_files([("control", self.to_string())], gz_writer())?.finish()?;
         let mut message_bytes: Vec<u8> = Vec::new();

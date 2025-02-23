@@ -93,16 +93,15 @@ struct BuildPackageArgs {
     #[clap(long = "secret-key-file", env = "WOLFPACK_SECRET_KEY_FILE")]
     secret_key_file: Option<PathBuf>,
 
-    /// Package metadata file.
-    #[clap(value_name = "METADATA-FILE")]
-    metadata_file: PathBuf,
-
-    /// Directory with package contents.
-    #[clap(value_name = "ROOTFS-DIRECTORY")]
-    rootfs_dir: PathBuf,
+    /// Directory with package metadata and contents.
+    ///
+    /// `wolfpack.toml` file contains the metadata, `rootfs` subdirectory contains the packaged
+    /// files.
+    #[clap(value_name = "input directory")]
+    input_dir: PathBuf,
 
     /// Output directory.
-    #[clap(value_name = "OUTPUT-DIRECTORY")]
+    #[clap(value_name = "output directory")]
     output_dir: PathBuf,
 }
 
@@ -204,12 +203,9 @@ fn build_package(args: BuildPackageArgs) -> Result<ExitCode, Box<dyn std::error:
     let master_secret_key = read_master_key(args.secret_key_file.as_ref())?;
     let gen = SigningKeyGenerator::new(&master_secret_key);
     let builder = PackageBuilder::new(HashSet::from_iter(PackageFormat::all().iter().copied()));
-    builder.build_package(
-        &args.metadata_file,
-        &args.rootfs_dir,
-        &args.output_dir,
-        &gen,
-    )?;
+    let metadata_file = args.input_dir.join("wolfpack.toml");
+    let rootfs_dir = args.input_dir.join("rootfs");
+    builder.build_package(&metadata_file, &rootfs_dir, &args.output_dir, &gen)?;
     Ok(ExitCode::SUCCESS)
 }
 

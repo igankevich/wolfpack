@@ -94,6 +94,7 @@ impl PackageFormat {
         output_dir: &Path,
         signing_key_generator: &SigningKeyGenerator,
     ) -> Result<(), Error> {
+        create_dir_all(output_dir)?;
         match self {
             Self::Deb => {
                 let package: deb::Package = metadata.common.try_into()?;

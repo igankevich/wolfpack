@@ -446,6 +446,7 @@ mod tests {
     use std::process::Command;
 
     use arbtest::arbtest;
+    use command_error::CommandExt;
     use tempfile::TempDir;
 
     use super::*;
@@ -538,7 +539,7 @@ gpgkey=file://{}
             assert!(
                 Command::new("cat")
                     .arg(workdir.path().join("repodata").join("repomd.xml"))
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package:\n========{:?}========",
@@ -549,7 +550,7 @@ gpgkey=file://{}
                     .arg("--repo=test")
                     .arg("install")
                     .arg(&package.name)
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package:\n========{:?}========",
@@ -559,7 +560,7 @@ gpgkey=file://{}
                 dnf()
                     .arg("remove")
                     .arg(&package.name)
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package:\n========{:?}========",

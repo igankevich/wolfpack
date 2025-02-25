@@ -3,13 +3,14 @@ use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::io::BufRead;
 use std::io::BufReader;
-use std::io::Error;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
 
+use command_error::ChildExt;
+use command_error::CommandExt;
 use serde::Deserialize;
 
 use crate::build;
@@ -39,8 +40,8 @@ impl BuildConfig {
         let mut child = Command::new("rustc")
             .arg("-vV")
             .stdout(Stdio::piped())
-            .spawn()?;
-        let stdout = child.stdout.take().expect("Stdout exists");
+            .spawn_checked()?;
+        let stdout = child.child_mut().stdout.take().expect("Stdout exists");
         let reader = BufReader::new(stdout);
         let mut target = None;
         for line in reader.lines() {
@@ -56,13 +57,10 @@ impl BuildConfig {
                 target = Some(value.trim().to_string());
             }
         }
-        let status = child.wait()?;
-        if !status.success() {
-            return Err(std::io::Error::other("`rustc -vV` failed"));
-        }
+        child.wait_checked()?;
         match target {
             Some(target) => Ok(target),
-            None => Err(std::io::Error::other("Failed to parse `rustc -vV` output")),
+            None => Err(std::io::Error::other("Failed to parse `rustc -vV` output").into()),
         }
     }
 }
@@ -113,9 +111,9 @@ pub fn build_package<P: AsRef<Path>>(
     command.arg("--message-format=json-render-diagnostics");
     command.current_dir(project_dir.as_ref());
     command.stdout(Stdio::piped());
-    let mut child = command.spawn()?;
+    let mut child = command.spawn_checked()?;
     let mut output_files = Vec::new();
-    if let Some(stdout) = child.stdout.take() {
+    if let Some(stdout) = child.child_mut().stdout.take() {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             let line = line?;
@@ -138,10 +136,7 @@ pub fn build_package<P: AsRef<Path>>(
             }
         }
     }
-    let status = child.wait()?;
-    if !status.success() {
-        return Err(std::io::Error::other("`cargo build` failed"));
-    }
+    child.wait_checked()?;
     Ok(output_files)
 }
 
@@ -152,18 +147,15 @@ pub fn get_packages<P: AsRef<Path>>(project_dir: P) -> Result<Vec<Package>, Erro
     command.arg("--no-deps");
     command.current_dir(project_dir.as_ref());
     command.stdout(Stdio::piped());
-    let mut child = command.spawn()?;
+    let mut child = command.spawn_checked()?;
     let json = {
-        let mut stdout = child.stdout.take().expect("Stdout exists");
+        let mut stdout = child.child_mut().stdout.take().expect("Stdout exists");
         let mut json = String::new();
         stdout.read_to_string(&mut json)?;
         json
     };
-    let metadata: Metadata = serde_json::from_str(&json).map_err(Error::other)?;
-    let status = child.wait()?;
-    if !status.success() {
-        return Err(std::io::Error::other("`cargo metadata` failed"));
-    }
+    let metadata: Metadata = serde_json::from_str(&json)?;
+    child.wait_checked()?;
     Ok(metadata.packages)
 }
 
@@ -202,6 +194,16 @@ pub struct Package {
 #[serde(default)]
 pub struct PackageMetadata {
     pub wolfpack: BTreeMap<String, BuildConfig>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Input/output error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("{0}")]
+    Command(#[from] command_error::Error),
+    #[error("JSON parsing error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 fn join<'a, I>(items: I, separator: &str) -> String

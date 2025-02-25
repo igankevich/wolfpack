@@ -156,6 +156,8 @@ mod tests {
     use std::process::Stdio;
 
     use arbtest::arbtest;
+    use command_error::ChildExt;
+    use command_error::CommandExt;
     use tempfile::TempDir;
 
     use super::*;
@@ -170,7 +172,7 @@ mod tests {
         assert!(Command::new("ls")
             .arg("-l")
             .arg(private_key_file.as_path())
-            .status()
+            .status_checked()
             .unwrap()
             .success());
         assert!(Command::new("openssl")
@@ -180,7 +182,7 @@ mod tests {
             .arg("-i")
             .arg("-in")
             .arg(private_key_file.as_path())
-            .status()
+            .status_checked()
             .unwrap()
             .success());
         let output = Command::new("pkg")
@@ -190,7 +192,7 @@ mod tests {
             .arg("ecdsa")
             .arg(private_key_file.as_path())
             .stdout(Stdio::piped())
-            .output()
+            .output_checked()
             .unwrap();
         assert_eq!(verifying_key.to_der().unwrap(), output.stdout);
         let pkg_verifying_key = VerifyingKey::from_der(&output.stdout[..]).unwrap();
@@ -209,12 +211,12 @@ mod tests {
             .arg("ecdsa")
             .arg(private_key_file.as_path())
             .stdout(Stdio::piped())
-            .output()
+            .output_checked()
             .unwrap();
         assert!(Command::new("ls")
             .arg("-l")
             .arg(private_key_file.as_path())
-            .status()
+            .status_checked()
             .unwrap()
             .success());
         assert!(Command::new("openssl")
@@ -224,7 +226,7 @@ mod tests {
             .arg("-i")
             .arg("-in")
             .arg(private_key_file.as_path())
-            .status()
+            .status_checked()
             .unwrap()
             .success());
         let verifying_key = VerifyingKey::from_der(&output.stdout[..]).unwrap();
@@ -249,14 +251,14 @@ mod tests {
                 .arg(private_key_file.as_path())
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .spawn()
+                .spawn_checked()
                 .unwrap();
             let message = b"hello world";
             {
-                let mut stdin = child.stdin.take().unwrap();
+                let mut stdin = child.child_mut().stdin.take().unwrap();
                 stdin.write_all(message).unwrap();
             }
-            let output = child.wait_with_output().unwrap();
+            let output = child.output_checked().unwrap();
             let signature = output.stdout;
             let signature = Signature::from_der(&signature[..]).unwrap();
             verifying_key.verify_data(message, &signature).unwrap();

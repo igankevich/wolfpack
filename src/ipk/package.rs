@@ -153,6 +153,7 @@ mod tests {
     use std::process::Command;
 
     use arbtest::arbtest;
+    use command_error::CommandExt;
     use tempfile::TempDir;
 
     use super::*;
@@ -208,7 +209,7 @@ mod tests {
                 Command::new("opkg")
                     .arg("install")
                     .arg(package_path.as_path())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package:\n========{}========",
@@ -218,7 +219,7 @@ mod tests {
                 Command::new("opkg")
                     .arg("remove")
                     .arg(package.name().to_string())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package:\n========{}========",

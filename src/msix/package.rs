@@ -164,6 +164,7 @@ mod tests {
     use std::process::Command;
 
     use arbtest::arbtest;
+    use command_error::CommandExt;
     use tempfile::TempDir;
 
     use super::*;
@@ -194,7 +195,7 @@ mod tests {
                     .arg("msixmgr")
                     .arg("-AddPackage")
                     .arg(&package_file)
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",

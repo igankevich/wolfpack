@@ -163,6 +163,7 @@ mod tests {
     use std::process::Command;
 
     use arbtest::arbtest;
+    use command_error::CommandExt;
     use tempfile::TempDir;
 
     use super::*;
@@ -195,7 +196,10 @@ mod tests {
                 .unwrap()
                 .write(&repo_dir, &signing_key)
                 .unwrap();
-            Command::new("find").arg(workdir.path()).status().unwrap();
+            Command::new("find")
+                .arg(workdir.path())
+                .status_checked()
+                .unwrap();
             std::fs::write(
                 "/etc/opkg/test.conf",
                 format!("src/gz test file://{}\n", repo_dir.display()),
@@ -206,18 +210,18 @@ mod tests {
                 .unwrap();
             Command::new("cat")
                 .arg("/etc/opkg/test.conf")
-                .status()
+                .status_checked()
                 .unwrap();
             Command::new("sh")
                 .arg("-c")
                 .arg("cat /etc/opkg/keys/*")
-                .status()
+                .status_checked()
                 .unwrap();
             assert!(
                 Command::new("opkg")
                     .arg("update")
                     .arg(package_path.as_path())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package:\n========{}========",
@@ -227,7 +231,7 @@ mod tests {
                 Command::new("opkg")
                     .arg("install")
                     .arg(package.name().to_string())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package:\n========{}========",
@@ -237,7 +241,7 @@ mod tests {
                 Command::new("opkg")
                     .arg("remove")
                     .arg(package.name().to_string())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package:\n========{}========",

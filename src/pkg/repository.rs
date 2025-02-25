@@ -322,6 +322,7 @@ mod tests {
     use std::process::Command;
 
     use arbtest::arbtest;
+    use command_error::CommandExt;
     use tempfile::TempDir;
 
     use super::*;
@@ -381,7 +382,7 @@ mod tests {
                     .arg("--force")
                     .arg("--repository")
                     .arg("test")
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "repo.conf = {:?}",
@@ -392,7 +393,7 @@ mod tests {
                     .arg("install")
                     .arg("-y")
                     .arg(package.name.to_string())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",
@@ -403,7 +404,7 @@ mod tests {
                     .arg("remove")
                     .arg("-y")
                     .arg(package.name.to_string())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",

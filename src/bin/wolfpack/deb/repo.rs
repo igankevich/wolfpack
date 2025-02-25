@@ -1,3 +1,4 @@
+use command_error::CommandExt;
 use deko::bufread::AnyDecoder;
 use elf::abi::EI_NIDENT;
 use elf::abi::ET_DYN;
@@ -510,13 +511,10 @@ impl Repo for DebRepo {
                             let path = dst.join(entry.path()?);
                             if get_elf_type(&path).is_some() {
                                 log::info!("patching {:?}", path);
-                                let status = Command::new("./patchelf.sh")
+                                Command::new("./patchelf.sh")
                                     .arg(&path)
                                     .arg(&dst)
-                                    .status()?;
-                                if !status.success() {
-                                    return Err(Error::Patch(path));
-                                }
+                                    .status_checked()?;
                             }
                         }
                     }

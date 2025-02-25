@@ -340,6 +340,7 @@ mod tests {
     use std::process::Command;
 
     use arbtest::arbtest;
+    use command_error::CommandExt;
 
     use super::*;
     use crate::deb::SimpleValue;
@@ -389,20 +390,20 @@ mod tests {
             assert!(Command::new("dpkg")
                 .arg("--install")
                 .arg(&repo_package_file)
-                .status()
+                .status_checked()
                 .unwrap()
                 .success());
             assert!(Command::new("find")
                 .arg(root.as_path())
-                .status()
+                .status_checked()
                 .unwrap()
                 .success());
-            assert!(apt_get().arg("update").status().unwrap().success());
+            assert!(apt_get().arg("update").status_checked().unwrap().success());
             assert!(
                 apt_get()
                     .arg("install")
                     .arg(package_name.to_string())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package = {:?}",
@@ -412,7 +413,7 @@ mod tests {
                 apt_get()
                     .arg("remove")
                     .arg(package_name.to_string())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package = {:?}",

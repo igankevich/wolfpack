@@ -8,6 +8,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 
+use command_error::CommandExt;
 use lddtree::DependencyAnalyzer;
 use wolfpack::build;
 use wolfpack::cargo;
@@ -94,7 +95,7 @@ impl ProjectBuilder {
                         }
                         patchelf.arg("--force-rpath");
                         patchelf.arg(&dest_file);
-                        patchelf.status()?;
+                        patchelf.status_checked()?;
                     }
                     let mut patchelf = Command::new("patchelf");
                     patchelf.arg("--set-rpath");
@@ -105,7 +106,7 @@ impl ProjectBuilder {
                     }
                     patchelf.arg("--force-rpath");
                     patchelf.arg(&dest_file);
-                    patchelf.status()?;
+                    patchelf.status_checked()?;
                 }
                 let doc_dir = {
                     let mut dst = app_dir.to_path_buf();

@@ -29,8 +29,6 @@ pub enum Error {
     NotFound(String),
     #[error("Dependency `{0}` not found")]
     DependencyNotFound(String),
-    #[error("Failed to patch {0:?}")]
-    Patch(PathBuf),
     #[error("Failed to parse ELF: {0}")]
     Elf(#[from] elf::ParseError),
     #[error("HTTP error: {0}")]
@@ -53,6 +51,10 @@ pub enum Error {
     LddTree(#[from] lddtree::Error),
     #[error("Library {0:?} not found")]
     LibraryNotFound(PathBuf),
+    #[error("Cargo error: {0}")]
+    Cargo(#[from] wolfpack::cargo::Error),
+    #[error("{0}")]
+    Command(#[from] command_error::Error),
     #[error("{0}")]
     Other(String),
 }

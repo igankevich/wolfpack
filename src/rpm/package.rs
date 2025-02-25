@@ -346,6 +346,7 @@ mod tests {
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use arbtest::arbtest;
+    use command_error::CommandExt;
     use rand::Rng;
     use rand_mt::Mt64;
     use tempfile::TempDir;
@@ -396,7 +397,7 @@ mod tests {
                 .arg("--verbose")
                 .arg("--import")
                 .arg(verifying_key_file.as_path())
-                .status()
+                .status_checked()
                 .unwrap()
                 .success(),
             "verifying key:\n{}",
@@ -455,7 +456,7 @@ mod tests {
                     .arg("--query")
                     .arg("--dump")
                     .arg(package_file.as_path())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",
@@ -467,7 +468,7 @@ mod tests {
                     .arg("--verbose")
                     .arg("--install")
                     .arg(package_file.as_path())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",
@@ -478,7 +479,7 @@ mod tests {
                     .arg("--verbose")
                     .arg("--erase")
                     .arg(&package.name)
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",

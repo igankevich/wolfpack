@@ -88,6 +88,7 @@ mod tests {
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use arbtest::arbtest;
+    use command_error::CommandExt;
     use rand::rngs::OsRng;
     use rand::Rng;
     use rand_mt::Mt64;
@@ -110,7 +111,7 @@ mod tests {
             .arg("tmpfs")
             .arg("tmpfs")
             .arg("/root")
-            .status()
+            .status_checked()
             .unwrap()
             .success());
         let _guard = prevent_concurrency("macos");
@@ -135,7 +136,7 @@ mod tests {
                     .arg("xar")
                     .arg("-tf")
                     .arg(format!("/Volumes/SystemRoot{}", package_file.display()))
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",
@@ -150,7 +151,7 @@ mod tests {
                     .arg("/")
                     .arg("-pkg")
                     .arg(format!("/Volumes/SystemRoot{}", package_file.display()))
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",

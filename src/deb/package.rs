@@ -248,6 +248,7 @@ mod tests {
     use std::process::Stdio;
 
     use arbtest::arbtest;
+    use command_error::CommandExt;
     use pgp::types::PublicKeyTrait;
     use tempfile::TempDir;
 
@@ -362,7 +363,7 @@ mod tests {
                     .arg("--output")
                     .arg(keyring_file.as_path())
                     .arg(verifying_key_file.as_path())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "control:\n========{}========",
@@ -374,7 +375,7 @@ mod tests {
                     .arg("--root")
                     .arg(root.as_path())
                     .arg(path.as_path())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "control:\n========{}========",
@@ -386,7 +387,7 @@ mod tests {
                     .arg(root.as_path())
                     .arg("--install")
                     .arg(path.as_path())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "control:\n========{}========",
@@ -399,7 +400,7 @@ mod tests {
                     .arg("-L")
                     .arg(control.name().as_str())
                     .stdout(Stdio::null())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "control:\n========{}========",

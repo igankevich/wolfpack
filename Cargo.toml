@@ -12,6 +12,9 @@ keywords = ["deb", "rpm", "ipk", "pkg", "msix"]
 categories = ["command-line-utilities", "development-tools::build-utils"]
 include = ["**/*.rs", "**/*.sql", "Cargo.toml", "README.md", "LICENSE"]
 
+[package.metadata.wolfpack]
+release = false
+
 [dependencies]
 ar = "0.9.0"
 async-trait = "0.1.86"

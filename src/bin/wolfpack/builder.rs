@@ -4,6 +4,7 @@ use std::fs::create_dir_all;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use std::str::FromStr;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -75,16 +76,30 @@ pub enum PackageFormat {
     Deb,
     Rpm,
     Ipk,
-    Pkg,
-    MacOs,
+    FreeBsdPkg,
+    MacOsPkg,
     Msix,
 }
 
 impl PackageFormat {
-    // TODO split into linux, freebsd, macos, windows
-    pub fn all() -> &'static [Self] {
+    pub fn linux() -> &'static [Self] {
         use PackageFormat::*;
-        &[Deb, Rpm, Ipk, Pkg, MacOs, Msix]
+        &[Deb, Rpm, Ipk]
+    }
+
+    pub fn freebsd() -> &'static [Self] {
+        use PackageFormat::*;
+        &[FreeBsdPkg]
+    }
+
+    pub fn macos() -> &'static [Self] {
+        use PackageFormat::*;
+        &[MacOsPkg]
+    }
+
+    pub fn windows() -> &'static [Self] {
+        use PackageFormat::*;
+        &[Msix]
     }
 
     pub fn build_package(
@@ -119,7 +134,7 @@ impl PackageFormat {
                 let signer = signing_key;
                 package.write(output_file, rootfs_dir, &signer)?;
             }
-            Self::Pkg => {
+            Self::FreeBsdPkg => {
                 let manifest: pkg::CompactManifest = metadata.common.try_into()?;
                 let package = pkg::Package::new(manifest, rootfs_dir.to_path_buf());
                 let output_file = output_dir.join(package.file_name());
@@ -127,7 +142,7 @@ impl PackageFormat {
                 let file = File::create(&output_file)?;
                 package.write(file)?;
             }
-            Self::MacOs => {
+            Self::MacOsPkg => {
                 let (signing_key, _) = signing_key_generator.macos()?;
                 // TODO
                 let certs = Vec::new();
@@ -179,12 +194,12 @@ impl PackageFormat {
                 let repo = ipk::Repository::new(output_dir, [input_dir], &verifying_key)?;
                 repo.write(output_dir, &signing_key)?;
             }
-            Self::Pkg => {
+            Self::FreeBsdPkg => {
                 let (signing_key, _verifying_key) = signing_key_generator.pkg()?;
                 let repo = pkg::Repository::new([input_dir])?;
                 repo.build(output_dir, &signing_key)?;
             }
-            Self::MacOs => {
+            Self::MacOsPkg => {
                 let macos_repo_dir = output_dir.join("macos");
                 create_dir_all(&macos_repo_dir)?;
                 for entry in WalkDir::new(input_dir).into_iter() {
@@ -224,6 +239,37 @@ impl PackageFormat {
             }
         }
         Ok(())
+    }
+
+    pub fn parse_set(s: &str) -> Result<HashSet<Self>, Error> {
+        let mut formats = HashSet::new();
+        for word in s.split(',') {
+            match word.trim() {
+                "linux" => formats.extend(Self::linux()),
+                "freebsd" => formats.extend(Self::freebsd()),
+                "macos" => formats.extend(Self::macos()),
+                "windows" => formats.extend(Self::windows()),
+                other => {
+                    formats.insert(other.parse()?);
+                }
+            }
+        }
+        Ok(formats)
+    }
+}
+
+impl FromStr for PackageFormat {
+    type Err = Error;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "deb" => Ok(Self::Deb),
+            "rpm" => Ok(Self::Rpm),
+            "ipk" => Ok(Self::Ipk),
+            "freebsd-pkg" => Ok(Self::FreeBsdPkg),
+            "macos-pkg" => Ok(Self::MacOsPkg),
+            "msix" => Ok(Self::Msix),
+            _ => Err(std::io::ErrorKind::InvalidData.into()),
+        }
     }
 }
 

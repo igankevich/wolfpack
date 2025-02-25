@@ -15,15 +15,16 @@ use serde::Deserialize;
 use crate::build;
 use crate::cargo::Target;
 
-#[derive(Default)]
+#[derive(Deserialize, Debug)]
+#[serde(default)]
 pub struct BuildConfig {
     pub target: Option<String>,
     pub profile: Option<String>,
-    pub packages: BTreeSet<String>,
-    pub main_package: Option<String>,
+    pub release: bool,
     pub default_features: bool,
     pub features: BTreeSet<String>,
     pub env: BTreeMap<OsString, OsString>,
+    pub build: bool,
 }
 
 impl BuildConfig {
@@ -67,12 +68,29 @@ impl BuildConfig {
     }
 }
 
+impl Default for BuildConfig {
+    fn default() -> Self {
+        Self {
+            target: Default::default(),
+            profile: Default::default(),
+            release: true,
+            default_features: true,
+            features: Default::default(),
+            env: Default::default(),
+            build: true,
+        }
+    }
+}
+
 pub fn build_package<P: AsRef<Path>>(
-    config: &BuildConfig,
+    package: &Package,
     project_dir: P,
 ) -> Result<Vec<(build::BuildTarget, PathBuf)>, Error> {
+    let config = &package.metadata.wolfpack;
     let mut command = Command::new("cargo");
     command.arg("build");
+    command.arg("--package");
+    command.arg(package.name.as_str());
     if let Some(target) = config.target.as_deref() {
         command.arg("--target");
         command.arg(target);
@@ -80,10 +98,6 @@ pub fn build_package<P: AsRef<Path>>(
     if let Some(profile) = config.profile.as_deref() {
         command.arg("--profile");
         command.arg(profile);
-    }
-    for package in config.packages.iter() {
-        command.arg("--package");
-        command.arg(package.as_str());
     }
     if !config.default_features {
         command.arg("--no-default-features");
@@ -95,8 +109,9 @@ pub fn build_package<P: AsRef<Path>>(
     for (name, value) in config.env.iter() {
         command.env(name, value);
     }
-    // TODO
-    //command.arg("--release");
+    if config.release {
+        command.arg("--release");
+    }
     command.arg("--message-format=json-render-diagnostics");
     command.current_dir(project_dir.as_ref());
     command.stdout(Stdio::piped());
@@ -132,10 +147,7 @@ pub fn build_package<P: AsRef<Path>>(
     Ok(output_files)
 }
 
-pub fn get_package_metadata<P: AsRef<Path>>(
-    name: Option<&str>,
-    project_dir: P,
-) -> Result<Package, Error> {
+pub fn get_packages<P: AsRef<Path>>(project_dir: P) -> Result<Vec<Package>, Error> {
     let mut command = Command::new("cargo");
     command.arg("metadata");
     command.arg("--format-version=1");
@@ -155,20 +167,8 @@ pub fn get_package_metadata<P: AsRef<Path>>(
         return Err(std::io::Error::other("`cargo metadata` failed"));
     }
     let mut packages = metadata.packages;
-    let package = match name {
-        Some(name) => packages
-            .into_iter()
-            .find(|package| name == package.name.as_str()),
-        None => {
-            if packages.len() == 1 {
-                packages.pop()
-            } else {
-                None
-            }
-        }
-    }
-    .ok_or(std::io::Error::other("Failed to find package metadata"))?;
-    Ok(package)
+    packages.retain(|package| package.metadata.wolfpack.build);
+    Ok(packages)
 }
 
 #[derive(Deserialize)]
@@ -198,6 +198,14 @@ pub struct Package {
     pub readme: Option<String>,
     pub license: Option<String>,
     pub license_file: Option<String>,
+    #[serde(default)]
+    pub metadata: PackageMetadata,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct PackageMetadata {
+    pub wolfpack: BuildConfig,
 }
 
 fn join<'a, I>(items: I, separator: &str) -> String

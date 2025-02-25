@@ -1,6 +1,5 @@
 use clap::Parser;
 use clap::Subcommand;
-use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -89,9 +88,8 @@ struct BuildProjectArgs {
 
 #[derive(clap::Args)]
 struct BuildPackageArgs {
-    /// Secret key file.
-    #[clap(long = "secret-key-file", env = "WOLFPACK_SECRET_KEY_FILE")]
-    secret_key_file: Option<PathBuf>,
+    #[clap(flatten)]
+    common: CommonBuildArgs,
 
     /// Directory with package metadata and contents.
     ///
@@ -107,9 +105,8 @@ struct BuildPackageArgs {
 
 #[derive(clap::Args)]
 struct BuildRepoArgs {
-    /// Secret key file.
-    #[clap(long = "secret-key-file", env = "WOLFPACK_SECRET_KEY_FILE")]
-    secret_key_file: Option<PathBuf>,
+    #[clap(flatten)]
+    common: CommonBuildArgs,
 
     /// Repository metadata file.
     #[clap(value_name = "METADATA-FILE")]
@@ -122,6 +119,29 @@ struct BuildRepoArgs {
     /// Output directory.
     #[clap(value_name = "OUTPUT-DIRECTORY")]
     output_dir: PathBuf,
+}
+
+#[derive(clap::Args)]
+struct CommonBuildArgs {
+    /// Secret key file.
+    #[clap(
+        long = "secret-key-file",
+        env = "WOLFPACK_SECRET_KEY_FILE",
+        value_name = "secret key file"
+    )]
+    secret_key_file: Option<PathBuf>,
+
+    /// Package format(s).
+    ///
+    /// Possible values: deb, rpm, ipk, freebsd-pkg, macos-pkg, msix.
+    /// You can also specify operating system instead of the package format:
+    /// linux, freebsd, macos, windows.
+    #[clap(
+        long = "formats",
+        value_name = "format1,format2,...",
+        default_value = "linux"
+    )]
+    package_formats: String,
 }
 
 pub fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
@@ -200,9 +220,10 @@ fn build_project(args: BuildProjectArgs) -> Result<ExitCode, Box<dyn std::error:
 }
 
 fn build_package(args: BuildPackageArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
-    let master_secret_key = read_master_key(args.secret_key_file.as_ref())?;
+    let master_secret_key = read_master_key(args.common.secret_key_file.as_ref())?;
     let gen = SigningKeyGenerator::new(&master_secret_key);
-    let builder = PackageBuilder::new(HashSet::from_iter(PackageFormat::all().iter().copied()));
+    let formats = PackageFormat::parse_set(&args.common.package_formats)?;
+    let builder = PackageBuilder::new(formats);
     let metadata_file = args.input_dir.join("wolfpack.toml");
     let rootfs_dir = args.input_dir.join("rootfs");
     builder.build_package(&metadata_file, &rootfs_dir, &args.output_dir, &gen)?;
@@ -210,9 +231,10 @@ fn build_package(args: BuildPackageArgs) -> Result<ExitCode, Box<dyn std::error:
 }
 
 fn build_repo(args: BuildRepoArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
-    let master_secret_key = read_master_key(args.secret_key_file.as_ref())?;
+    let master_secret_key = read_master_key(args.common.secret_key_file.as_ref())?;
     let gen = SigningKeyGenerator::new(&master_secret_key);
-    let builder = PackageBuilder::new(HashSet::from_iter(PackageFormat::all().iter().copied()));
+    let formats = PackageFormat::parse_set(&args.common.package_formats)?;
+    let builder = PackageBuilder::new(formats);
     builder.build_repo(&args.metadata_file, &args.input_dir, &args.output_dir, &gen)?;
     Ok(ExitCode::SUCCESS)
 }

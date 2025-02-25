@@ -24,7 +24,6 @@ pub struct BuildConfig {
     pub default_features: bool,
     pub features: BTreeSet<String>,
     pub env: BTreeMap<OsString, OsString>,
-    pub build: bool,
 }
 
 impl BuildConfig {
@@ -77,20 +76,19 @@ impl Default for BuildConfig {
             default_features: true,
             features: Default::default(),
             env: Default::default(),
-            build: true,
         }
     }
 }
 
 pub fn build_package<P: AsRef<Path>>(
-    package: &Package,
+    package_name: &str,
+    config: &BuildConfig,
     project_dir: P,
 ) -> Result<Vec<(build::BuildTarget, PathBuf)>, Error> {
-    let config = &package.metadata.wolfpack;
     let mut command = Command::new("cargo");
     command.arg("build");
     command.arg("--package");
-    command.arg(package.name.as_str());
+    command.arg(package_name);
     if let Some(target) = config.target.as_deref() {
         command.arg("--target");
         command.arg(target);
@@ -166,9 +164,7 @@ pub fn get_packages<P: AsRef<Path>>(project_dir: P) -> Result<Vec<Package>, Erro
     if !status.success() {
         return Err(std::io::Error::other("`cargo metadata` failed"));
     }
-    let mut packages = metadata.packages;
-    packages.retain(|package| package.metadata.wolfpack.build);
-    Ok(packages)
+    Ok(metadata.packages)
 }
 
 #[derive(Deserialize)]
@@ -205,7 +201,7 @@ pub struct Package {
 #[derive(Deserialize, Default)]
 #[serde(default)]
 pub struct PackageMetadata {
-    pub wolfpack: BuildConfig,
+    pub wolfpack: BTreeMap<String, BuildConfig>,
 }
 
 fn join<'a, I>(items: I, separator: &str) -> String

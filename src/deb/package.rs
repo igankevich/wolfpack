@@ -241,9 +241,9 @@ fn gz_writer() -> GzEncoder<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::create_dir_all;
-    use std::fs::remove_dir_all;
-    use std::fs::File;
+    use fs_err::create_dir_all;
+    use fs_err::remove_dir_all;
+    use fs_err::File;
     use std::process::Command;
     use std::process::Stdio;
 
@@ -325,7 +325,7 @@ mod tests {
             create_dir_all(debsig_policies.as_path()).unwrap();
             create_dir_all(keyring_file.parent().unwrap()).unwrap();
             create_dir_all(policy_file.parent().unwrap()).unwrap();
-            std::fs::write(
+            fs_err::write(
                 policy_file.as_path(),
                 format!(
                     r#"<?xml version="1.0"?>

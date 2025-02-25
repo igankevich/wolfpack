@@ -1,6 +1,6 @@
+use fs_err::File;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::ops::Deref;

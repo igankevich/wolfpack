@@ -28,7 +28,7 @@ pub struct Config {
 
 impl Config {
     pub fn open<P: AsRef<Path>>(config_dir: P) -> Result<Self, Error> {
-        match std::fs::read_to_string(config_dir.as_ref().join("config.toml")) {
+        match fs_err::read_to_string(config_dir.as_ref().join("config.toml")) {
             Ok(s) => Ok(toml::from_str(&s)?),
             Err(ref e) if e.kind() == ErrorKind::NotFound => Ok(Default::default()),
             Err(e) => Err(e.into()),

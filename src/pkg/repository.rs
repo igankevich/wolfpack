@@ -1,8 +1,8 @@
+use fs_err::File;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::fs::File;
 use std::io::Read;
 use std::os::unix::fs::symlink;
 use std::path::Path;
@@ -76,7 +76,7 @@ impl Repository {
     ) -> Result<(), std::io::Error> {
         let output_dir = output_dir.as_ref();
         let meta = MetaConf::default().to_string();
-        std::fs::write(output_dir.join("meta.conf"), &meta)?;
+        fs_err::write(output_dir.join("meta.conf"), &meta)?;
         symlink("meta.conf", output_dir.join("meta"))?;
         tar_xz_from_signed_file(
             Path::new("meta"),
@@ -297,7 +297,10 @@ where
 }
 
 fn xz_file<P: AsRef<Path>>(path: P) -> Result<XzFile, std::io::Error> {
-    Ok(XzEncoder::new(File::create(path)?, COMPRESSION_LEVEL))
+    Ok(XzEncoder::new(
+        File::create(path.as_ref())?,
+        COMPRESSION_LEVEL,
+    ))
 }
 
 fn sign<C: AsRef<[u8]>>(signing_key: &SigningKey, contents: C) -> Result<Vec<u8>, std::io::Error> {
@@ -318,7 +321,7 @@ type TarXzFile = TarBuilder<XzFile>;
 
 #[cfg(test)]
 mod tests {
-    use std::fs::create_dir_all;
+    use fs_err::create_dir_all;
     use std::process::Command;
 
     use arbtest::arbtest;
@@ -364,8 +367,8 @@ mod tests {
                 .write(File::create(package_file.as_path()).unwrap())
                 .unwrap();
             let (signing_key, verifying_key) = SigningKey::generate();
-            std::fs::write(&verifying_key_file, verifying_key.to_der().unwrap()).unwrap();
-            std::fs::write(&signing_key_file, signing_key.to_der().unwrap()).unwrap();
+            fs_err::write(&verifying_key_file, verifying_key.to_der().unwrap()).unwrap();
+            fs_err::write(&signing_key_file, signing_key.to_der().unwrap()).unwrap();
             let repository = Repository::new([workdir.path()]).unwrap();
             repository.build(workdir.path(), &signing_key).unwrap();
             create_dir_all("/etc/pkg").unwrap();
@@ -374,7 +377,7 @@ mod tests {
                 format!("file://{}", workdir.path().display()),
                 verifying_key_file.clone(),
             );
-            std::fs::write("/etc/pkg/test.conf", format!("{}\n", repo_conf)).unwrap();
+            fs_err::write("/etc/pkg/test.conf", format!("{}\n", repo_conf)).unwrap();
             assert!(
                 Command::new("pkg")
                     .arg("--debug")

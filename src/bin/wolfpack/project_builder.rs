@@ -1,7 +1,7 @@
+use fs_err::create_dir_all;
+use fs_err::set_permissions;
 use std::collections::HashSet;
 use std::fs::copy;
-use std::fs::create_dir_all;
-use std::fs::set_permissions;
 use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -143,7 +143,7 @@ impl ProjectBuilder {
                 };
                 let metadata_string = toml::to_string_pretty(&metadata)?;
                 let metadata_file = output_dir.join("wolfpack.toml");
-                std::fs::write(&metadata_file, metadata_string.as_bytes())?;
+                fs_err::write(&metadata_file, metadata_string.as_bytes())?;
                 // TODO spdx licenses
             }
         }

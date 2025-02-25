@@ -1,10 +1,10 @@
+use fs_err::create_dir_all;
+use fs_err::File;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::fs::create_dir_all;
-use std::fs::File;
 use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Write;
@@ -49,7 +49,7 @@ impl Repository {
             create_dir_all(output_dir.as_ref().join(&filename))?;
             filename.push(path.file_name().ok_or(ErrorKind::InvalidData)?);
             let new_path = output_dir.as_ref().join(&filename);
-            std::fs::rename(path, new_path)?;
+            fs_err::rename(path, new_path)?;
             let control = ExtendedPackage {
                 control,
                 size,
@@ -92,7 +92,7 @@ impl Repository {
         let output_dir = output_dir.as_ref();
         create_dir_all(output_dir)?;
         let packages_string = self.to_string();
-        std::fs::write(output_dir.join("Packages"), packages_string.as_bytes())?;
+        fs_err::write(output_dir.join("Packages"), packages_string.as_bytes())?;
         {
             let mut writer = GzEncoder::new(
                 File::create(output_dir.join("Packages.gz"))?,
@@ -159,7 +159,7 @@ impl Display for ExtendedPackage {
 #[cfg(test)]
 mod tests {
 
-    use std::fs::remove_dir_all;
+    use fs_err::remove_dir_all;
     use std::process::Command;
 
     use arbtest::arbtest;
@@ -180,7 +180,7 @@ mod tests {
         let signing_key = SigningKey::generate(Some("wolfpack".into()));
         let verifying_key = signing_key.to_verifying_key();
         // speed up opkg update
-        std::fs::remove_file("/etc/opkg/distfeeds.conf").unwrap();
+        fs_err::remove_file("/etc/opkg/distfeeds.conf").unwrap();
         arbtest(|u| {
             let mut package: Package = u.arbitrary()?;
             package.architecture = "all".parse().unwrap();
@@ -200,7 +200,7 @@ mod tests {
                 .arg(workdir.path())
                 .status_checked()
                 .unwrap();
-            std::fs::write(
+            fs_err::write(
                 "/etc/opkg/test.conf",
                 format!("src/gz test file://{}\n", repo_dir.display()),
             )

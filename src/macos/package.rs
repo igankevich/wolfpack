@@ -1,4 +1,4 @@
-use std::fs::File;
+use fs_err::File;
 use std::io::Error;
 use std::io::Write;
 use std::path::Path;
@@ -82,7 +82,7 @@ const GENERATOR_VERSION: &str = concat!("Wolfpack/", env!("CARGO_PKG_VERSION"));
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
+    use fs_err::File;
     use std::process::Command;
 
     use arbitrary::Arbitrary;

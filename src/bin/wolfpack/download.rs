@@ -1,3 +1,5 @@
+use fs_err::remove_file;
+use fs_err::File;
 use indicatif::ProgressBar;
 use parking_lot::Mutex;
 use reqwest::header::HeaderValue;
@@ -10,8 +12,6 @@ use reqwest::header::IF_NONE_MATCH;
 use reqwest::header::LAST_MODIFIED;
 use reqwest::header::USER_AGENT;
 use reqwest::StatusCode;
-use std::fs::remove_file;
-use std::fs::File;
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;

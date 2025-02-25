@@ -1,7 +1,7 @@
+use fs_err::create_dir_all;
+use fs_err::File;
 use std::collections::HashSet;
 use std::ffi::OsStr;
-use std::fs::create_dir_all;
-use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use std::str::FromStr;
@@ -37,7 +37,7 @@ impl PackageBuilder {
         output_dir: &Path,
         signing_key_generator: &SigningKeyGenerator,
     ) -> Result<(), Error> {
-        let metadata = std::fs::read_to_string(metadata_file)?;
+        let metadata = fs_err::read_to_string(metadata_file)?;
         let metadata: PackageMetadata = toml::from_str(&metadata)?;
         for format in self.formats.iter() {
             format.build_package(
@@ -57,7 +57,7 @@ impl PackageBuilder {
         output_dir: &Path,
         signing_key_generator: &SigningKeyGenerator,
     ) -> Result<(), Error> {
-        let metadata = std::fs::read_to_string(metadata_file)?;
+        let metadata = fs_err::read_to_string(metadata_file)?;
         let metadata: RepoMetadata = toml::from_str(&metadata)?;
         for format in self.formats.iter() {
             format.build_repo(
@@ -216,7 +216,7 @@ impl PackageFormat {
                             continue;
                         }
                     }
-                    std::fs::rename(
+                    fs_err::rename(
                         entry_path,
                         macos_repo_dir.join(entry_path.file_name().expect("File name exists")),
                     )?;
@@ -231,7 +231,7 @@ impl PackageFormat {
                     if entry_path.extension() != Some(OsStr::new("msix")) {
                         continue;
                     }
-                    std::fs::rename(
+                    fs_err::rename(
                         entry_path,
                         msix_repo_dir.join(entry_path.file_name().expect("File name exists")),
                     )?;

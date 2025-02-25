@@ -1,10 +1,10 @@
+use fs_err::create_dir_all;
+use fs_err::File;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::fs::create_dir_all;
-use std::fs::File;
 use std::io::ErrorKind;
 use std::io::Read;
 use std::path::Path;
@@ -60,7 +60,7 @@ impl Repository {
             create_dir_all(output_dir.as_ref().join(&filename))?;
             filename.push(path.file_name().ok_or(ErrorKind::InvalidData)?);
             let new_path = output_dir.as_ref().join(&filename);
-            std::fs::rename(path, new_path)?;
+            fs_err::rename(path, new_path)?;
             let package = ExtendedPackage {
                 inner: package,
                 size,
@@ -110,10 +110,10 @@ impl Repository {
         let output_dir = dists_dir.join(suite.to_string());
         create_dir_all(output_dir.as_path())?;
         let packages_string = self.to_string();
-        std::fs::write(output_dir.join("Packages"), packages_string.as_bytes())?;
+        fs_err::write(output_dir.join("Packages"), packages_string.as_bytes())?;
         let release = Release::new(suite, self, packages_string.as_str())?;
         let release_string = release.to_string();
-        std::fs::write(output_dir.join("Release"), release_string.as_bytes())?;
+        fs_err::write(output_dir.join("Release"), release_string.as_bytes())?;
         let signed_release = signer
             .sign(release_string.as_str())
             .map_err(|_| Error::other("failed to sign the release"))?;
@@ -158,7 +158,7 @@ impl Repository {
         // Write repository configuration.
         let sources_list_file = rootfs_dir.join(format!("etc/apt/sources.list.d/{}.list", suite));
         create_dir_all(sources_list_file.parent().expect("Parent dir exists"))?;
-        std::fs::write(
+        fs_err::write(
             &sources_list_file,
             format!(
                 "deb [signed-by={}] {url} {suite}/\n",
@@ -335,8 +335,8 @@ impl FromStr for ExtendedPackage {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::remove_dir_all;
-    use std::fs::remove_file;
+    use fs_err::remove_dir_all;
+    use fs_err::remove_file;
     use std::process::Command;
 
     use arbtest::arbtest;

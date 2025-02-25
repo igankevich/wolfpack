@@ -104,7 +104,7 @@ impl Package {
                 let hash = if path.is_dir() {
                     String::new()
                 } else {
-                    sha2::Sha256::compute(&std::fs::read(path)?).to_string()
+                    sha2::Sha256::compute(&fs_err::read(path)?).to_string()
                 };
                 filedigests.push(CString::new(hash).map_err(Error::other)?);
             }
@@ -340,7 +340,7 @@ const _COMPRESSION_LEVEL: i32 = 22;
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
+    use fs_err::File;
     use std::process::Command;
 
     use arbitrary::Arbitrary;

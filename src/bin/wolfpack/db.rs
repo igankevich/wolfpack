@@ -1,3 +1,4 @@
+use fs_err::create_dir_all;
 use log::error;
 use parking_lot::Mutex;
 use rusqlite::functions::FunctionFlags;
@@ -12,7 +13,6 @@ use rusqlite_migration::{Migrations, M};
 use sql_minifier::macros::load_sql;
 use std::cmp::Ordering;
 use std::ffi::OsString;
-use std::fs::create_dir_all;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -1,5 +1,5 @@
-use std::fs::File;
-use std::fs::OpenOptions;
+use fs_err::File;
+use fs_err::OpenOptions;
 use std::io::Error;
 use std::io::Write;
 use std::path::Path;

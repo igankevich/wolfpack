@@ -59,11 +59,11 @@ pub trait ArchiveWrite<W: Write> {
                 continue;
             }
             let relative_path = Path::new(".").join(entry_path);
-            let metadata = std::fs::metadata(entry.path())?;
+            let metadata = fs_err::metadata(entry.path())?;
             let data = if entry.file_type().is_dir() {
                 Vec::new()
             } else {
-                std::fs::read(entry.path())?
+                fs_err::read(entry.path())?
             };
             archive.add_regular_file_with_metadata(relative_path, &metadata, data)?;
         }

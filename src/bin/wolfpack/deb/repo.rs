@@ -4,6 +4,9 @@ use elf::abi::EI_NIDENT;
 use elf::abi::ET_DYN;
 use elf::abi::ET_EXEC;
 use elf::endian::AnyEndian;
+use fs_err::create_dir_all;
+use fs_err::read_to_string;
+use fs_err::File;
 use indicatif::MultiProgress;
 use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
@@ -12,9 +15,6 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use std::fs::create_dir_all;
-use std::fs::read_to_string;
-use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::ErrorKind;
@@ -207,7 +207,7 @@ impl Repo for DebRepo {
                         Some(downloading_progress_bar.clone()),
                     )
                     .await?;
-                    let message = std::fs::read(&release_file)?;
+                    let message = fs_err::read(&release_file)?;
                     let signature =
                         deb::Signature::read_armored_one(File::open(&release_gpg_file)?)?;
                     let verifying_keys = deb::VerifyingKey::read_binary_all(File::open(

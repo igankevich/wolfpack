@@ -314,8 +314,8 @@ mod tests {
 
     #[test]
     fn cleartext_sign_verify() {
-        //let body = std::fs::read("InRelease.tmp").unwrap();
-        //let body = std::fs::read("clearsign.txt").unwrap();
+        //let body = fs_err::read("InRelease.tmp").unwrap();
+        //let body = fs_err::read("clearsign.txt").unwrap();
         //let data = pgp::composed::Any::from_armor(&body[..]).unwrap();
         //let data = pgp::composed::message::Message::from_armor_single(&body[..]).unwrap();
         //let data = CleartextSignedMessage::from_armor(&body[..]).unwrap();

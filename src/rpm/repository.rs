@@ -1,7 +1,7 @@
+use fs_err::create_dir_all;
+use fs_err::File;
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::fs::create_dir_all;
-use std::fs::File;
 use std::io::Error;
 use std::io::Write;
 use std::path::Path;
@@ -80,7 +80,7 @@ impl Repository {
         let mut primary_xml = Vec::<u8>::new();
         metadata.write(&mut primary_xml)?;
         let primary_xml_sha256 = sha2::Sha256::compute(&primary_xml);
-        std::fs::write(repodata.join("primary.xml"), primary_xml)?;
+        fs_err::write(repodata.join("primary.xml"), primary_xml)?;
         let repo_md = RepoMd {
             revision: 0,
             data: vec![xml::Data {
@@ -106,7 +106,7 @@ impl Repository {
         };
         let mut repo_md_vec = Vec::new();
         repo_md.write(&mut repo_md_vec)?;
-        std::fs::write(repodata.join("repomd.xml"), &repo_md_vec[..])?;
+        fs_err::write(repodata.join("repomd.xml"), &repo_md_vec[..])?;
         let signature = signer
             .sign(&repo_md_vec)
             .map_err(|_| Error::other("failed to sign"))?;
@@ -442,7 +442,7 @@ pub mod xml {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
+    use fs_err::File;
     use std::process::Command;
 
     use arbtest::arbtest;
@@ -457,14 +457,14 @@ mod tests {
     #[ignore]
     #[test]
     fn repo_md_read() {
-        let input = std::fs::read_to_string("epel/repomd.xml").unwrap();
+        let input = fs_err::read_to_string("epel/repomd.xml").unwrap();
         let _repo_md = RepoMd::from_str(&input).unwrap();
     }
 
     #[ignore]
     #[test]
     fn primary_xml_read() {
-        let input = std::fs::read_to_string(
+        let input = fs_err::read_to_string(
             "epel/e6c64120dd039602f051ca362c69636284674da9ac05c21cff04a4bd990dfd0f-primary.xml",
         )
         .unwrap();
@@ -474,7 +474,7 @@ mod tests {
     #[ignore]
     #[test]
     fn file_lists_xml_read() {
-        let input = std::fs::read_to_string(
+        let input = fs_err::read_to_string(
             "epel/7497ca1a100e9ad1d4275db2af4a19790e5a2b8c9d2c7f85150806000a1d1202-filelists.xml",
         )
         .unwrap();
@@ -484,7 +484,7 @@ mod tests {
     #[ignore]
     #[test]
     fn other_xml_read() {
-        let input = std::fs::read_to_string(
+        let input = fs_err::read_to_string(
             "epel/89a9bd48b92b5a42ab40acc287ba0a09c1011a15bff8c6428931173c57dba321-other.xml",
         )
         .unwrap();
@@ -520,7 +520,7 @@ mod tests {
                 .unwrap();
             let repository = Repository::new([workdir.path()]).unwrap();
             repository.write(workdir.path(), &signer).unwrap();
-            std::fs::write(
+            fs_err::write(
                 "/etc/yum.repos.d/test.repo",
                 format!(
                     r#"[test]

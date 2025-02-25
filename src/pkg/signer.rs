@@ -168,7 +168,7 @@ mod tests {
         let (signing_key, verifying_key) = SigningKey::generate();
         let workdir = TempDir::new().unwrap();
         let private_key_file = workdir.path().join("private-key");
-        std::fs::write(private_key_file.as_path(), signing_key.to_der().unwrap()).unwrap();
+        fs_err::write(private_key_file.as_path(), signing_key.to_der().unwrap()).unwrap();
         assert!(Command::new("ls")
             .arg("-l")
             .arg(private_key_file.as_path())
@@ -231,7 +231,7 @@ mod tests {
             .success());
         let verifying_key = VerifyingKey::from_der(&output.stdout[..]).unwrap();
         let signing_key =
-            SigningKey::from_der(&std::fs::read(private_key_file.as_path()).unwrap()).unwrap();
+            SigningKey::from_der(&fs_err::read(private_key_file.as_path()).unwrap()).unwrap();
         assert_eq!(verifying_key, signing_key.verifying_key())
     }
 
@@ -242,7 +242,7 @@ mod tests {
             let (signing_key, verifying_key) = SigningKey::generate();
             let workdir = TempDir::new().unwrap();
             let private_key_file = workdir.path().join("private-key");
-            std::fs::write(private_key_file.as_path(), signing_key.to_der().unwrap()).unwrap();
+            fs_err::write(private_key_file.as_path(), signing_key.to_der().unwrap()).unwrap();
             let mut child = Command::new("pkg")
                 .arg("key")
                 .arg("--sign")

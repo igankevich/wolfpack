@@ -251,7 +251,7 @@ fn read_master_key<P: AsRef<Path>>(
     let s = match secret_key_file {
         Some(file) => {
             let file = file.as_ref();
-            std::fs::read_to_string(file).map_err(|e| Error::file_read(file, e))?
+            fs_err::read_to_string(file).map_err(|e| Error::file_read(file, e))?
         }
         None => {
             let mut line = String::new();

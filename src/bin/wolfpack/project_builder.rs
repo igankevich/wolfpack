@@ -89,10 +89,6 @@ impl ProjectBuilder {
                         let mut patchelf = Command::new("patchelf");
                         patchelf.arg("--set-rpath");
                         patchelf.arg("$ORIGIN");
-                        if let Some(interpreter) = interpreter.as_ref() {
-                            patchelf.arg("--set-interpreter");
-                            patchelf.arg(interpreter);
-                        }
                         patchelf.arg("--force-rpath");
                         patchelf.arg(&dest_file);
                         patchelf.status_checked()?;

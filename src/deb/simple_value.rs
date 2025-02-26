@@ -147,6 +147,22 @@ fn is_valid_char(ch: &u8) -> bool {
     ![b'\r', b'\n'].contains(ch)
 }
 
+pub trait ParseField {
+    fn parse_field<T>(&self, name: &'static str) -> Result<T, Error>
+    where
+        T: FromStr;
+}
+
+impl ParseField for str {
+    fn parse_field<T>(&self, name: &'static str) -> Result<T, Error>
+    where
+        T: FromStr,
+    {
+        self.parse::<T>()
+            .map_err(|_| Error::InvalidField(name, self.into()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use arbitrary::Arbitrary;

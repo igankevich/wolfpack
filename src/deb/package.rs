@@ -22,6 +22,7 @@ use crate::deb::MultilineValue;
 use crate::deb::PackageName;
 use crate::deb::PackageSigner;
 use crate::deb::PackageVerifier;
+use crate::deb::ParseField;
 use crate::deb::Provides;
 use crate::deb::SimpleValue;
 use crate::deb::Version;
@@ -218,12 +219,16 @@ impl TryFrom<wolf::Metadata> for Package {
     type Error = Error;
     fn try_from(other: wolf::Metadata) -> Result<Self, Self::Error> {
         Ok(Self {
-            name: other.name.parse()?,
-            version: other.version.parse()?,
+            name: other.name.parse_field("name")?,
+            version: other.version.parse_field("version")?,
             architecture: other.arch.into(),
             description: other.description.into(),
-            homepage: Some(other.homepage.parse()?),
-            license: other.license.parse()?,
+            homepage: if other.homepage.is_empty() {
+                None
+            } else {
+                Some(other.homepage.parse_field("homepage")?)
+            },
+            license: other.license.parse_field("license")?,
             depends: Default::default(),
             provides: Default::default(),
             maintainer: Default::default(),

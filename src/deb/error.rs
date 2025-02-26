@@ -29,6 +29,8 @@ pub enum Error {
     Md5Sums,
     #[error("invalid md5 hash")]
     InvalidMd5,
+    #[error("Invalid {0:?}: {1:?}")]
+    InvalidField(&'static str, String),
     #[error("{0}")]
     Other(String),
 }

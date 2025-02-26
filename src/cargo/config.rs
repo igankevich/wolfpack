@@ -11,6 +11,7 @@ use std::process::Stdio;
 
 use command_error::ChildExt;
 use command_error::CommandExt;
+use serde::de::Deserializer;
 use serde::Deserialize;
 
 use crate::build;
@@ -154,8 +155,13 @@ pub fn get_packages<P: AsRef<Path>>(project_dir: P) -> Result<Vec<Package>, Erro
         stdout.read_to_string(&mut json)?;
         json
     };
-    let metadata: Metadata = serde_json::from_str(&json)?;
+    let mut metadata: Metadata = serde_json::from_str(&json)?;
     child.wait_checked()?;
+    for package in metadata.packages.iter_mut() {
+        if package.metadata.wolfpack.is_empty() {
+            package.metadata = Default::default();
+        }
+    }
     Ok(metadata.packages)
 }
 
@@ -175,7 +181,7 @@ struct Metadata {
     packages: Vec<Package>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Package {
     pub name: String,
     pub version: String,
@@ -186,14 +192,22 @@ pub struct Package {
     pub readme: Option<String>,
     pub license: Option<String>,
     pub license_file: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_nullable")]
     pub metadata: PackageMetadata,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Debug)]
 #[serde(default)]
 pub struct PackageMetadata {
     pub wolfpack: BTreeMap<String, BuildConfig>,
+}
+
+impl Default for PackageMetadata {
+    fn default() -> Self {
+        Self {
+            wolfpack: [("default".into(), BuildConfig::default())].into(),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -220,4 +234,13 @@ where
         buf.push_str(item);
     }
     buf
+}
+
+fn deserialize_nullable<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    let value = Option::<T>::deserialize(deserializer)?;
+    Ok(value.unwrap_or_default())
 }

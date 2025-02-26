@@ -1,6 +1,6 @@
 use fs_err::create_dir_all;
 use fs_err::File;
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::io::Read;
 use std::path::Path;
@@ -22,11 +22,11 @@ use crate::Error;
 use crate::SigningKeyGenerator;
 
 pub struct PackageBuilder {
-    formats: HashSet<PackageFormat>,
+    formats: BTreeSet<PackageFormat>,
 }
 
 impl PackageBuilder {
-    pub fn new(formats: HashSet<PackageFormat>) -> Self {
+    pub fn new(formats: BTreeSet<PackageFormat>) -> Self {
         Self { formats }
     }
 
@@ -109,8 +109,9 @@ impl PackageFormat {
         output_dir: &Path,
         signing_key_generator: &SigningKeyGenerator,
     ) -> Result<(), Error> {
+        log::info!("Building {} {:?}...", metadata.common.name, self);
         create_dir_all(output_dir)?;
-        match self {
+        let output_file = match self {
             Self::Deb => {
                 let package: deb::Package = metadata.common.try_into()?;
                 let output_file = output_dir.join(package.file_name());
@@ -118,6 +119,7 @@ impl PackageFormat {
                 let signer = deb::PackageSigner::new(signing_key);
                 let file = File::create(&output_file)?;
                 package.write(file, rootfs_dir, &signer)?;
+                output_file
             }
             Self::Rpm => {
                 let package: rpm::Package = metadata.common.try_into()?;
@@ -126,13 +128,15 @@ impl PackageFormat {
                 let signer = rpm::PackageSigner::new(signing_key);
                 let file = File::create(&output_file)?;
                 package.write(file, rootfs_dir, &signer)?;
+                output_file
             }
             Self::Ipk => {
                 let package: ipk::Package = metadata.common.try_into()?;
                 let output_file = output_dir.join(package.file_name());
                 let (signing_key, _) = signing_key_generator.ipk()?;
                 let signer = signing_key;
-                package.write(output_file, rootfs_dir, &signer)?;
+                package.write(&output_file, rootfs_dir, &signer)?;
+                output_file
             }
             Self::FreeBsdPkg => {
                 let manifest: pkg::CompactManifest = metadata.common.try_into()?;
@@ -141,6 +145,7 @@ impl PackageFormat {
                 // Only repositories are signed.
                 let file = File::create(&output_file)?;
                 package.write(file)?;
+                output_file
             }
             Self::MacOsPkg => {
                 let (signing_key, _) = signing_key_generator.macos()?;
@@ -156,14 +161,17 @@ impl PackageFormat {
                 let output_file = output_dir.join(package.file_name());
                 let file = File::create(&output_file)?;
                 package.write(file, rootfs_dir, &signer)?;
+                output_file
             }
             Self::Msix => {
                 // TODO signing
                 let package: msix::Package = metadata.common.try_into()?;
                 let output_file = output_dir.join(package.file_name());
                 package.write(&output_file, rootfs_dir)?;
+                output_file
             }
-        }
+        };
+        log::info!("Wrote {}", output_file.display());
         Ok(())
     }
 
@@ -241,8 +249,8 @@ impl PackageFormat {
         Ok(())
     }
 
-    pub fn parse_set(s: &str) -> Result<HashSet<Self>, Error> {
-        let mut formats = HashSet::new();
+    pub fn parse_set(s: &str) -> Result<BTreeSet<Self>, Error> {
+        let mut formats = BTreeSet::new();
         for word in s.split(',') {
             match word.trim() {
                 "linux" => formats.extend(Self::linux()),

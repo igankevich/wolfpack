@@ -12,8 +12,8 @@ use log::SetLoggerError;
 pub struct Logger;
 
 impl Logger {
-    pub fn init() -> Result<(), SetLoggerError> {
-        set_logger(LOGGER.get_or_init(move || Logger)).map(|()| set_max_level(LevelFilter::Info))
+    pub fn init(max_level: LevelFilter) -> Result<(), SetLoggerError> {
+        set_logger(LOGGER.get_or_init(move || Logger)).map(|()| set_max_level(max_level))
     }
 }
 

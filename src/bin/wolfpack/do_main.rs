@@ -1,5 +1,6 @@
 use clap::Parser;
 use clap::Subcommand;
+use clap::ValueEnum;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -15,10 +16,45 @@ use crate::SigningKeyGenerator;
 
 #[derive(Parser)]
 struct Args {
+    /// Configuration directory.
     #[arg(short = 'c', long = "config", default_value = "/etc/wolfpack")]
     config_dir: PathBuf,
+
+    /// Log level.
+    #[arg(
+        short = 'l',
+        long = "log-level",
+        env = "WOLFPACK_LOG",
+        default_value = "info"
+    )]
+    log_level: LevelFilter,
+
+    /// Subcommand.
     #[clap(subcommand)]
     command: Command,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum LevelFilter {
+    Off,
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl From<LevelFilter> for log::LevelFilter {
+    fn from(other: LevelFilter) -> Self {
+        match other {
+            LevelFilter::Off => Self::Off,
+            LevelFilter::Error => Self::Error,
+            LevelFilter::Warn => Self::Warn,
+            LevelFilter::Info => Self::Info,
+            LevelFilter::Debug => Self::Debug,
+            LevelFilter::Trace => Self::Trace,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -145,8 +181,8 @@ struct CommonBuildArgs {
 }
 
 pub fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
-    Logger::init().map_err(Error::Logger)?;
     let args = Args::parse();
+    Logger::init(args.log_level.into()).map_err(Error::Logger)?;
     let config = Config::open(&args.config_dir)?;
     match args.command {
         Command::Pull => pull(config),

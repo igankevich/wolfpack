@@ -6,6 +6,7 @@ use base58::ToBase58;
 use hkdf::Hkdf;
 use rand::rngs::OsRng;
 use rand::RngCore;
+use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha512;
 use wolfpack::deb;
@@ -140,7 +141,6 @@ impl SigningKeyGenerator {
     pub fn macos(&self) -> Result<(macos::SigningKey, macos::VerifyingKey), Error> {
         // RSA key is not a bag of bytes, so we generate it from the seed
         // using a crypto PRNG.
-        use rand_chacha::rand_core::SeedableRng;
         let mut seed = [0_u8; 32];
         self.hkdf
             .expand(&INFO_MACOS_SEED, &mut seed)
@@ -174,10 +174,20 @@ mod tests {
     fn test_deb() {
         let master_secret_key = MasterSecretKey::new([123_u8; MASTER_SECRET_KEY_LEN]);
         let gen = SigningKeyGenerator::new(&master_secret_key);
-        let (signing_key_1, _verifying_key) = gen.deb().unwrap();
-        let key1 = signing_key_1.to_armored_string().unwrap();
-        let (signing_key_2, _verifying_key) = gen.deb().unwrap();
-        let key2 = signing_key_2.to_armored_string().unwrap();
-        assert_eq!(key1, key2);
+        let (signing_key_1, verifying_key_1) = gen.deb().unwrap();
+        let gen = SigningKeyGenerator::new(&master_secret_key);
+        let (signing_key_2, verifying_key_2) = gen.deb().unwrap();
+        assert_eq!(
+            signing_key_1.to_armored_string().unwrap(),
+            signing_key_2.to_armored_string().unwrap(),
+        );
+        assert_eq!(
+            verifying_key_1
+                .to_armored_string(Default::default())
+                .unwrap(),
+            verifying_key_2
+                .to_armored_string(Default::default())
+                .unwrap(),
+        );
     }
 }

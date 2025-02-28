@@ -7,6 +7,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::io::ErrorKind;
 use std::io::Read;
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -110,7 +111,20 @@ impl Repository {
         let output_dir = dists_dir.join(suite.to_string());
         create_dir_all(output_dir.as_path())?;
         let packages_string = self.to_string();
-        fs_err::write(output_dir.join("Packages"), packages_string.as_bytes())?;
+        for (format, extension) in [
+            (deko::Format::Verbatim, ""),
+            (deko::Format::Gz, ".gz"),
+            (deko::Format::Xz, ".xz"),
+        ] {
+            let filename = format!("Packages{}", extension);
+            let mut writer = deko::AnyEncoder::new(
+                File::create(output_dir.join(filename))?,
+                format,
+                deko::write::Compression::Best,
+            )?;
+            writer.write_all(packages_string.as_bytes())?;
+            writer.finish()?;
+        }
         let release = Release::new(suite, self, packages_string.as_str())?;
         let release_string = release.to_string();
         fs_err::write(output_dir.join("Release"), release_string.as_bytes())?;

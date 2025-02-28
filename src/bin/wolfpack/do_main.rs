@@ -24,8 +24,8 @@ struct Args {
     #[arg(
         short = 'l',
         long = "log-level",
-        env = "WOLFPACK_LOG",
-        default_value = "info"
+        default_value = "info",
+        ignore_case = true
     )]
     log_level: LevelFilter,
 
@@ -145,15 +145,15 @@ struct BuildRepoArgs {
     common: CommonBuildArgs,
 
     /// Repository metadata file.
-    #[clap(value_name = "METADATA-FILE")]
-    metadata_file: PathBuf,
+    #[clap(short = 'm', long = "metadata-file", value_name = "metadata file")]
+    metadata_file: Option<PathBuf>,
 
     /// Directory with pre-built packages.
-    #[clap(value_name = "INPUT-DIRECTORY")]
+    #[clap(value_name = "input directory")]
     input_dir: PathBuf,
 
     /// Output directory.
-    #[clap(value_name = "OUTPUT-DIRECTORY")]
+    #[clap(value_name = "output directory")]
     output_dir: PathBuf,
 }
 
@@ -175,7 +175,7 @@ struct CommonBuildArgs {
     #[clap(
         long = "formats",
         value_name = "format1,format2,...",
-        default_value = "linux"
+        default_value_t = PackageFormat::NATIVE.to_string()
     )]
     package_formats: String,
 }
@@ -271,7 +271,12 @@ fn build_repo(args: BuildRepoArgs) -> Result<ExitCode, Box<dyn std::error::Error
     let gen = SigningKeyGenerator::new(&master_secret_key);
     let formats = PackageFormat::parse_set(&args.common.package_formats)?;
     let builder = PackageBuilder::new(formats);
-    builder.build_repo(&args.metadata_file, &args.input_dir, &args.output_dir, &gen)?;
+    builder.build_repo(
+        args.metadata_file.as_deref(),
+        &args.input_dir,
+        &args.output_dir,
+        &gen,
+    )?;
     Ok(ExitCode::SUCCESS)
 }
 

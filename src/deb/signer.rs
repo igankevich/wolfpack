@@ -94,12 +94,6 @@ impl Verifier for PackageVerifier {
 #[derive(Clone)]
 pub struct SigningKey(SignedSecretKey);
 
-impl From<SigningKey> for SignedSecretKey {
-    fn from(other: SigningKey) -> Self {
-        other.0
-    }
-}
-
 impl SigningKey {
     pub fn to_armored_string(&self) -> Result<String, Error> {
         self.0
@@ -167,7 +161,7 @@ impl SigningKey {
         let packet_version = Default::default();
         let version = Default::default();
         let key_type = KeyType::EdDSALegacy;
-        let created_at = SystemTime::now();
+        let created_at = SystemTime::UNIX_EPOCH;
         let expiration = None;
         let primary_key = packet::SecretKey::new(
             packet::PublicKey::new(
@@ -205,12 +199,19 @@ impl SigningKey {
             Default::default(),
             Default::default(),
         );
+        // OsRng is unused in these functions for Ed25519 algorithm.
         let signed_secret_key = secret_key.sign(OsRng, String::new).map_err(|_| Error)?;
         let signed_public_key = signed_secret_key
             .public_key()
             .sign(OsRng, &signed_secret_key, String::new)
             .map_err(|_| Error)?;
         Ok((SigningKey(signed_secret_key), signed_public_key.into()))
+    }
+}
+
+impl From<SigningKey> for SignedSecretKey {
+    fn from(other: SigningKey) -> Self {
+        other.0
     }
 }
 

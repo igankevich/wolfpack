@@ -52,13 +52,19 @@ impl PackageBuilder {
 
     pub fn build_repo(
         &self,
-        metadata_file: &Path,
+        metadata_file: Option<&Path>,
         input_dir: &Path,
         output_dir: &Path,
         signing_key_generator: &SigningKeyGenerator,
     ) -> Result<(), Error> {
-        let metadata = fs_err::read_to_string(metadata_file)?;
-        let metadata: RepoMetadata = toml::from_str(&metadata)?;
+        let metadata = match metadata_file {
+            Some(metadata_file) => {
+                let metadata = fs_err::read_to_string(metadata_file)?;
+                let metadata: RepoMetadata = toml::from_str(&metadata)?;
+                metadata
+            }
+            None => Default::default(),
+        };
         for format in self.formats.iter() {
             format.build_repo(
                 metadata.clone(),
@@ -82,7 +88,7 @@ pub enum PackageFormat {
 }
 
 impl PackageFormat {
-    pub fn linux() -> &'static [Self] {
+    pub const fn linux() -> &'static [Self] {
         use PackageFormat::*;
         &[Deb, Rpm, Ipk]
     }
@@ -102,6 +108,38 @@ impl PackageFormat {
         &[Msix]
     }
 
+    pub const NATIVE: &'static str = if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "freebsd") {
+        "freebsd"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "linux"
+    };
+
+    pub const fn file_extension(&self) -> &'static str {
+        use PackageFormat::*;
+        match self {
+            Deb => "deb",
+            Rpm => "rpm",
+            Ipk => "ipk",
+            FreeBsdPkg => "pkg",
+            MacOsPkg => "pkg",
+            Msix => "msix",
+        }
+    }
+
+    pub const fn os_name(&self) -> &'static str {
+        use PackageFormat::*;
+        match self {
+            Deb | Rpm | Ipk => "linux",
+            FreeBsdPkg => "freebsd",
+            MacOsPkg => "macos",
+            Msix => "windows",
+        }
+    }
+
     pub fn build_package(
         &self,
         metadata: PackageMetadata,
@@ -115,7 +153,7 @@ impl PackageFormat {
             Self::Deb => {
                 let package: deb::Package = metadata.common.try_into()?;
                 let output_file = output_dir.join(package.file_name());
-                let (signing_key, _) = signing_key_generator.deb()?;
+                let (signing_key, _verifying_key) = signing_key_generator.deb()?;
                 let signer = deb::PackageSigner::new(signing_key);
                 let file = File::create(&output_file)?;
                 package.write(file, rootfs_dir, &signer)?;
@@ -182,34 +220,48 @@ impl PackageFormat {
         output_dir: &Path,
         signing_key_generator: &SigningKeyGenerator,
     ) -> Result<(), Error> {
+        {
+            let canonical_input_dir = input_dir.canonicalize()?;
+            let canonical_output_dir = output_dir.canonicalize()?;
+            if canonical_input_dir.starts_with(&canonical_output_dir)
+                || canonical_output_dir.starts_with(&canonical_input_dir)
+            {
+                return Err(Error::Other(format!(
+                    "Input directory {input_dir:?} and output directory {output_dir:?} \
+                    can't be nested and can't be the same"
+                )));
+            }
+        }
+        let mut output_dir = output_dir.to_path_buf();
+        output_dir.push(self.os_name());
+        output_dir.push(self.file_extension());
+        create_dir_all(&output_dir)?;
         match self {
             Self::Deb => {
                 let (signing_key, verifying_key) = signing_key_generator.deb()?;
                 let verifier = deb::PackageVerifier::new(verifying_key);
-                let repo = deb::Repository::new(output_dir, [input_dir], &verifier)?;
-                let suite = metadata.name.try_into()?;
+                let repo = deb::Repository::new(&output_dir, [input_dir], &verifier)?;
+                let suite = metadata.common.name.try_into()?;
                 let signer = sign::PgpCleartextSigner::new(signing_key.into());
-                repo.write(output_dir, suite, &signer)?;
+                repo.write(&output_dir, suite, &signer)?;
             }
             Self::Rpm => {
                 let (signing_key, _verifying_key) = signing_key_generator.rpm()?;
                 let signer = rpm::PackageSigner::new(signing_key);
-                let repo = rpm::Repository::new([input_dir])?;
-                repo.write(output_dir, &signer)?;
+                let repo = rpm::Repository::new(&output_dir, [input_dir])?;
+                repo.write(&output_dir, &signer)?;
             }
             Self::Ipk => {
                 let (signing_key, verifying_key) = signing_key_generator.ipk()?;
-                let repo = ipk::Repository::new(output_dir, [input_dir], &verifying_key)?;
-                repo.write(output_dir, &signing_key)?;
+                let repo = ipk::Repository::new(&output_dir, [input_dir], &verifying_key)?;
+                repo.write(&output_dir, &signing_key)?;
             }
             Self::FreeBsdPkg => {
                 let (signing_key, _verifying_key) = signing_key_generator.pkg()?;
                 let repo = pkg::Repository::new([input_dir])?;
-                repo.build(output_dir, &signing_key)?;
+                repo.build(&output_dir, &signing_key)?;
             }
             Self::MacOsPkg => {
-                let macos_repo_dir = output_dir.join("macos");
-                create_dir_all(&macos_repo_dir)?;
                 for entry in WalkDir::new(input_dir).into_iter() {
                     let entry = entry.map_err(std::io::Error::other)?;
                     let entry_path = entry.path();
@@ -226,13 +278,11 @@ impl PackageFormat {
                     }
                     fs_err::rename(
                         entry_path,
-                        macos_repo_dir.join(entry_path.file_name().expect("File name exists")),
+                        output_dir.join(entry_path.file_name().expect("File name exists")),
                     )?;
                 }
             }
             Self::Msix => {
-                let msix_repo_dir = output_dir.join("msix");
-                create_dir_all(&msix_repo_dir)?;
                 for entry in WalkDir::new(input_dir).into_iter() {
                     let entry = entry.map_err(std::io::Error::other)?;
                     let entry_path = entry.path();
@@ -241,7 +291,7 @@ impl PackageFormat {
                     }
                     fs_err::rename(
                         entry_path,
-                        msix_repo_dir.join(entry_path.file_name().expect("File name exists")),
+                        output_dir.join(entry_path.file_name().expect("File name exists")),
                     )?;
                 }
             }
@@ -289,8 +339,9 @@ pub struct PackageMetadata {
     // TODO deb overrides
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RepoMetadata {
-    pub name: String,
+    #[serde(flatten)]
+    pub common: wolf::RepoMetadata,
 }

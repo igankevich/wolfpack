@@ -3,12 +3,13 @@ use fs_err::File;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use normalize_path::NormalizePath;
 use quick_xml::de::from_str;
 use quick_xml::errors::serialize::DeError;
 //use quick_xml::se::to_writer;
@@ -21,6 +22,7 @@ use walkdir::WalkDir;
 
 use crate::hash::Hasher;
 use crate::hash::Sha256Hash;
+use crate::hash::Sha256Reader;
 use crate::rpm::Arch;
 use crate::rpm::Package;
 use crate::rpm::PackageSigner;
@@ -30,21 +32,25 @@ pub struct Repository {
 }
 
 impl Repository {
-    pub fn new<I, P>(paths: I) -> Result<Self, std::io::Error>
+    pub fn new<I, P1, P2>(output_dir: P2, paths: I) -> Result<Self, std::io::Error>
     where
-        I: IntoIterator<Item = P>,
-        P: AsRef<Path>,
+        I: IntoIterator<Item = P1>,
+        P1: AsRef<Path>,
+        P2: AsRef<Path>,
     {
         let mut packages = HashMap::new();
-        let mut push_package = |directory: &Path, path: &Path| -> Result<(), std::io::Error> {
-            let relative_path = Path::new(".").join(
-                path.strip_prefix(directory)
-                    .map_err(std::io::Error::other)?
-                    .normalize(),
-            );
-            let reader = File::open(path)?;
-            let package = Package::read(reader)?;
-            packages.insert(relative_path, package);
+        let mut push_package = |path: &Path| -> Result<(), std::io::Error> {
+            let mut reader = Sha256Reader::new(File::open(path)?);
+            let package = Package::read(reader.by_ref())?;
+            let (hash, _size) = reader.digest()?;
+            let mut filename = PathBuf::new();
+            filename.push("data");
+            filename.push(hash.to_string());
+            create_dir_all(output_dir.as_ref().join(&filename))?;
+            filename.push(path.file_name().ok_or(ErrorKind::InvalidData)?);
+            let new_path = output_dir.as_ref().join(&filename);
+            fs_err::rename(path, new_path)?;
+            packages.insert(filename, package);
             Ok(())
         };
         for path in paths.into_iter() {
@@ -57,11 +63,10 @@ impl Repository {
                     {
                         continue;
                     }
-                    push_package(path, entry.path())?
+                    push_package(entry.path())?
                 }
             } else {
-                // TODO
-                push_package(Path::new("."), path)?
+                push_package(path)?
             }
         }
         Ok(Self { packages })
@@ -518,8 +523,9 @@ mod tests {
                     &signer,
                 )
                 .unwrap();
-            let repository = Repository::new([workdir.path()]).unwrap();
-            repository.write(workdir.path(), &signer).unwrap();
+            let output_dir = workdir.path().join("repo");
+            let repository = Repository::new(&output_dir, [workdir.path()]).unwrap();
+            repository.write(&output_dir, &signer).unwrap();
             fs_err::write(
                 "/etc/yum.repos.d/test.repo",
                 format!(
@@ -531,14 +537,14 @@ repo_gpgcheck=1
 gpgcheck=1
 gpgkey=file://{}
 "#,
-                    workdir.path().display(),
+                    output_dir.display(),
                     verifying_key_file.display(),
                 ),
             )
             .unwrap();
             assert!(
                 Command::new("cat")
-                    .arg(workdir.path().join("repodata").join("repomd.xml"))
+                    .arg(output_dir.join("repodata").join("repomd.xml"))
                     .status_checked()
                     .unwrap()
                     .success(),

@@ -11,8 +11,6 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
-use flate2::write::GzEncoder;
-use flate2::Compression;
 use ksign::IO;
 use walkdir::WalkDir;
 
@@ -45,6 +43,7 @@ impl Repository {
             let control = Package::read_control(reader.by_ref(), path, verifier)?;
             let (hash, size) = reader.digest()?;
             let mut filename = PathBuf::new();
+            filename.push("data");
             filename.push(hash.to_string());
             create_dir_all(output_dir.as_ref().join(&filename))?;
             filename.push(path.file_name().ok_or(ErrorKind::InvalidData)?);
@@ -71,7 +70,7 @@ impl Repository {
                 for entry in WalkDir::new(path).into_iter() {
                     let entry = entry?;
                     if entry.file_type().is_dir()
-                        || entry.path().extension() != Some(OsStr::new("deb"))
+                        || entry.path().extension() != Some(OsStr::new("ipk"))
                     {
                         continue;
                     }
@@ -92,12 +91,13 @@ impl Repository {
         let output_dir = output_dir.as_ref();
         create_dir_all(output_dir)?;
         let packages_string = self.to_string();
-        fs_err::write(output_dir.join("Packages"), packages_string.as_bytes())?;
-        {
-            let mut writer = GzEncoder::new(
-                File::create(output_dir.join("Packages.gz"))?,
-                Compression::best(),
-            );
+        for (format, extension) in [(deko::Format::Verbatim, ""), (deko::Format::Gz, ".gz")] {
+            let filename = format!("Packages{}", extension);
+            let mut writer = deko::AnyEncoder::new(
+                File::create(output_dir.join(filename))?,
+                format,
+                deko::write::Compression::Best,
+            )?;
             writer.write_all(packages_string.as_bytes())?;
             writer.finish()?;
         }

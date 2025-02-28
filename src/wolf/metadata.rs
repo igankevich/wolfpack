@@ -13,3 +13,17 @@ pub struct Metadata {
     pub license: String,
     pub arch: Arch,
 }
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepoMetadata {
+    pub name: String,
+}
+
+impl Default for RepoMetadata {
+    fn default() -> Self {
+        Self {
+            name: "main".into(),
+        }
+    }
+}

@@ -231,7 +231,7 @@ impl TryFrom<wolf::Metadata> for Package {
             license: other.license.parse_field("license")?,
             depends: Default::default(),
             provides: Default::default(),
-            maintainer: Default::default(),
+            maintainer: "Wolfpack <wolfpack@wolfpack.com>".parse()?,
             other: Default::default(),
             installed_size: Default::default(),
         })

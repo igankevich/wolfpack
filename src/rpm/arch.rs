@@ -9,6 +9,7 @@ define_arch_enum! {
     (I386, "i386"),
     (Mips64el, "mips64el"),
     (Mipsel, "mipsel"),
+    (Noarch, "noarch"),
 }
 
 define_arch_try_from! {

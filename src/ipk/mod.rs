@@ -1,7 +1,9 @@
+mod arch;
 mod package;
 mod repository;
 mod signer;
 
+pub use self::arch::*;
 pub use self::package::*;
 pub use self::repository::*;
 pub use self::signer::*;

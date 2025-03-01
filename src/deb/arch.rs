@@ -19,7 +19,6 @@ define_arch_enum! {
     (Ppc64el, "ppc64el"),
     (S390x, "s390x"),
     (All, "all"),
-    (Any, "any"),
 }
 
 define_arch_from! {
@@ -36,6 +35,7 @@ define_arch_from! {
     (Mips64el, Mips64el),
     (Ppc64el, Ppc64el),
     (S390x, S390x),
+    (All, All),
 }
 
 impl TryFrom<Value> for HashSet<Arch> {

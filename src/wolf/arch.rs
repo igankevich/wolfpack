@@ -13,4 +13,5 @@ define_arch_enum! {
     (Mips64el, "mips64el"),
     (Ppc64el, "ppc64el"),
     (S390x, "s390x"),
+    (All, "all"),
 }

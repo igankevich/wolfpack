@@ -16,14 +16,14 @@ use walkdir::WalkDir;
 
 use crate::hash::Sha256Hash;
 use crate::hash::Sha256Reader;
+use crate::ipk::Arch;
 use crate::ipk::Error;
 use crate::ipk::Package;
 use crate::ipk::PackageSigner;
 use crate::ipk::PackageVerifier;
-use crate::ipk::SimpleValue;
 
 pub struct Repository {
-    packages: HashMap<SimpleValue, PerArchPackages>,
+    packages: HashMap<Arch, PerArchPackages>,
 }
 
 impl Repository {
@@ -37,7 +37,7 @@ impl Repository {
         P: AsRef<Path>,
         P2: AsRef<Path>,
     {
-        let mut packages: HashMap<SimpleValue, PerArchPackages> = HashMap::new();
+        let mut packages: HashMap<Arch, PerArchPackages> = HashMap::new();
         let mut push_package = |path: &Path| -> Result<(), Error> {
             let mut reader = Sha256Reader::new(File::open(path)?);
             let control = Package::read_control(reader.by_ref(), path, verifier)?;
@@ -56,7 +56,7 @@ impl Repository {
                 filename,
             };
             packages
-                .entry(control.control.architecture.into())
+                .entry(control.control.architecture)
                 .or_insert_with(|| PerArchPackages {
                     packages: Vec::new(),
                 })
@@ -108,11 +108,11 @@ impl Repository {
         Ok(())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&SimpleValue, &PerArchPackages)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&Arch, &PerArchPackages)> {
         self.packages.iter()
     }
 
-    pub fn architectures(&self) -> HashSet<SimpleValue> {
+    pub fn architectures(&self) -> HashSet<Arch> {
         self.packages.keys().cloned().collect()
     }
 }
@@ -189,7 +189,7 @@ mod tests {
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let package_path = workdir.path().join("test.ipk");
             package
-                .write(directory.path(), package_path.as_path(), &signing_key)
+                .write(package_path.as_path(), directory.path(), &signing_key)
                 .unwrap();
             let _ = remove_dir_all(&repo_dir);
             Repository::new(&repo_dir, [&package_path], &verifying_key)
@@ -230,7 +230,7 @@ mod tests {
             assert!(
                 Command::new("opkg")
                     .arg("install")
-                    .arg(package.name().to_string())
+                    .arg(package.name.to_string())
                     .status_checked()
                     .unwrap()
                     .success(),
@@ -240,7 +240,7 @@ mod tests {
             assert!(
                 Command::new("opkg")
                     .arg("remove")
-                    .arg(package.name().to_string())
+                    .arg(package.name.to_string())
                     .status_checked()
                     .unwrap()
                     .success(),

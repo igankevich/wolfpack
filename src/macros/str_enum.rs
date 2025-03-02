@@ -1,4 +1,4 @@
-macro_rules! define_arch_enum {
+macro_rules! define_str_enum {
     { $enum:ident, $(($name:ident, $str:literal),)* } => {
         #[derive(
             Clone,
@@ -57,37 +57,4 @@ macro_rules! define_arch_enum {
     }
 }
 
-pub(crate) use define_arch_enum;
-
-#[allow(unused)]
-macro_rules! define_arch_try_from {
-    { $from:ty, $to:ty, $(($name1:ident, $name2:ident),)* } => {
-        impl TryFrom<$from> for $to {
-            type Error = std::io::Error;
-
-            fn try_from(other: $from) -> Result<Self, Self::Error> {
-                match other {
-                    $( <$from>::$name1 => Ok(<$to>::$name2), )*
-                    _ => Err(std::io::ErrorKind::InvalidData.into()),
-                }
-            }
-        }
-    }
-}
-
-#[allow(unused)]
-pub(crate) use define_arch_try_from;
-
-macro_rules! define_arch_from {
-    { $from:ty, $to:ty, $(($name1:ident, $name2:ident),)* } => {
-        impl From<$from> for $to {
-            fn from(other: $from) -> Self {
-                match other {
-                    $( <$from>::$name1 => <$to>::$name2, )*
-                }
-            }
-        }
-    }
-}
-
-pub(crate) use define_arch_from;
+pub(crate) use define_str_enum;

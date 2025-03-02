@@ -221,7 +221,7 @@ impl TryFrom<wolf::Metadata> for Package {
         Ok(Self {
             name: other.name.parse_field("name")?,
             version: other.version.parse_field("version")?,
-            architecture: other.arch.into(),
+            architecture: Arch::All,
             description: other.description.into(),
             homepage: if other.homepage.is_empty() {
                 None

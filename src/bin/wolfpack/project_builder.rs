@@ -120,7 +120,6 @@ impl ProjectBuilder {
                     dirs.create(&doc_dir)?;
                     copy(&src, &dest_file)?;
                 }
-                let arch = config.get_target()?.try_into()?;
                 let metadata = wolf::Metadata {
                     name: package.name.clone(),
                     version: package.version.clone(),
@@ -135,7 +134,6 @@ impl ProjectBuilder {
                     .next()
                     .unwrap_or_default(),
                     license: package.license.clone().unwrap_or_default(),
-                    arch,
                 };
                 let metadata_string = toml::to_string_pretty(&metadata)?;
                 let metadata_file = output_dir.join("wolfpack.toml");

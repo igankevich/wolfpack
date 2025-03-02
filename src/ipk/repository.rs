@@ -49,6 +49,16 @@ impl Repository {
             filename.push(path.file_name().ok_or(ErrorKind::InvalidData)?);
             let new_path = output_dir.as_ref().join(&filename);
             fs_err::rename(path, new_path)?;
+            let file_name = path.file_name().expect("File name exists");
+            let file_name_sig = {
+                let mut name = file_name.to_os_string();
+                name.push(".sig");
+                name
+            };
+            fs_err::rename(
+                path.parent().expect("Parent exists").join(&file_name_sig),
+                output_dir.as_ref().join(&file_name_sig),
+            )?;
             let control = ExtendedPackage {
                 control,
                 size,
@@ -56,7 +66,7 @@ impl Repository {
                 filename,
             };
             packages
-                .entry(control.control.architecture)
+                .entry(control.control.arch)
                 .or_insert_with(|| PerArchPackages {
                     packages: Vec::new(),
                 })
@@ -183,7 +193,7 @@ mod tests {
         fs_err::remove_file("/etc/opkg/distfeeds.conf").unwrap();
         arbtest(|u| {
             let mut package: Package = u.arbitrary()?;
-            package.architecture = "all".parse().unwrap();
+            package.arch = "all".parse().unwrap();
             package.depends.clear();
             package.installed_size = Some(100);
             let directory: DirectoryOfFiles = u.arbitrary()?;

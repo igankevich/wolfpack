@@ -55,6 +55,8 @@ pub enum Error {
     Cargo(#[from] wolfpack::cargo::Error),
     #[error("{0}")]
     Command(#[from] command_error::Error),
+    #[error("Directory traversing error: {0}")]
+    WalkDir(#[from] walkdir::Error),
     #[error("{0}")]
     Other(String),
 }

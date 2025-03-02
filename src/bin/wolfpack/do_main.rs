@@ -1,9 +1,11 @@
-use clap::Parser;
-use clap::Subcommand;
-use clap::ValueEnum;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
+
+use clap::Parser;
+use clap::Subcommand;
+use clap::ValueEnum;
+use tempfile::TempDir;
 
 use crate::Config;
 use crate::Error;
@@ -69,6 +71,8 @@ enum Command {
     Resolve(ResolveArgs),
     /// Generate signing key.
     Key(KeyArgs),
+    /// Build packages.
+    Build(BuildArgs),
     /// Build a new project.
     BuildProject(BuildProjectArgs),
     /// Build a new package.
@@ -110,6 +114,20 @@ struct ResolveArgs {
 
 #[derive(clap::Args)]
 struct KeyArgs {}
+
+#[derive(clap::Args)]
+struct BuildArgs {
+    #[clap(flatten)]
+    common: CommonBuildArgs,
+
+    /// Directory with the source code.
+    #[clap(value_name = "source code directory")]
+    source_dir: PathBuf,
+
+    /// Output directory.
+    #[clap(value_name = "output directory")]
+    output_dir: PathBuf,
+}
 
 #[derive(clap::Args)]
 struct BuildProjectArgs {
@@ -157,7 +175,7 @@ struct BuildRepoArgs {
     output_dir: PathBuf,
 }
 
-#[derive(clap::Args)]
+#[derive(clap::Args, Clone)]
 struct CommonBuildArgs {
     /// Secret key file.
     #[clap(
@@ -189,6 +207,7 @@ pub fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Command::Search(more_args) => search(config, more_args),
         Command::Install(more_args) => install(config, more_args),
         Command::Resolve(more_args) => resolve(config, more_args),
+        Command::Build(more_args) => build(more_args),
         Command::BuildProject(more_args) => build_project(more_args),
         Command::BuildPackage(more_args) => build_package(more_args),
         Command::BuildRepo(more_args) => build_repo(more_args),
@@ -249,6 +268,30 @@ fn resolve(mut config: Config, args: ResolveArgs) -> Result<ExitCode, Box<dyn st
     })
 }
 
+fn build(args: BuildArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    let workdir = TempDir::with_prefix("wolfpack-")?;
+    let binaries_dir = workdir.path().join("binaries");
+    build_project(BuildProjectArgs {
+        source_dir: args.source_dir,
+        output_dir: binaries_dir.clone(),
+    })?;
+    log::info!("Building packages...");
+    let packages_dir = workdir.path().join("packages");
+    build_package(BuildPackageArgs {
+        common: args.common.clone(),
+        input_dir: binaries_dir,
+        output_dir: packages_dir.clone(),
+    })?;
+    log::info!("Building repos...");
+    build_repo(BuildRepoArgs {
+        common: args.common,
+        metadata_file: None,
+        input_dir: packages_dir,
+        output_dir: args.output_dir,
+    })?;
+    Ok(ExitCode::SUCCESS)
+}
+
 fn build_project(args: BuildProjectArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
     let builder = ProjectBuilder::new();
     builder.build(&args.source_dir, &args.output_dir)?;
@@ -260,9 +303,7 @@ fn build_package(args: BuildPackageArgs) -> Result<ExitCode, Box<dyn std::error:
     let gen = SigningKeyGenerator::new(&master_secret_key);
     let formats = PackageFormat::parse_set(&args.common.package_formats)?;
     let builder = PackageBuilder::new(formats);
-    let metadata_file = args.input_dir.join("wolfpack.toml");
-    let rootfs_dir = args.input_dir.join("rootfs");
-    builder.build_package(&metadata_file, &rootfs_dir, &args.output_dir, &gen)?;
+    builder.build_packages(&args.input_dir, &args.output_dir, &gen)?;
     Ok(ExitCode::SUCCESS)
 }
 

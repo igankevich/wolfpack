@@ -39,7 +39,7 @@ pub struct Package {
     pub name: PackageName,
     pub version: Version,
     pub license: SimpleValue,
-    pub architecture: Arch,
+    pub arch: Arch,
     pub maintainer: SimpleValue,
     pub description: MultilineValue,
     pub installed_size: Option<u64>,
@@ -110,7 +110,7 @@ impl Package {
     }
 
     pub fn file_name(&self) -> String {
-        format!("{}_{}_{}.ipk", self.name, self.version, self.architecture)
+        format!("{}_{}_{}.ipk", self.name, self.version, self.arch)
     }
 }
 
@@ -119,7 +119,7 @@ impl Display for Package {
         writeln!(f, "Package: {}", self.name)?;
         writeln!(f, "Version: {}", self.version)?;
         writeln!(f, "License: {}", self.license)?;
-        writeln!(f, "Architecture: {}", self.architecture)?;
+        writeln!(f, "Architecture: {}", self.arch)?;
         writeln!(f, "Maintainer: {}", self.maintainer)?;
         if let Some(installed_size) = self.installed_size.as_ref() {
             writeln!(f, "Installed-Size: {}", installed_size)?;
@@ -146,7 +146,7 @@ impl FromStr for Package {
             name: fields.remove_any("package")?.try_into()?,
             version: fields.remove_any("version")?.try_into()?,
             license: fields.remove_some("license")?.unwrap_or_default(),
-            architecture: fields.remove_any("architecture")?.as_str().parse()?,
+            arch: fields.remove_any("architecture")?.as_str().parse()?,
             description: fields.remove_any("description")?.try_into()?,
             maintainer: fields.remove_any("maintainer")?.try_into()?,
             installed_size: fields.remove_some("installed-size")?,
@@ -164,7 +164,7 @@ impl TryFrom<wolf::Metadata> for Package {
         Ok(Self {
             name: other.name.parse_field("name")?,
             version: other.version.parse_field("version")?,
-            architecture: other.arch.try_into()?,
+            arch: Arch::All,
             description: other.description.into(),
             license: other.license.parse_field("license")?,
             depends: Default::default(),
@@ -242,7 +242,7 @@ mod tests {
         let _verifying_key = signing_key.to_verifying_key();
         arbtest(|u| {
             let mut package: Package = u.arbitrary()?;
-            package.architecture = "all".parse().unwrap();
+            package.arch = "all".parse().unwrap();
             package.installed_size = Some(100);
             package.depends.clear();
             let directory: DirectoryOfFiles = u.arbitrary()?;

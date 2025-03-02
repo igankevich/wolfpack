@@ -15,7 +15,6 @@ use serde::de::Deserializer;
 use serde::Deserialize;
 
 use crate::build;
-use crate::cargo::Target;
 
 #[derive(Deserialize, Debug)]
 #[serde(default)]
@@ -26,44 +25,6 @@ pub struct BuildConfig {
     pub default_features: bool,
     pub features: BTreeSet<String>,
     pub env: BTreeMap<OsString, OsString>,
-}
-
-impl BuildConfig {
-    pub fn get_target(&self) -> Result<Target, Error> {
-        let arch = self.get_target_impl()?.parse()?;
-        Ok(arch)
-    }
-
-    fn get_target_impl(&self) -> Result<String, Error> {
-        if let Some(target) = self.target.as_ref() {
-            return Ok(target.clone());
-        }
-        let mut child = Command::new("rustc")
-            .arg("-vV")
-            .stdout(Stdio::piped())
-            .spawn_checked()?;
-        let stdout = child.child_mut().stdout.take().expect("Stdout exists");
-        let reader = BufReader::new(stdout);
-        let mut target = None;
-        for line in reader.lines() {
-            let line = line?;
-            let mut words = line.splitn(2, ':');
-            let Some(key) = words.next() else {
-                continue;
-            };
-            if key == "host" {
-                let value = words
-                    .next()
-                    .ok_or(std::io::Error::other("Failed to parse target"))?;
-                target = Some(value.trim().to_string());
-            }
-        }
-        child.wait_checked()?;
-        match target {
-            Some(target) => Ok(target),
-            None => Err(std::io::Error::other("Failed to parse `rustc -vV` output").into()),
-        }
-    }
 }
 
 impl Default for BuildConfig {

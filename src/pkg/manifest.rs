@@ -95,7 +95,7 @@ impl TryFrom<wolf::Metadata> for CompactManifest {
         Ok(Self {
             name: other.name.parse()?,
             version: other.version.parse()?,
-            arch: other.arch.to_string(),
+            arch: "all".into(),
             desc: other.description,
             www: other.homepage,
             licenses: vec![other.license],

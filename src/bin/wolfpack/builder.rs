@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use walkdir::WalkDir;
 use wolfpack::deb;
+use wolfpack::elf;
 use wolfpack::ipk;
 use wolfpack::macos;
 use wolfpack::msix;
@@ -30,6 +31,33 @@ impl PackageBuilder {
         Self { formats }
     }
 
+    pub fn build_packages(
+        &self,
+        input_dir: &Path,
+        output_dir: &Path,
+        signing_key_generator: &SigningKeyGenerator,
+    ) -> Result<(), Error> {
+        for entry in WalkDir::new(input_dir).into_iter() {
+            let entry = entry?;
+            let rootfs_dir = entry.path();
+            if rootfs_dir.file_name() != Some(OsStr::new("rootfs")) {
+                continue;
+            }
+            let parent = rootfs_dir.parent().expect("Parent exists");
+            let metadata_file = parent.join("wolfpack.toml");
+            if !metadata_file.exists() {
+                continue;
+            }
+            self.build_package(
+                &metadata_file,
+                rootfs_dir,
+                output_dir,
+                signing_key_generator,
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn build_package(
         &self,
         metadata_file: &Path,
@@ -39,9 +67,26 @@ impl PackageBuilder {
     ) -> Result<(), Error> {
         let metadata = fs_err::read_to_string(metadata_file)?;
         let metadata: PackageMetadata = toml::from_str(&metadata)?;
+        let elf_targets = elf::Target::scan_dir(rootfs_dir)?;
+        let elf_target = match elf_targets.len() {
+            0 => None,
+            1 => Some(elf_targets.into_iter().next().expect("Checked length")),
+            _ => {
+                use std::fmt::Write;
+                let mut buf = String::with_capacity(4096);
+                buf.push_str("Multiple ELF targets found: ");
+                let mut iter = elf_targets.into_iter();
+                let _ = write!(&mut buf, "{}", iter.next().expect("More than one target"));
+                for target in iter {
+                    let _ = write!(&mut buf, ", {}", target);
+                }
+                return Err(std::io::Error::other(buf).into());
+            }
+        };
         for format in self.formats.iter() {
             format.build_package(
                 metadata.clone(),
+                elf_target,
                 rootfs_dir,
                 output_dir,
                 signing_key_generator,
@@ -143,6 +188,7 @@ impl PackageFormat {
     pub fn build_package(
         &self,
         metadata: PackageMetadata,
+        elf_target: Option<elf::Target>,
         rootfs_dir: &Path,
         output_dir: &Path,
         signing_key_generator: &SigningKeyGenerator,
@@ -151,7 +197,8 @@ impl PackageFormat {
         create_dir_all(output_dir)?;
         let output_file = match self {
             Self::Deb => {
-                let package: deb::Package = metadata.common.try_into()?;
+                let mut package: deb::Package = metadata.common.try_into()?;
+                package.architecture = elf_target.into();
                 let output_file = output_dir.join(package.file_name());
                 let (signing_key, _verifying_key) = signing_key_generator.deb()?;
                 let signer = deb::PackageSigner::new(signing_key);
@@ -160,7 +207,8 @@ impl PackageFormat {
                 output_file
             }
             Self::Rpm => {
-                let package: rpm::Package = metadata.common.try_into()?;
+                let mut package: rpm::Package = metadata.common.try_into()?;
+                package.arch = elf_target.into();
                 let output_file = output_dir.join(package.file_name());
                 let (signing_key, _) = signing_key_generator.rpm()?;
                 let signer = rpm::PackageSigner::new(signing_key);
@@ -169,7 +217,8 @@ impl PackageFormat {
                 output_file
             }
             Self::Ipk => {
-                let package: ipk::Package = metadata.common.try_into()?;
+                let mut package: ipk::Package = metadata.common.try_into()?;
+                package.arch = elf_target.into();
                 let output_file = output_dir.join(package.file_name());
                 let (signing_key, _) = signing_key_generator.ipk()?;
                 let signer = signing_key;
@@ -220,9 +269,10 @@ impl PackageFormat {
         output_dir: &Path,
         signing_key_generator: &SigningKeyGenerator,
     ) -> Result<(), Error> {
+        create_dir_all(output_dir)?;
         {
-            let canonical_input_dir = input_dir.canonicalize()?;
-            let canonical_output_dir = output_dir.canonicalize()?;
+            let canonical_input_dir = fs_err::canonicalize(input_dir)?;
+            let canonical_output_dir = fs_err::canonicalize(output_dir)?;
             if canonical_input_dir.starts_with(&canonical_output_dir)
                 || canonical_output_dir.starts_with(&canonical_input_dir)
             {

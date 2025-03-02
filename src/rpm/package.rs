@@ -308,7 +308,7 @@ impl TryFrom<wolf::Metadata> for Package {
         Ok(Self {
             name: other.name,
             version: other.version,
-            arch: other.arch.try_into()?,
+            arch: Arch::Noarch,
             summary: other.description.clone(),
             description: other.description,
             url: other.homepage,

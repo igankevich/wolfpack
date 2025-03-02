@@ -1,11 +1,48 @@
+use bitflags::bitflags;
 use elf::abi::*;
+use elf::endian::AnyEndian;
 
-define_elf_arch_enum! {
-    Arch,
+use crate::macros::define_int_enum;
+
+define_int_enum! {
+    Class,
+    u8,
+    (Elf32, ELFCLASS32),
+    (Elf64, ELFCLASS64),
+}
+
+impl From<elf::file::Class> for Class {
+    fn from(other: elf::file::Class) -> Self {
+        match other {
+            elf::file::Class::ELF32 => Self::Elf32,
+            elf::file::Class::ELF64 => Self::Elf64,
+        }
+    }
+}
+
+define_int_enum! {
+    ByteOrder,
+    u8,
+    (LittleEndian, ELFDATA2LSB),
+    (BigEndian, ELFDATA2MSB),
+}
+
+impl From<AnyEndian> for ByteOrder {
+    fn from(other: AnyEndian) -> Self {
+        match other {
+            AnyEndian::Little => Self::LittleEndian,
+            AnyEndian::Big => Self::BigEndian,
+        }
+    }
+}
+
+define_int_enum! {
+    Machine,
+    u16,
     (None, EM_NONE),
     (M32, EM_M32),
     (Sparc, EM_SPARC),
-    (Intel386, EM_386),
+    (I386, EM_386),
     (Mororola68k, EM_68K),
     (Mororola88k, EM_88K),
     (Iamcu, EM_IAMCU),
@@ -15,7 +52,7 @@ define_elf_arch_enum! {
     (MipsRs3Le, EM_MIPS_RS3_LE),
     (Parisc, EM_PARISC),
     (Vpp500, EM_VPP500),
-    (Sparc32plus, EM_SPARC32PLUS),
+    (Sparc32Plus, EM_SPARC32PLUS),
     (Intel960, EM_960),
     (Ppc, EM_PPC),
     (Ppc64, EM_PPC64),
@@ -185,56 +222,15 @@ define_elf_arch_enum! {
     (Amdgpu, EM_AMDGPU),
     (Riscv, EM_RISCV),
     (Bpf, EM_BPF),
+    (Loong, EM_LOONGARCH),
 }
 
-macro_rules! define_elf_arch_enum {
-    { $enum:ident, $(($name:ident, $value:ident),)* } => {
-        #[derive(
-            Clone,
-            Copy,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            Debug,
-        )]
-        #[cfg_attr(test, derive(arbitrary::Arbitrary))]
-        #[repr(u16)]
-        pub enum $enum {
-            $( $name = $value, )*
-        }
+const EM_LOONGARCH: u16 = 0x102;
 
-        impl $enum {
-            pub const fn as_str(&self) -> &'static str {
-                match self {
-                    $( $enum::$name => stringify!($value), )*
-                }
-            }
-        }
-
-        impl std::fmt::Display for $enum {
-            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(f, "{}", self.as_str())
-            }
-        }
-
-        impl From<$enum> for u16 {
-            fn from(other: $enum) -> u16 {
-                other as u16
-            }
-        }
-
-        impl TryFrom<u16> for $enum {
-            type Error = std::io::Error;
-            fn try_from(other: u16) -> Result<Self, Self::Error> {
-                match other {
-                    $( $value => Ok($enum::$name), )*
-                    _ => Err(std::io::ErrorKind::InvalidData.into()),
-                }
-            }
-        }
+bitflags! {
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct Flags: u32 {
+        const ARM_SOFT_FLOAT = EF_ARM_ABI_FLOAT_SOFT;
+        const ARM_HARD_FLOAT = EF_ARM_ABI_FLOAT_HARD;
     }
 }
-
-use define_elf_arch_enum;

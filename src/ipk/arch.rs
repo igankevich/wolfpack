@@ -1,5 +1,5 @@
-use crate::macros::define_arch_enum;
-use crate::macros::define_arch_try_from;
+use crate::elf;
+use crate::macros::define_str_enum;
 
 // This directory https://git.openwrt.org/openwrt/openwrt/target/linux/
 // contains `target.mk` files and `Makefile` files that in turn contain `ARCH`
@@ -8,7 +8,7 @@ use crate::macros::define_arch_try_from;
 // in `ARCH` and `CPU_TYPE` also becomes an underscore). For example, for `ARCH
 // := aarch64` and `CPU_TYPE := cortex-a53` the resulting package architecture
 // is `aarch64_cortex_a53`.
-define_arch_enum! {
+define_str_enum! {
     Arch,
     (Aarch64, "aarch64"),
     (Arc, "arc"),
@@ -28,19 +28,29 @@ define_arch_enum! {
     (Noarch, "noarch"),
 }
 
-define_arch_try_from! {
-    crate::wolf::Arch,
-    Arch,
-    (Amd64, X86_64),
-    (Arm64, Aarch64),
-    (Armel, Arm),
-    (Armhf, Arm),
-    (I386, I386),
-    (Mips, Mips),
-    (Mipsel, Mipsel),
-    (Mips64, Mips64),
-    (Mips64el, Mips64el),
-    //(Ppc64el, ),
-    //(S390x, ),
-    (All, All),
+impl From<Option<elf::Target>> for Arch {
+    fn from(target: Option<elf::Target>) -> Self {
+        use elf::macros::*;
+        match target {
+            target!(Arc) => Self::Arc,
+            target!(Loong, LittleEndian, Elf64) => Self::Loongarch64,
+            target!(X86_64) => Self::X86_64,
+            target!(I386) => Self::I386,
+            target!(Aarch64) => Self::Aarch64,
+            target!(Arm, BigEndian) => Self::Armeb,
+            target!(Arm, LittleEndian) => Self::Arm,
+            target!(Mips, LittleEndian, Elf32) => Self::Mipsel,
+            target!(Mips, BigEndian, Elf32) => Self::Mips,
+            target!(Mips, LittleEndian, Elf64) => Self::Mips64el,
+            target!(Mips, BigEndian, Elf64) => Self::Mips64,
+            // TODO MipsRs3Le, MipsX
+            target!(Ppc, BigEndian) => Self::Powerpc,
+            target!(Ppc64, BigEndian) => Self::Powerpc64,
+            Some(other) => {
+                log::warn!("No architecture mapping for ELF target \"{}\"", other);
+                Self::Noarch
+            }
+            None => Self::Noarch,
+        }
+    }
 }

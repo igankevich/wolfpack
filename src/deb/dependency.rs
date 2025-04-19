@@ -277,8 +277,7 @@ impl FromStr for Dependency {
             } else {
                 version_range.start - 1
             };
-            let range = value[..arch_end]
-                .as_bytes()
+            let range = value.as_bytes()[..arch_end]
                 .iter()
                 .position(|ch| *ch == b':')
                 .map(|i| i + 1..arch_end)

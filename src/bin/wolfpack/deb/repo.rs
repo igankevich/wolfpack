@@ -1,9 +1,4 @@
-use command_error::CommandExt;
 use deko::bufread::AnyDecoder;
-use elf::abi::EI_NIDENT;
-use elf::abi::ET_DYN;
-use elf::abi::ET_EXEC;
-use elf::endian::AnyEndian;
 use fs_err::create_dir_all;
 use fs_err::read_to_string;
 use fs_err::File;
@@ -21,11 +16,12 @@ use std::io::ErrorKind;
 use std::io::Read;
 use std::ops::RangeInclusive;
 use std::path::Path;
-use std::process::Command;
 use std::sync::Arc;
 use std::time::Instant;
 use uname_rs::Uname;
 use wolfpack::deb;
+use wolfpack::elf::change_root;
+use wolfpack::elf::is_native_elf;
 use wolfpack::sign::VerifierV2;
 
 use crate::db::Connection;
@@ -88,7 +84,7 @@ impl DebRepo {
                 .insert_deb_package(package, &url, &package_file, component_id)?;
             indexing_progress_bar.lock().inc(1);
         }
-        //log::info!("Indexed {:?}", packages_file);
+        //log::debug!("Indexed {:?}", packages_file);
         // Resolve dependencies in batches.
         progress_bar.lock().inc_length(packages.len() as u64);
         let batch_size = 1_000;
@@ -122,7 +118,12 @@ impl DebRepo {
         let ro_conn = db_conn.lock().clone_read_only()?;
         let ro_conn = ro_conn.lock();
         for package in packages.iter() {
-            for dep in package.inner.depends.iter() {
+            for dep in package
+                .inner
+                .depends
+                .iter()
+                .chain(package.inner.pre_depends.iter())
+            {
                 let matches = ro_conn.select_deb_dependencies(&repo_name, dep)?;
                 if matches.len() != 1 {
                     continue;
@@ -219,7 +220,7 @@ impl Repo for DebRepo {
                         &signature,
                     )
                     .map_err(|_| Error::Verify(release_gpg_file.clone()))?;
-                    log::info!(
+                    log::debug!(
                         "Verified {} against {}",
                         release_file.display(),
                         release_gpg_file.display()
@@ -314,7 +315,7 @@ impl Repo for DebRepo {
         threads.join();
         let progress_bar = progress_bar.lock();
         progress_bar.finish();
-        log::info!(
+        log::debug!(
             "Resolved dependencies of {} packages in {:.2}s",
             progress_bar.length().unwrap_or(0),
             progress_bar.elapsed().as_secs_f32()
@@ -398,7 +399,6 @@ impl Repo for DebRepo {
                     }
                 }
             }
-            // Add dependencies.
             let mut dependencies = VecDeque::new();
             // Select dependencies that has already been resolved on repository pull.
             let resolved_dependencies = db_conn
@@ -413,7 +413,9 @@ impl Repo for DebRepo {
                     .position(|dep| dep.version_matches(&resolved.name, &version));
                 if let Some(i) = i {
                     let dep = depends.remove(i);
-                    log::info!(
+                    log::debug!("Recurse into {}", resolved.name);
+                    dependencies.extend(resolved.depends.clone().into_inner());
+                    log::debug!(
                         "Already resolved \"{}\" as {}({})",
                         dep,
                         resolved.name,
@@ -426,10 +428,10 @@ impl Repo for DebRepo {
             dependencies.extend(depends);
             let mut visited = HashSet::new();
             'outer: while let Some(dep) = dependencies.pop_front() {
-                log::info!("Resolving {}", dep);
+                log::debug!("Resolving {}", dep);
                 let t = Instant::now();
                 let mut candidates = db_conn.lock().select_deb_dependencies(name, &dep)?;
-                log::info!("{}s", t.elapsed().as_secs_f32());
+                log::debug!("{}s", t.elapsed().as_secs_f32());
                 if candidates.is_empty() {
                     return Err(Error::DependencyNotFound(dep.to_string()));
                 }
@@ -473,13 +475,13 @@ impl Repo for DebRepo {
                 for package in candidates.into_iter() {
                     // TODO unique `dependencies`
                     if visited.insert(package.hash.clone()) {
-                        log::info!("Recurse into {}", package.name);
+                        log::debug!("Recurse into {}", package.name);
                         dependencies.extend(package.depends.clone().into_inner());
                         matches.push(package);
                     }
                 }
             }
-            log::info!("Installing...");
+            log::debug!("Installing...");
             // Install in topological (reverse) order.
             for package in matches.into_iter().rev() {
                 if let Some(dirname) = package.filename.parent() {
@@ -499,7 +501,7 @@ impl Repo for DebRepo {
                         let verifier = deb::PackageVerifier::none();
                         let (_control, data) =
                             deb::Package::read(File::open(&package.filename)?, &verifier)?;
-                        log::info!("Installing {}", package.filename.display());
+                        log::debug!("Installing {}", package.filename.display());
                         let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
                         let dst = config.store_dir.join(name);
                         create_dir_all(&dst)?;
@@ -509,12 +511,9 @@ impl Repo for DebRepo {
                         for entry in tar_archive.entries()? {
                             let entry = entry?;
                             let path = dst.join(entry.path()?);
-                            if get_elf_type(&path).is_some() {
-                                log::info!("patching {:?}", path);
-                                Command::new("./patchelf.sh")
-                                    .arg(&path)
-                                    .arg(&dst)
-                                    .status_checked()?;
+                            let metadata = fs_err::symlink_metadata(&path)?;
+                            if metadata.is_file() && is_native_elf(&path)? {
+                                change_root(path, &dst)?;
                             }
                         }
                     }
@@ -534,29 +533,6 @@ impl Repo for DebRepo {
         print_table(matches.iter(), std::io::stdout())?;
         Ok(())
     }
-}
-
-fn get_elf_type(path: &Path) -> Option<ElfType> {
-    let mut file = File::open(path).ok()?;
-    let mut buf = [0; 64];
-    let n = file.read(&mut buf[..]).ok()?;
-    let buf = &mut buf[..n];
-    drop(file);
-    if buf.len() < 4 {
-        return None;
-    }
-    let ident = elf::file::parse_ident::<AnyEndian>(buf).ok()?;
-    let header = elf::file::FileHeader::<AnyEndian>::parse_tail(ident, &buf[EI_NIDENT..]).ok()?;
-    match header.e_type {
-        ET_EXEC => Some(ElfType::Executable),
-        ET_DYN => Some(ElfType::Library),
-        _ => None,
-    }
-}
-
-enum ElfType {
-    Executable,
-    Library,
 }
 
 fn ask_number(prompt: &str, valid_range: RangeInclusive<usize>) -> Result<usize, Error> {

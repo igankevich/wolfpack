@@ -190,6 +190,7 @@ impl Repository {
             maintainer: Default::default(),
             installed_size: Default::default(),
             provides: Default::default(),
+            pre_depends: Default::default(),
             depends: if url.starts_with("https://") {
                 // TODO add other types
                 "apt-transport-https".parse()?

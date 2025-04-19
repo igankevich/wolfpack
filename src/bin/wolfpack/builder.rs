@@ -44,7 +44,7 @@ impl PackageBuilder {
                 continue;
             }
             let parent = rootfs_dir.parent().expect("Parent exists");
-            let metadata_file = parent.join("wolfpack.toml");
+            let metadata_file = parent.join(PACKAGE_CONFIG_FILE_NAME);
             if !metadata_file.exists() {
                 continue;
             }
@@ -395,3 +395,5 @@ pub struct RepoMetadata {
     #[serde(flatten)]
     pub common: wolf::RepoMetadata,
 }
+
+pub const PACKAGE_CONFIG_FILE_NAME: &str = "package.toml";

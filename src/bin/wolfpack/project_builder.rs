@@ -6,15 +6,15 @@ use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
 
-use command_error::CommandExt;
 use lddtree::DependencyAnalyzer;
 use wolfpack::build;
 use wolfpack::cargo;
+use wolfpack::elf;
 use wolfpack::wolf;
 
 use crate::Error;
+use crate::PACKAGE_CONFIG_FILE_NAME;
 
 pub struct ProjectBuilder {}
 
@@ -85,24 +85,10 @@ impl ProjectBuilder {
                         let dest_file = lib_dir.join(file_name);
                         dirs.create(&lib_dir)?;
                         copy(realpath, &dest_file)?;
-                        set_permissions(&dest_file, Permissions::from_mode(0o755))?;
-                        let mut patchelf = Command::new("patchelf");
-                        patchelf.arg("--set-rpath");
-                        patchelf.arg("$ORIGIN");
-                        patchelf.arg("--force-rpath");
-                        patchelf.arg(&dest_file);
-                        patchelf.status_checked()?;
+                        set_permissions(&dest_file, Permissions::from_mode(0o644))?;
+                        elf::patch(&dest_file, "$ORIGIN", None)?;
                     }
-                    let mut patchelf = Command::new("patchelf");
-                    patchelf.arg("--set-rpath");
-                    patchelf.arg("$ORIGIN/../lib");
-                    if let Some(interpreter) = interpreter.as_ref() {
-                        patchelf.arg("--set-interpreter");
-                        patchelf.arg(interpreter);
-                    }
-                    patchelf.arg("--force-rpath");
-                    patchelf.arg(&dest_file);
-                    patchelf.status_checked()?;
+                    elf::patch(&dest_file, "$ORIGIN/../lib", interpreter.as_deref())?;
                 }
                 let doc_dir = {
                     let mut dst = app_dir.to_path_buf();
@@ -136,7 +122,7 @@ impl ProjectBuilder {
                     license: package.license.clone().unwrap_or_default(),
                 };
                 let metadata_string = toml::to_string_pretty(&metadata)?;
-                let metadata_file = output_dir.join("wolfpack.toml");
+                let metadata_file = output_dir.join(PACKAGE_CONFIG_FILE_NAME);
                 fs_err::write(&metadata_file, metadata_string.as_bytes())?;
                 // TODO spdx licenses
             }

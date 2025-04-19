@@ -48,6 +48,8 @@ pub struct Package {
     #[serde(default)]
     pub depends: Dependencies,
     #[serde(default)]
+    pub pre_depends: Dependencies,
+    #[serde(default)]
     pub homepage: Option<SimpleValue>,
     #[serde(flatten)]
     pub other: Fields,
@@ -180,6 +182,9 @@ impl Display for Package {
         if !self.provides.is_empty() {
             writeln!(f, "Provides: {}", self.provides)?;
         }
+        if !self.pre_depends.is_empty() {
+            writeln!(f, "Pre-Depends: {}", self.pre_depends)?;
+        }
         if !self.depends.is_empty() {
             writeln!(f, "Depends: {}", self.depends)?;
         }
@@ -207,6 +212,7 @@ impl FromStr for Package {
             maintainer: fields.remove_any("maintainer")?.try_into()?,
             installed_size: fields.remove_some("installed-size")?,
             provides: fields.remove_some("provides")?.unwrap_or_default(),
+            pre_depends: fields.remove_some("pre-depends")?.unwrap_or_default(),
             depends: fields.remove_some("depends")?.unwrap_or_default(),
             homepage: fields.remove_some("homepage")?,
             other: fields,
@@ -229,6 +235,7 @@ impl TryFrom<wolf::Metadata> for Package {
                 Some(other.homepage.parse_field("homepage")?)
             },
             license: other.license.parse_field("license")?,
+            pre_depends: Default::default(),
             depends: Default::default(),
             provides: Default::default(),
             maintainer: "Wolfpack <wolfpack@wolfpack.com>".parse()?,
@@ -323,6 +330,7 @@ mod tests {
             let mut control: Package = u.arbitrary()?;
             control.architecture = "all".parse().unwrap();
             control.depends.clear();
+            control.pre_depends.clear();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let path = workdir.path().join("test.deb");
             let _ = remove_dir_all(root.as_path());

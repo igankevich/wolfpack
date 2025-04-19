@@ -62,6 +62,12 @@ impl Connection {
         component_id: Id,
     ) -> Result<(), Error> {
         let hash = package.hash();
+        let all_dependencies = {
+            let mut all = Vec::new();
+            all.extend(package.inner.pre_depends.iter().cloned());
+            all.extend(package.inner.depends.iter().cloned());
+            deb::Dependencies::new(all)
+        };
         let id = self
             .inner
             .prepare_cached(
@@ -78,8 +84,8 @@ impl Connection {
                     package.inner.architecture.as_str(),
                     package.inner.description.as_str(),
                     package.inner.installed_size.map(|s| s.saturating_mul(1024)), // Convert from KiB.
-                    if !package.inner.depends.is_empty() {
-                        Some(package.inner.depends.to_string())
+                    if !all_dependencies.is_empty() {
+                        Some(all_dependencies.to_string())
                     } else {
                         None
                     },
@@ -361,6 +367,7 @@ pub struct DebMatch {
     pub description: String,
 }
 
+#[derive(Debug)]
 pub struct DebDependencyMatch {
     pub id: Id,
     pub name: String,

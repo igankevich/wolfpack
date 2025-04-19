@@ -33,7 +33,7 @@ impl From<Option<elf::Target>> for Arch {
         use elf::macros::*;
         match target {
             target!(Arc) => Self::Arc,
-            target!(Loong, LittleEndian, Elf64) => Self::Loongarch64,
+            target!(Loongarch, LittleEndian, Elf64) => Self::Loongarch64,
             target!(X86_64) => Self::X86_64,
             target!(I386) => Self::I386,
             target!(Aarch64) => Self::Aarch64,

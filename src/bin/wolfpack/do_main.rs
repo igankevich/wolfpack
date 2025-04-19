@@ -7,8 +7,10 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use tempfile::TempDir;
 
+use crate::exec;
 use crate::Config;
 use crate::Error;
+use crate::ExecArgs;
 use crate::Logger;
 use crate::MasterSecretKey;
 use crate::PackageBuilder;
@@ -79,6 +81,8 @@ enum Command {
     BuildPackage(BuildPackageArgs),
     /// Build a new repository.
     BuildRepo(BuildRepoArgs),
+    /// Execute foreign binary.
+    Exec(ExecArgs),
 }
 
 #[derive(clap::Args)]
@@ -212,6 +216,7 @@ pub fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Command::BuildPackage(more_args) => build_package(more_args),
         Command::BuildRepo(more_args) => build_repo(more_args),
         Command::Key(more_args) => key(more_args),
+        Command::Exec(more_args) => Ok(exec(more_args)?),
     }
 }
 

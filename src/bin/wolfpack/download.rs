@@ -65,7 +65,7 @@ async fn do_download_file<P: AsRef<Path>>(
             if let Some(downloaded_file) = downloaded_file.as_ref() {
                 if let Some(expires) = downloaded_file.expires {
                     if expires > SystemTime::now() {
-                        log::info!("Fresh {}", url);
+                        log::debug!("Fresh {}", url);
                         return Ok(());
                     }
                 }
@@ -104,14 +104,14 @@ async fn do_download_file<P: AsRef<Path>>(
                 match (file_size, downloaded_file.file_size) {
                     (Some(len1), Some(len2)) if len1 != len2 => {
                         // File was externally modified.
-                        log::info!("Force-update {}", url);
+                        log::debug!("Force-update {}", url);
                         externally_modified = true;
                         continue;
                     }
                     _ => {}
                 }
             }
-            log::info!("Up-to-date {}", url);
+            log::debug!("Up-to-date {}", url);
             return Ok(());
         }
         break response;
@@ -142,7 +142,7 @@ async fn do_download_file<P: AsRef<Path>>(
         .insert_downloaded_file(url, etag, last_modified, real_max_age, content_length)?;
     let mut file = File::create(path)?;
     let mut hasher = hash.as_ref().map(|h| h.hasher());
-    log::info!("Downloading {} to {}", url, path.display());
+    log::debug!("Downloading {} to {}", url, path.display());
     if let Some(progress_bar) = progress_bar.as_ref() {
         if let Some(content_length) = content_length {
             progress_bar.lock().inc_length(content_length);
@@ -159,7 +159,7 @@ async fn do_download_file<P: AsRef<Path>>(
     }
     file.flush()?;
     drop(file);
-    log::info!("Finished downloading {} to {}", url, path.display());
+    log::debug!("Finished downloading {} to {}", url, path.display());
     if let (Some(hash), Some(hasher)) = (hash, hasher) {
         let actual_hash = hasher.finalize();
         if hash != actual_hash {

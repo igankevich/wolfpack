@@ -22,9 +22,9 @@ define_str_enum! {
 
 impl From<Option<elf::Target>> for Arch {
     fn from(target: Option<elf::Target>) -> Self {
+        use elb::ArmFlags;
+        use elb::Machine;
         use elf::macros::*;
-        use elf::Flags;
-        use elf::Machine;
         use elf::Target;
         match target {
             target!(X86_64) => Self::X86_64,
@@ -34,12 +34,14 @@ impl From<Option<elf::Target>> for Arch {
                 machine: Machine::Arm,
                 flags,
                 ..
-            }) if flags.contains(Flags::ARM_SOFT_FLOAT) => Self::Arm,
+            }) if ArmFlags::from_bits_truncate(flags).contains(ArmFlags::SOFT_FLOAT) => Self::Arm,
             Some(Target {
                 machine: Machine::Arm,
                 flags,
                 ..
-            }) if flags.contains(Flags::ARM_HARD_FLOAT) => Self::Armhfp,
+            }) if ArmFlags::from_bits_truncate(flags).contains(ArmFlags::HARD_FLOAT) => {
+                Self::Armhfp
+            }
             target!(Mips, LittleEndian, Elf32) => Self::Mipsel,
             target!(Mips, BigEndian, Elf32) => Self::Mips,
             target!(Mips, LittleEndian, Elf64) => Self::Mips64el,
@@ -49,7 +51,7 @@ impl From<Option<elf::Target>> for Arch {
             target!(Ppc64, LittleEndian) => Self::Ppc64le,
             target!(S390) => Self::S390x,
             target!(Sparc) => Self::Sparc,
-            target!(Sparc32Plus) => Self::Sparc,
+            target!(Sparc32plus) => Self::Sparc,
             target!(Sparcv9) => Self::Sparc64,
             Some(other) => {
                 log::warn!("No architecture mapping for ELF target \"{}\"", other);

@@ -29,8 +29,8 @@ pub enum Error {
     NotFound(String),
     #[error("Dependency `{0}` not found")]
     DependencyNotFound(String),
-    #[error("Failed to parse ELF: {0}")]
-    Elf(#[from] elf::ParseError),
+    #[error("ELF error: {0}")]
+    Elf(#[from] elb::Error),
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("Invalid header: {0}")]

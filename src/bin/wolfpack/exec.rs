@@ -64,13 +64,14 @@ pub fn exec(args: ExecArgs) -> Result<ExitCode, std::io::Error> {
             std::ptr::null(),
         )
     })?;
-    let old_root_dir = args.rootfs_dir.join(".wolfpack-exec-old");
+    let old_root_dir = args.rootfs_dir.join(".parent");
     fs_err::create_dir_all(&old_root_dir)?;
     let root_dir_bind = args.rootfs_dir.join(
         args.rootfs_dir
             .strip_prefix("/")
             .expect("Checked that the path is absolute above"),
     );
+    fs_err::create_dir_all(&root_dir_bind)?;
     let c_old_root_dir = into_c_string(old_root_dir);
     let c_rootfs_dir = into_c_string(args.rootfs_dir);
     check(unsafe {
@@ -89,8 +90,6 @@ pub fn exec(args: ExecArgs) -> Result<ExitCode, std::io::Error> {
             c_old_root_dir.as_c_str().as_ptr(),
         )
     })?;
-    fs_err::create_dir_all(&root_dir_bind)?;
-    //let c_root_dir_bind = into_c_string(root_dir_bind);
     check(unsafe {
         mount(
             c"/".as_ptr(),
@@ -100,16 +99,25 @@ pub fn exec(args: ExecArgs) -> Result<ExitCode, std::io::Error> {
             std::ptr::null(),
         )
     })?;
-    //fs_err::create_dir_all("/proc")?;
-    //check(unsafe {
-    //    mount(
-    //        c"proc".as_ptr(),
-    //        c"/proc".as_ptr(),
-    //        c"proc".as_ptr(),
-    //        MS_NOSUID | MS_NODEV | MS_NOEXEC,
-    //        std::ptr::null(),
-    //    )
-    //})?;
+    for (source, target) in [
+        (c"/.parent/proc", c"/proc"),
+        (c"/.parent/sys", c"/sys"),
+        (c"/.parent/dev", c"/dev"),
+    ] {
+        unsafe { libc::rmdir(target.as_ptr()) };
+        unsafe { libc::unlink(target.as_ptr()) };
+        //check(unsafe { libc::mkdir(target.as_ptr(), 0o755) })?;
+        check(unsafe { libc::symlink(source.as_ptr(), target.as_ptr()) })?;
+        //check(unsafe {
+        //    mount(
+        //        source.as_ptr(),
+        //        target.as_ptr(),
+        //        c"none".as_ptr(),
+        //        MS_BIND,
+        //        std::ptr::null(),
+        //    )
+        //})?;
+    }
     let mut command = Command::new(&args.program);
     command.args(&args.args);
     if args.clear_env {

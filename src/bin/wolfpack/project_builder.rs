@@ -55,6 +55,7 @@ impl ProjectBuilder {
                     let dest_file = dest_dir.join(path.file_name().expect("File name is present"));
                     copy(&path, &dest_file)?;
                     set_permissions(&dest_file, Permissions::from_mode(0o755))?;
+                    // TODO set rpath via rust args
                     let analyzer = DependencyAnalyzer::new("/".into());
                     let dependencies = analyzer.analyze(&path)?;
                     let interpreter = if let Some(interpreter) = dependencies.interpreter.as_ref() {

@@ -376,6 +376,7 @@ mod tests {
             let mut package: Package = u.arbitrary()?;
             package.architecture = "all".parse().unwrap();
             package.depends.clear();
+            package.pre_depends.clear();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let deb_path = workdir.path().join("test.deb");
             let _ = remove_dir_all(&root);

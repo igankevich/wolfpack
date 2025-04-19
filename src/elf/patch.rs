@@ -1,20 +1,22 @@
 use std::collections::BTreeSet;
 use std::ffi::CString;
+use std::ffi::OsStr;
 use std::ffi::OsString;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::ffi::OsStringExt;
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 
-use elb::ByteOrder;
-use elb::Class;
+use elb::host;
 use elb::DynamicTag;
 use elb::Elf;
 use elb::ElfPatcher;
-use elb::Machine;
+use elb_dl::DependencyTree;
+use elb_dl::DynamicLoader;
+use elb_dl::Libc;
 use fs_err::File;
 use fs_err::OpenOptions;
-use lddtree::DependencyAnalyzer;
 
 pub fn patch<P1, P2>(file: P1, rpath: P2, interpreter: Option<&Path>) -> Result<(), elb::Error>
 where
@@ -43,42 +45,61 @@ where
     Ok(())
 }
 
-pub fn change_root<P1, P2>(file: P1, root: P2) -> Result<(), std::io::Error>
+pub fn change_root<P1, P2>(file: P1, root: P2) -> Result<bool, elb_dl::Error>
 where
     P1: AsRef<Path>,
     P2: Into<PathBuf>,
 {
+    let Some(host_class) = host::CLASS else {
+        return Ok(false);
+    };
+    let Some(host_byte_order) = host::BYTE_ORDER else {
+        return Ok(false);
+    };
+    let Some(host_machine) = host::MACHINE else {
+        return Ok(false);
+    };
     let root = root.into();
     let file = file.as_ref();
-    log::info!("Changing root to {}: {}", root.display(), file.display());
-    // TODO
-    let analyzer = DependencyAnalyzer::new(root.clone())
-        .add_library_path(root.join("lib/x86_64-linux-gnu"))
-        .add_library_path(root.join("usr/lib/x86_64-linux-gnu"));
-    let dependencies = match analyzer.analyze(file) {
-        Ok(dependencies) => dependencies,
-        Err(e) => {
-            log::warn!("Failed to analyze dependencies of {:?}: {e}", file);
-            return Ok(());
-        }
+    let mut f = File::open(file)?;
+    let elf = match Elf::read_unchecked(&mut f, 4096) {
+        Ok(header) => header,
+        Err(elb::Error::NotElf) => return Ok(false),
+        Err(e) => return Err(e.into()),
     };
+    if !(elf.header.byte_order == host_byte_order
+        && elf.header.class == host_class
+        && elf.header.machine == host_machine)
+    {
+        return Ok(false);
+    }
+    log::info!("Changing root to {}: {}", root.display(), file.display());
+    let interpreter = elf.read_interpreter(&mut f)?;
+    let Some(dynamic_table) = elf.read_dynamic_table(&mut f)? else {
+        return Ok(false);
+    };
+    if dynamic_table.get(DynamicTag::Needed).is_none() {
+        // Statically linked executable.
+        return Ok(false);
+    }
+    drop(f);
+    let mut tree = DependencyTree::new();
+    let search_dirs = elb_dl::glibc::get_search_dirs(&root)?;
+    log::info!("Library search dirs: {search_dirs:#?}");
+    let loader = DynamicLoader::options()
+        .libc(Libc::Glibc)
+        .search_dirs(search_dirs)
+        .new_loader();
+    let dependencies = loader.resolve_dependencies(file, &mut tree)?;
     // Change interpreter.
-    let interpreter = if let Some(interpreter) = dependencies.interpreter.as_ref() {
-        let library = dependencies.libraries.get(interpreter).ok_or_else(|| {
-            std::io::Error::other(format!("Interpreter {} not found", interpreter))
-        })?;
-        let dest_file = match library.realpath.as_ref() {
-            Some(realpath) => realpath.clone(),
-            None => {
-                if library.path.starts_with(&root) {
-                    library.path.clone()
-                } else {
-                    Path::new(&root).join(&library.path)
-                }
-            }
+    let interpreter = if let Some(c_interpreter) = interpreter.as_ref() {
+        let interpreter = Path::new(OsStr::from_bytes(c_interpreter.as_bytes()));
+        let Ok(interpreter) = interpreter.strip_prefix("/") else {
+            // Bad interpreter.
+            return Ok(false);
         };
-        let new_interpreter = canonicalize_in_root(&dest_file, &root)?;
-        eprintln!("Set interp {:?} library {:?}", new_interpreter, library);
+        let new_interpreter = canonicalize_in_root(&root.join(interpreter), &root)?;
+        eprintln!("Set interp {:?}", new_interpreter);
         Some(new_interpreter)
     } else {
         None
@@ -86,18 +107,8 @@ where
     // TODO modify existing rpath
     // Change rpath.
     let mut rpath = BTreeSet::new();
-    for (_file_name, library) in dependencies.libraries.iter() {
-        let dest_file = match library.realpath.as_ref() {
-            Some(realpath) => realpath.clone(),
-            None => {
-                let path = library
-                    .path
-                    .strip_prefix(&root)
-                    .unwrap_or(library.path.as_path());
-                Path::new(&root).join(path)
-            }
-        };
-        rpath.insert(dest_file.parent().expect("Parent exists").to_path_buf());
+    for path in dependencies.iter() {
+        rpath.insert(path.parent().expect("Parent exists").to_path_buf());
     }
     // Join rpath with ":".
     let mut rpath_str = OsString::new();
@@ -113,7 +124,7 @@ where
     }
     eprintln!("Set rpath {:?}", rpath_str);
     patch(file, rpath_str, interpreter.as_deref()).map_err(std::io::Error::other)?;
-    Ok(())
+    Ok(true)
 }
 
 fn canonicalize_in_root(path: &Path, root: &Path) -> Result<PathBuf, std::io::Error> {
@@ -135,54 +146,3 @@ fn canonicalize_in_root(path: &Path, root: &Path) -> Result<PathBuf, std::io::Er
     }
     Ok(new_path)
 }
-
-pub fn is_native_elf<P: AsRef<Path>>(path: &P) -> Result<bool, elb::Error> {
-    let Some(host_class) = HOST_CLASS else {
-        return Ok(false);
-    };
-    let Some(host_byte_order) = HOST_BYTE_ORDER else {
-        return Ok(false);
-    };
-    let Some(host_machine) = HOST_MACHINE else {
-        return Ok(false);
-    };
-    let mut file = File::open(path.as_ref())?;
-    let header = match elb::Header::read(&mut file) {
-        Ok(header) => header,
-        Err(elb::Error::NotElf) => return Ok(false),
-        Err(e) => return Err(e),
-    };
-    Ok(header.byte_order == host_byte_order
-        && header.class == host_class
-        && header.machine == host_machine)
-}
-
-const HOST_BYTE_ORDER: Option<ByteOrder> = if cfg!(target_endian = "little") {
-    Some(ByteOrder::LittleEndian)
-} else if cfg!(target_endian = "big") {
-    Some(ByteOrder::BigEndian)
-} else {
-    None
-};
-
-const HOST_CLASS: Option<Class> = if cfg!(target_pointer_width = "32") {
-    Some(Class::Elf32)
-} else if cfg!(target_pointer_width = "64") {
-    Some(Class::Elf64)
-} else {
-    None
-};
-
-const HOST_MACHINE: Option<Machine> = if cfg!(target_arch = "x86_64") {
-    Some(Machine::X86_64)
-} else if cfg!(target_arch = "arm") {
-    Some(Machine::Arm)
-} else if cfg!(target_arch = "aarch64") {
-    Some(Machine::Aarch64)
-} else if cfg!(target_arch = "mips") {
-    Some(Machine::Mips)
-} else {
-    None
-};
-
-// TODO ELF flags from target_abi

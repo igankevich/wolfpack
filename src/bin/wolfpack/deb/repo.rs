@@ -21,7 +21,6 @@ use std::time::Instant;
 use uname_rs::Uname;
 use wolfpack::deb;
 use wolfpack::elf::change_root;
-use wolfpack::elf::is_native_elf;
 use wolfpack::sign::VerifierV2;
 
 use crate::db::Connection;
@@ -512,7 +511,7 @@ impl Repo for DebRepo {
                             let entry = entry?;
                             let path = dst.join(entry.path()?);
                             let metadata = fs_err::symlink_metadata(&path)?;
-                            if metadata.is_file() && is_native_elf(&path)? {
+                            if metadata.is_file() {
                                 change_root(path, &dst)?;
                             }
                         }

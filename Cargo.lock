@@ -987,9 +987,9 @@ dependencies = [
 
 [[package]]
 name = "elb"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05dcf375f87e3f84faaf2063b8c3a1c3e77ff71c9d84bffb98c3a593b44635e6"
+checksum = "98416d8e962d579e6cb4152f1cdba89f9e6a8696c40b7cc2f26ec681787ac8b7"
 dependencies = [
  "bitflags",
  "log",
@@ -998,9 +998,9 @@ dependencies = [
 
 [[package]]
 name = "elb-dl"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e44a1247755f418de2ff71cb875681bf39a82d43c97ff3b9158fd322eea2b65"
+checksum = "39ad6759740c3273c4fb58a9fb9c689a1d40634a18656872c3580ba1f0d44b8c"
 dependencies = [
  "base32-fs",
  "elb",
@@ -2929,9 +2929,9 @@ dependencies = [
 
 [[package]]
 name = "scroll_derive"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f81c2fde025af7e69b1d1420531c8a8811ca898919db177141a85313b1cb932"
+checksum = "1783eabc414609e28a5ba76aee5ddd52199f7107a0b24c2e9746a1ecc34a683d"
 dependencies = [
  "proc-macro2",
  "quote",

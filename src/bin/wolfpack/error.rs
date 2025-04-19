@@ -31,6 +31,8 @@ pub enum Error {
     DependencyNotFound(String),
     #[error("ELF error: {0}")]
     Elf(#[from] elb::Error),
+    #[error("ELF dynamic loader error: {0}")]
+    ElfDl(#[from] elb_dl::Error),
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("Invalid header: {0}")]

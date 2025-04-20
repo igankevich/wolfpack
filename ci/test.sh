@@ -59,11 +59,37 @@ cargo_test_all() {
     unset RUST_TEST_THREADS
 }
 
+wolfpack() {
+    ./target/debug/wolfpack "$@"
+}
+
+run_in() {
+    root="$1"
+    shift
+    uid="$(id -u)"
+    if test "$uid" = "0" || test -e /.dockerenv; then
+        chroot "$root" "$@"
+    else
+        unshare -r /bin/sh -c "chroot $root $*"
+    fi
+}
+
+wolfpack_build_project_test() {
+    cargo build --bin wolfpack
+    rm -rf "$workdir"/dummy
+    rm -rf "$workdir"/out
+    cargo new "$workdir"/dummy
+    wolfpack build-project "$workdir"/dummy "$workdir"/out
+    root="$workdir"/out/dummy/default/rootfs
+    run_in "$root" /opt/dummy/bin/dummy
+}
+
 main() {
     . ./ci/preamble.sh
     install_dependencies
     cargo_lints
     cargo_test_all "$@"
+    wolfpack_build_project_test
 }
 
 main "$@"

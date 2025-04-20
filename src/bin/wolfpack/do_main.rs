@@ -151,7 +151,7 @@ struct BuildPackageArgs {
 
     /// Directory with package metadata and contents.
     ///
-    /// `wolfpack.toml` file contains the metadata, `rootfs` subdirectory contains the packaged
+    /// `package.toml` file contains the metadata, `rootfs` subdirectory contains the packaged
     /// files.
     #[clap(value_name = "input directory")]
     input_dir: PathBuf,

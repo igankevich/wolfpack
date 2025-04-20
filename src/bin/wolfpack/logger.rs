@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 
 use log::set_logger;
 use log::set_max_level;
+use log::Level;
 use log::LevelFilter;
 use log::Log;
 use log::Metadata;
@@ -25,7 +26,11 @@ impl Log for Logger {
     fn log(&self, record: &Record) {
         use std::fmt::Write;
         let mut buffer = String::with_capacity(4096);
-        if writeln!(&mut buffer, "{}", record.args()).is_ok() {
+        let prefix = match record.level() {
+            Level::Warn => "WARNING: ",
+            _ => "",
+        };
+        if writeln!(&mut buffer, "{prefix}{}", record.args()).is_ok() {
             use std::io::Write;
             let _ = stderr().write_all(buffer.as_bytes());
         }

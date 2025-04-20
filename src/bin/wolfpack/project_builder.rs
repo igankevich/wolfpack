@@ -1,13 +1,15 @@
+use fs_err::copy;
 use fs_err::create_dir_all;
 use fs_err::set_permissions;
 use std::collections::HashSet;
-use std::fs::copy;
 use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 
-use lddtree::DependencyAnalyzer;
+use elb_dl::DependencyTree;
+use elb_dl::DynamicLoader;
+use elb_dl::Libc;
 use wolfpack::build;
 use wolfpack::cargo;
 use wolfpack::elf;
@@ -27,25 +29,33 @@ impl ProjectBuilder {
         let packages = cargo::get_packages(project_dir)?;
         for package in packages.into_iter() {
             let output_dir = output_dir.join(&package.name);
-            for (config_name, config) in package.metadata.wolfpack.iter() {
+            for (config_name, config) in package.metadata.wolfpack.into_iter() {
                 log::trace!(
                     "Building package {:?} with configuration {:?}",
                     package.name,
                     config_name
                 );
+                if !config.common.prefix.is_absolute() {
+                    return Err(Error::InstallationPrefix(config.common.prefix));
+                }
                 let output_dir = output_dir.join(config_name);
-                let outputs = cargo::build_package(&package.name, config, project_dir)?;
-                let mut dirs = DirMaker::new();
                 let rootfs_dir = output_dir.join("rootfs");
                 let app_dir = {
                     let mut dir = rootfs_dir.to_path_buf();
-                    // TODO configure
-                    dir.push("opt");
+                    dir.push(
+                        config
+                            .common
+                            .prefix
+                            .strip_prefix("/")
+                            .expect("Checked above"),
+                    );
                     dir.push(&package.name);
                     dir
                 };
+                let build_output = cargo::build_package(&package.name, &config, project_dir)?;
+                let mut dirs = DirMaker::new();
                 let lib_dir = app_dir.join("lib");
-                for (target, path) in outputs.into_iter() {
+                for (target, path) in build_output.files.into_iter() {
                     let subdir = match target {
                         build::BuildTarget::Executable => "bin",
                         build::BuildTarget::Library => "lib",
@@ -55,41 +65,52 @@ impl ProjectBuilder {
                     let dest_file = dest_dir.join(path.file_name().expect("File name is present"));
                     copy(&path, &dest_file)?;
                     set_permissions(&dest_file, Permissions::from_mode(0o755))?;
-                    // TODO set rpath via rust args
-                    let analyzer = DependencyAnalyzer::new("/".into());
-                    let dependencies = analyzer.analyze(&path)?;
-                    let interpreter = if let Some(interpreter) = dependencies.interpreter.as_ref() {
-                        let library = dependencies
-                            .libraries
-                            .get(interpreter)
-                            .ok_or_else(|| Error::LibraryNotFound(interpreter.into()))?;
-                        let realpath = library.realpath.as_ref().expect("Checked above");
-                        let file_name = realpath.file_name().expect("File name exists");
-                        let dest_file = Path::new("/").join(
-                            lib_dir
-                                .strip_prefix(&rootfs_dir)
-                                .expect("Prefix exists")
-                                .join(file_name),
-                        );
-                        eprintln!("Set interp {:?}", dest_file);
-                        Some(dest_file)
-                    } else {
-                        None
+                    let mut tree = DependencyTree::new();
+                    let Some((old_interpreter, new_interpreter)) =
+                        build_output.interpreter.as_ref()
+                    else {
+                        // No need to patch static binaries.
+                        continue;
                     };
-                    for (file_name, library) in dependencies.libraries.iter() {
-                        let realpath = library
-                            .realpath
-                            .as_ref()
-                            .ok_or_else(|| Error::LibraryNotFound(library.path.clone()))?;
-                        let file_name =
-                            Path::new(&file_name).file_name().expect("File name exists");
+                    let search_dirs = elb_dl::glibc::get_search_dirs(&config.common.sysroot)?;
+                    let loader = DynamicLoader::options()
+                        .libc(Libc::Glibc)
+                        .search_dirs(search_dirs)
+                        .new_loader();
+                    let dependencies = loader.resolve_dependencies(&path, &mut tree)?;
+                    for path in dependencies.iter() {
+                        let (path, mode, patch) = if path == new_interpreter {
+                            (old_interpreter.as_path(), 0o755, false)
+                        } else {
+                            (path.as_path(), 0o644, true)
+                        };
+                        let file_name = path.file_name().expect("File name exists");
                         let dest_file = lib_dir.join(file_name);
                         dirs.create(&lib_dir)?;
-                        copy(realpath, &dest_file)?;
-                        set_permissions(&dest_file, Permissions::from_mode(0o644))?;
-                        elf::patch(&dest_file, "$ORIGIN", None)?;
+                        copy(path, &dest_file)?;
+                        set_permissions(&dest_file, Permissions::from_mode(mode))?;
+                        if patch {
+                            elf::patch(&dest_file, "$ORIGIN", None)?;
+                        }
                     }
-                    elf::patch(&dest_file, "$ORIGIN/../lib", interpreter.as_deref())?;
+                    // TODO this is unrealiable without chroot
+                    // Check that all dependencies can be resolved in the new root.
+                    //{
+                    //    let mut tree = DependencyTree::new();
+                    //    let loader = DynamicLoader::options()
+                    //        .root(&rootfs_dir)
+                    //        .libc(Libc::Musl)
+                    //        //.search_dirs_override(vec![app_dir.join("lib")])
+                    //        .new_loader();
+                    //    let mut queue = VecDeque::new();
+                    //    queue.push_back(dest_file.to_path_buf());
+                    //    while let Some(path) = queue.pop_front() {
+                    //        let deps = loader
+                    //            .resolve_dependencies(&path, &mut tree)
+                    //            .map_err(|e| Error::ElfDependency(e.to_string()))?;
+                    //        queue.extend(deps);
+                    //    }
+                    //}
                 }
                 let doc_dir = {
                     let mut dst = app_dir.to_path_buf();

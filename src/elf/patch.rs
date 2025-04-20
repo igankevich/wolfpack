@@ -39,6 +39,8 @@ where
         bytes.push(0_u8);
         let c_interpreter = unsafe { CString::from_vec_with_nul_unchecked(bytes) };
         patcher.set_interpreter(c_interpreter.as_c_str())?;
+    } else {
+        patcher.remove_interpreter()?;
     }
     patcher.set_library_search_path(DynamicTag::Runpath, c_rpath.as_c_str())?;
     patcher.finish()?;
@@ -73,7 +75,6 @@ where
     {
         return Ok(false);
     }
-    log::info!("Changing root to {}: {}", root.display(), file.display());
     let interpreter = elf.read_interpreter(&mut f)?;
     let Some(dynamic_table) = elf.read_dynamic_table(&mut f)? else {
         return Ok(false);
@@ -85,7 +86,6 @@ where
     drop(f);
     let mut tree = DependencyTree::new();
     let search_dirs = elb_dl::glibc::get_search_dirs(&root)?;
-    log::info!("Library search dirs: {search_dirs:#?}");
     let loader = DynamicLoader::options()
         .libc(Libc::Glibc)
         .search_dirs(search_dirs)

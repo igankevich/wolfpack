@@ -49,10 +49,8 @@ pub enum Error {
     Sign,
     #[error("Failed to read `{0}`: {1}")]
     FileRead(PathBuf, std::io::Error),
-    #[error("Ldd tree error: {0}")]
-    LddTree(#[from] lddtree::Error),
-    #[error("Library {0:?} not found")]
-    LibraryNotFound(PathBuf),
+    #[error("Invalid installation prefix {0:?}")]
+    InstallationPrefix(PathBuf),
     #[error("Cargo error: {0}")]
     Cargo(#[from] wolfpack::cargo::Error),
     #[error("{0}")]

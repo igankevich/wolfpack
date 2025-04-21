@@ -19,6 +19,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::oneshot;
 use uname_rs::Uname;
 use wolfpack::deb;
 use wolfpack::elf::change_root;
@@ -26,9 +27,9 @@ use wolfpack::sign::VerifierV2;
 
 use crate::db::Connection;
 use crate::db::ConnectionArc;
-use crate::db::Id;
 use crate::deb::DebDependencyMatch;
 use crate::deb::DebMatch;
+use crate::deb::RepoId;
 use crate::download_file;
 use crate::print_table;
 use crate::Config;
@@ -36,6 +37,7 @@ use crate::DebConfig;
 use crate::Error;
 use crate::Repo;
 use crate::Row;
+use crate::SearchBy;
 use crate::ToRow;
 
 pub struct DebRepo {
@@ -58,9 +60,9 @@ impl DebRepo {
     #[allow(clippy::too_many_arguments)]
     fn index_packages(
         packages_file: &Path,
-        arch_dir: &Path,
+        repo_dir: &Path,
         base_url: String,
-        component_id: Id,
+        repo_id: RepoId,
         db_conn: ConnectionArc,
         dependency_resolution_tasks: Arc<Mutex<Vec<Task>>>,
         repo_name: String,
@@ -78,10 +80,14 @@ impl DebRepo {
         // Insert the packages into the database.
         for package in packages.iter() {
             let url = format!("{}/{}", base_url, package.filename.display());
-            let package_file = arch_dir.join(&package.filename);
-            db_conn
+            let package_file = repo_dir.join(&package.filename);
+            if let Err(e) = db_conn
                 .lock()
-                .insert_deb_package(package, &url, &package_file, component_id)?;
+                .insert_deb_package(package, &url, &package_file, repo_id)
+            {
+                log::error!("Failed to index {:?}: {e}", package.inner.name.as_str());
+                continue;
+            }
             indexing_progress_bar.lock().inc(1);
         }
         //log::debug!("Indexed {:?}", packages_file);
@@ -105,6 +111,33 @@ impl DebRepo {
                 }
             }));
         }
+        Ok(())
+    }
+
+    fn index_package_contents(
+        contents_file: &Path,
+        repo_id: RepoId,
+        db_conn: ConnectionArc,
+        indexing_progress_bar: Arc<Mutex<ProgressBar>>,
+    ) -> Result<(), Error> {
+        let decoder = AnyDecoder::new(BufReader::new(File::open(contents_file)?));
+        let contents = deb::PackageContents::read(BufReader::new(decoder))?.into_inner();
+        indexing_progress_bar
+            .lock()
+            .inc_length(contents.len() as u64);
+        let db_conn = db_conn.lock().clone_read_write()?;
+        db_conn.lock().inner.execute_batch("BEGIN")?;
+        for (package_name, files) in contents.iter() {
+            if let Err(e) = db_conn
+                .lock()
+                .insert_deb_package_contents(package_name, files, repo_id)
+            {
+                log::error!("Failed to index the contents of {package_name:?}: {e}");
+                continue;
+            }
+            indexing_progress_bar.lock().inc(1);
+        }
+        db_conn.lock().inner.execute_batch("COMMIT")?;
         Ok(())
     }
 
@@ -181,11 +214,15 @@ impl Repo for DebRepo {
         let dependency_resolution_tasks = Arc::new(Mutex::new(Vec::new()));
         let db_conn = Connection::new(config)?;
         let arch = Self::native_arch()?;
+        let repo_dir = config.cache_dir.join(name);
+        let mut index_rxs = Vec::new();
+        let mut releases = HashMap::new();
         #[allow(clippy::never_loop)]
         for base_url in self.config.base_urls.iter() {
+            let repo_id = db_conn.lock().insert_deb_repo(name, base_url)?;
             for suite in self.config.suites.iter() {
                 let suite_url = format!("{}/dists/{}", base_url, suite);
-                let suite_dir = config.cache_dir.join(name).join(suite);
+                let suite_dir = repo_dir.join(suite);
                 create_dir_all(&suite_dir)?;
                 let release_file = suite_dir.join("Release");
                 download_file(
@@ -234,17 +271,18 @@ impl Repo for DebRepo {
                         let files = release.get_files(&packages_prefix, "Packages");
                         let arch_dir = component_dir.join(format!("binary-{}", arch));
                         create_dir_all(&arch_dir)?;
+                        let component_url = format!("{}/{}", suite_url, packages_prefix);
+                        db_conn.lock().insert_deb_component(
+                            &component_url,
+                            suite,
+                            component.as_str(),
+                            arch,
+                            repo_id,
+                        )?;
+                        let (index_tx, index_rx) = oneshot::channel();
+                        index_rxs.push(index_rx);
                         for (candidate, hash, _file_size) in files.into_iter() {
                             let file_name = candidate.file_name().ok_or(ErrorKind::InvalidData)?;
-                            let component_url = format!("{}/{}", suite_url, packages_prefix);
-                            let component_id = db_conn.lock().insert_deb_component(
-                                &component_url,
-                                name,
-                                base_url,
-                                suite,
-                                component.as_str(),
-                                arch,
-                            )?;
                             let packages_url = format!(
                                 "{}/{}",
                                 component_url,
@@ -268,12 +306,13 @@ impl Repo for DebRepo {
                                     let tasks = dependency_resolution_tasks.clone();
                                     let progress_bar = progress_bar.clone();
                                     let indexing_progress_bar = indexing_progress_bar.clone();
+                                    let repo_dir = repo_dir.clone();
                                     threads.execute(move || {
                                         if let Err(e) = Self::index_packages(
                                             &packages_file,
-                                            &arch_dir,
+                                            &repo_dir,
                                             base_url,
-                                            component_id,
+                                            repo_id,
                                             db_conn,
                                             tasks,
                                             name,
@@ -282,6 +321,7 @@ impl Repo for DebRepo {
                                         ) {
                                             log::error!("Failed to index packages: {}", e)
                                         }
+                                        let _ = index_tx.send(());
                                     });
                                     break;
                                 }
@@ -291,6 +331,69 @@ impl Repo for DebRepo {
                         }
                     }
                 }
+                releases.insert((base_url, suite), release);
+            }
+        }
+        for index_rx in index_rxs.into_iter() {
+            index_rx.await?;
+        }
+        db_conn.lock().optimize()?;
+        #[allow(clippy::never_loop)]
+        for base_url in self.config.base_urls.iter() {
+            let repo_id = db_conn.lock().insert_deb_repo(name, base_url)?;
+            for suite in self.config.suites.iter() {
+                let mut contents_files = Vec::new();
+                let suite_url = format!("{}/dists/{}", base_url, suite);
+                let suite_dir = repo_dir.join(suite);
+                let release = releases.get(&(base_url, suite)).expect("Inserted above");
+                for component in release.components().intersection(&self.config.components) {
+                    let component_dir = suite_dir.join(component.as_str());
+                    for arch in [arch.as_str(), "all"] {
+                        let file_stem = format!("Contents-{}", arch);
+                        let files = release.get_files(component.as_str(), &file_stem);
+                        for (candidate, hash, _file_size) in files.into_iter() {
+                            let file_name = candidate.file_name().ok_or(ErrorKind::InvalidData)?;
+                            let contents_url = format!(
+                                "{}/{}/{}",
+                                suite_url,
+                                component,
+                                file_name.to_str().ok_or(ErrorKind::InvalidData)?,
+                            );
+                            let contents_file = component_dir.join(file_name);
+                            match download_file(
+                                &contents_url,
+                                &contents_file,
+                                Some(hash),
+                                db_conn.clone(),
+                                config,
+                                Some(downloading_progress_bar.clone()),
+                            )
+                            .await
+                            {
+                                Ok(..) => {
+                                    contents_files.push(contents_file);
+                                    break;
+                                }
+                                Err(Error::ResourceNotFound(..)) => continue,
+                                Err(e) => return Err(e),
+                            }
+                        }
+                    }
+                }
+                let db_conn = db_conn.clone();
+                let indexing_progress_bar = indexing_progress_bar.clone();
+                threads.execute(move || {
+                    for contents_file in contents_files.into_iter() {
+                        if let Err(e) = Self::index_package_contents(
+                            &contents_file,
+                            repo_id,
+                            db_conn.clone(),
+                            indexing_progress_bar.clone(),
+                        ) {
+                            log::error!("Failed to index package contents: {}", e)
+                        }
+                    }
+                });
             }
             // TODO Only one URL is used.
             break;
@@ -313,6 +416,7 @@ impl Repo for DebRepo {
             threads.execute(task);
         }
         threads.join();
+        db_conn.lock().optimize()?;
         let progress_bar = progress_bar.lock();
         progress_bar.finish();
         log::debug!(
@@ -577,13 +681,37 @@ impl Repo for DebRepo {
         Ok(())
     }
 
-    fn search(&mut self, config: &Config, name: &str, keyword: &str) -> Result<(), Error> {
+    fn search(
+        &mut self,
+        config: &Config,
+        name: &str,
+        by: SearchBy,
+        keyword: &str,
+    ) -> Result<(), Error> {
         let db_conn = Connection::new(config)?;
         let architecture = Self::native_arch()?;
-        let matches = db_conn
-            .lock()
-            .find_deb_packages(name, &architecture, keyword)?;
-        print_table(matches.iter(), std::io::stdout())?;
+        match by {
+            SearchBy::Name => {
+                let matches = db_conn
+                    .lock()
+                    .find_deb_packages(name, &architecture, keyword)?;
+                print_table(matches.iter(), std::io::stdout())?;
+            }
+            SearchBy::File => {
+                let matches =
+                    db_conn
+                        .lock()
+                        .find_deb_packages_by_file(name, &architecture, keyword)?;
+                print_table(matches.iter(), std::io::stdout())?;
+            }
+            SearchBy::Command => {
+                let matches =
+                    db_conn
+                        .lock()
+                        .find_deb_packages_by_command(name, &architecture, keyword)?;
+                print_table(matches.iter(), std::io::stdout())?;
+            }
+        };
         Ok(())
     }
 }
@@ -626,6 +754,25 @@ impl ToRow<3> for DebDependencyMatch {
             self.name.as_str().into(),
             self.version.as_str().into(),
             self.description
+                .as_str()
+                .lines()
+                .next()
+                .map(|line| line.trim())
+                .unwrap_or_default()
+                .into(),
+        ])
+    }
+}
+
+impl ToRow<4> for (PathBuf, DebMatch) {
+    fn to_row(&self) -> Row<'_, 4> {
+        let (path, package) = self;
+        Row([
+            path.to_str().unwrap_or_default().into(),
+            package.name.as_str().into(),
+            package.version.as_str().into(),
+            package
+                .description
                 .as_str()
                 .lines()
                 .next()

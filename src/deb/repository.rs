@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::io::BufRead;
 use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Write;
@@ -345,6 +346,52 @@ impl FromStr for ExtendedPackage {
             inner,
         };
         Ok(extended)
+    }
+}
+
+#[derive(Debug)]
+pub struct PackageContents {
+    table: HashMap<String, Vec<PathBuf>>,
+}
+
+impl PackageContents {
+    pub fn read<R: BufRead>(reader: R) -> Result<Self, Error> {
+        let mut table: HashMap<String, Vec<PathBuf>> = HashMap::new();
+        for line in reader.lines() {
+            let line = line?;
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            // Format: "path category/package-name,category/package-name"
+            // Path might contain any characters, so we parse from the end.
+            let mut columns = line.rsplitn(2, char::is_whitespace);
+            let packages = columns
+                .next()
+                .ok_or_else(|| Error::other(format!("No package names in {:?}", line)))?;
+            let path = columns
+                .next()
+                .ok_or_else(|| Error::other("No file path"))?
+                .trim();
+            for token in packages.split(',') {
+                let mut tokens = token.splitn(2, '/');
+                let _category = tokens
+                    .next()
+                    .ok_or_else(|| Error::other(format!("No category in {:?}", line)))?;
+                let package_name = tokens
+                    .next()
+                    .ok_or_else(|| Error::other(format!("No package name in {:?}", line)))?;
+                table
+                    .entry(package_name.to_string())
+                    .or_default()
+                    .push(path.into());
+            }
+        }
+        Ok(Self { table })
+    }
+
+    pub fn into_inner(self) -> HashMap<String, Vec<PathBuf>> {
+        self.table
     }
 }
 

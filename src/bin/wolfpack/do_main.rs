@@ -7,8 +7,10 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use tempfile::TempDir;
 
+use crate::db::Connection;
 use crate::download;
 use crate::exec;
+use crate::search;
 use crate::Config;
 use crate::DownloadArgs;
 use crate::Error;
@@ -18,6 +20,7 @@ use crate::MasterSecretKey;
 use crate::PackageBuilder;
 use crate::PackageFormat;
 use crate::ProjectBuilder;
+use crate::SearchArgs;
 use crate::SigningKeyGenerator;
 
 #[derive(Parser)]
@@ -87,17 +90,8 @@ enum Command {
     Exec(ExecArgs),
     /// Download package archive, but don't install it.
     Download(DownloadArgs),
-}
-
-#[derive(clap::Args)]
-struct SearchArgs {
-    /// Search query.
-    #[clap(
-        trailing_var_arg = true,
-        allow_hyphen_values = true,
-        value_name = "KEYWORD"
-    )]
-    query: Vec<String>,
+    /// Optimize database.
+    Optimize,
 }
 
 #[derive(clap::Args)]
@@ -222,7 +216,14 @@ pub fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Command::Key(more_args) => key(more_args),
         Command::Exec(more_args) => Ok(exec(more_args)?),
         Command::Download(more_args) => download(config, more_args),
+        Command::Optimize => optimize(config),
     }
+}
+
+fn optimize(config: Config) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    let db_conn = Connection::new(&config)?;
+    db_conn.lock().optimize()?;
+    Ok(ExitCode::SUCCESS)
 }
 
 fn pull(mut config: Config) -> Result<ExitCode, Box<dyn std::error::Error>> {
@@ -238,15 +239,6 @@ fn pull(mut config: Config) -> Result<ExitCode, Box<dyn std::error::Error>> {
         }
         Ok(ExitCode::SUCCESS)
     })
-}
-
-fn search(mut config: Config, args: SearchArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
-    let mut repos = config.take_repos();
-    let query = args.query.join(" ");
-    for (name, repo) in repos.iter_mut() {
-        repo.search(&config, name.as_str(), &query)?;
-    }
-    Ok(ExitCode::SUCCESS)
 }
 
 fn install(mut config: Config, args: InstallArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {

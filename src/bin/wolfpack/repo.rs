@@ -4,6 +4,7 @@ use crate::deb;
 use crate::Config;
 use crate::Error;
 use crate::RepoConfig;
+use crate::SearchBy;
 
 #[async_trait::async_trait]
 pub trait Repo {
@@ -23,7 +24,13 @@ pub trait Repo {
         packages: Vec<String>,
     ) -> Result<Vec<PathBuf>, Error>;
 
-    fn search(&mut self, config: &Config, name: &str, keyword: &str) -> Result<(), Error>;
+    fn search(
+        &mut self,
+        config: &Config,
+        name: &str,
+        by: SearchBy,
+        keyword: &str,
+    ) -> Result<(), Error>;
 
     fn resolve(
         &mut self,

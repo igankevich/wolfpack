@@ -45,6 +45,8 @@ pub enum Error {
     NoHash,
     #[error("Task error: {0}")]
     Join(#[from] tokio::task::JoinError),
+    #[error("Task error: {0}")]
+    OneShot(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("Signing error")]
     Sign,
     #[error("Failed to read `{0}`: {1}")]

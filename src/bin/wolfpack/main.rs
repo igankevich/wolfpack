@@ -11,6 +11,7 @@ mod key;
 mod logger;
 mod project_builder;
 mod repo;
+mod search;
 mod table;
 
 use self::builder::*;
@@ -24,6 +25,7 @@ use self::key::*;
 use self::logger::*;
 use self::project_builder::*;
 use self::repo::*;
+use self::search::*;
 use self::table::*;
 
 use std::process::ExitCode;

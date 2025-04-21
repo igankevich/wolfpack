@@ -50,7 +50,7 @@ cargo_test_all() {
     export ARBTEST_BUDGET_MS=10000
     export RUST_TEST_THREADS=1
     cargo_test_lib ghcr.io/igankevich/wolfpack-ci-openwrt-2:latest --nocapture --ignored opkg
-    cargo_test_lib ghcr.io/igankevich/wolfpack-ci-debian:latest --nocapture --ignored apt
+    cargo_test_lib ghcr.io/igankevich/wolfpack-ci-debian:latest --nocapture --ignored dpkg apt
     cargo_test_lib ghcr.io/igankevich/wolfpack-ci-freebsd:latest --nocapture --ignored bsd_pkg
     cargo_test_lib docker.io/fedora:latest --nocapture --ignored rpm_ dnf
     cargo_test_lib ghcr.io/igankevich/wolfpack-ci-darling:latest --nocapture --ignored darling_

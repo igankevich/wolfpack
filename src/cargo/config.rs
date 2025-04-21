@@ -303,8 +303,6 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("ELF error: {0}")]
     Elb(#[from] elb::Error),
-    #[error("Failed to find interpreter in a dummy executable")]
-    NoInterpreter,
 }
 
 fn join<'a, I>(items: I, separator: &str) -> String

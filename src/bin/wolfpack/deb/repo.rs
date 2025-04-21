@@ -91,7 +91,6 @@ impl DebRepo {
             }
             indexing_progress_bar.lock().inc(1);
         }
-        //log::debug!("Indexed {:?}", packages_file);
         // Resolve dependencies in batches.
         progress_bar.lock().inc_length(packages.len() as u64);
         let batch_size = 1_000;

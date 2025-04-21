@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::io::Error;
 use std::io::Write;
 
-// TODO
 pub trait ToRow<const N: usize> {
     fn to_row(&self) -> Row<'_, N>;
 }

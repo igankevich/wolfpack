@@ -7,16 +7,23 @@ CREATE TABLE downloaded_files (
     file_size INTEGER
 );
 
+CREATE TABLE deb_repos (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    url TEXT NOT NULL UNIQUE
+);
+
 -- Single component, i.e. `Packages` file.
 CREATE TABLE deb_components (
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     url TEXT NOT NULL UNIQUE,
-    -- TODO deb_repos table
-    repo_name TEXT NOT NULL,
-    base_url TEXT NOT NULL,
     suite TEXT NOT NULL,
     component TEXT NOT NULL,
-    architecture TEXT NOT NULL
+    architecture TEXT NOT NULL,
+    repo_id INTEGER NOT NULL
+        REFERENCES deb_repos(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
 );
 
 -- Single DEB package.
@@ -33,8 +40,8 @@ CREATE TABLE deb_packages (
     installed_size INTEGER,
     provides TEXT,
     depends TEXT,
-    component_id INTEGER NOT NULL
-        REFERENCES deb_components(id)
+    repo_id INTEGER NOT NULL
+        REFERENCES deb_repos(id)
         ON DELETE CASCADE
         ON UPDATE CASCADE
 );
@@ -70,6 +77,21 @@ CREATE TABLE deb_provisions (
 
 CREATE INDEX deb_provisions_name ON deb_provisions(name);
 
+-- Package contents.
+CREATE TABLE deb_files (
+    path BLOB NOT NULL,
+    package_name TEXT NOT NULL,
+    -- The architecture specified in the file name (e.g. "Contents-ARCH.gz").
+    arch TEXT NOT NULL,
+    repo_id INTEGER NOT NULL,
+    command BLOB,
+    PRIMARY KEY (path, package_name)
+);
+
+CREATE INDEX deb_files_path ON deb_files(path);
+CREATE INDEX deb_files_command ON deb_files(command);
+CREATE INDEX deb_files_package_name ON deb_files(package_name);
+
 -- Full-text search for DEB packages. {{{
 CREATE VIRTUAL TABLE deb_packages_fts
 USING fts5(
@@ -84,23 +106,25 @@ USING fts5(
 CREATE TRIGGER deb_packages_after_insert
 AFTER INSERT ON deb_packages
 BEGIN
-    INSERT INTO deb_packages_fts(rowid, name, description)
-    VALUES (new.id, new.name, new.description);
+    INSERT INTO deb_packages_fts(rowid, name, description, homepage)
+    VALUES (new.id, new.name, new.description, new.homepage);
 END;
 
 CREATE TRIGGER deb_packages_after_delete
 AFTER DELETE ON deb_packages
 BEGIN
-    INSERT INTO deb_packages_fts(deb_packages_fts, rowid, name, description)
-    VALUES('delete', old.name, old.description, old.description);
+    INSERT INTO deb_packages_fts(deb_packages_fts, rowid, name, description, homepage)
+    VALUES('delete', old.id, old.name, old.description, old.homepage);
+    -- We can't have foreign key references package name, hence this workaround.
+    DELETE FROM deb_files WHERE package_name = old.name;
 END;
 
 CREATE TRIGGER deb_packages_after_update
 AFTER UPDATE ON deb_packages
 BEGIN
-    INSERT INTO deb_packages_fts(deb_packages_fts, rowid, name, description)
-    VALUES('delete', old.name, old.name, old.description);
-    INSERT INTO deb_packages_fts(rowid, name, description)
-    VALUES (new.name, new.name, new.description);
+    INSERT INTO deb_packages_fts(deb_packages_fts, rowid, name, description, homepage)
+    VALUES('delete', old.id, old.name, old.description, old.homepage);
+    INSERT INTO deb_packages_fts(rowid, name, description, homepage)
+    VALUES (new.id, new.name, new.description, new.homepage);
 END;
 -- }}}

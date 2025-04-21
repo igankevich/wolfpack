@@ -3,6 +3,7 @@ use std::io::Write;
 use std::ops::Deref;
 use std::time::SystemTime;
 
+use base58::ToBase58;
 use pgp::cleartext::CleartextSignedMessage;
 use pgp::composed::signed_key::SignedPublicKeyParser;
 use pgp::composed::StandaloneSignature;
@@ -195,6 +196,17 @@ impl Deref for PgpVerifyingKey {
     }
 }
 
+impl std::fmt::Display for PgpVerifyingKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let b58 = self
+            .0
+            .to_armored_bytes(Default::default())
+            .unwrap_or_default()
+            .to_base58();
+        write!(f, "{}", b58)
+    }
+}
+
 #[derive(Debug)]
 pub struct PgpSignature(Signature);
 
@@ -314,8 +326,8 @@ mod tests {
 
     #[test]
     fn cleartext_sign_verify() {
-        //let body = std::fs::read("InRelease.tmp").unwrap();
-        //let body = std::fs::read("clearsign.txt").unwrap();
+        //let body = fs_err::read("InRelease.tmp").unwrap();
+        //let body = fs_err::read("clearsign.txt").unwrap();
         //let data = pgp::composed::Any::from_armor(&body[..]).unwrap();
         //let data = pgp::composed::message::Message::from_armor_single(&body[..]).unwrap();
         //let data = CleartextSignedMessage::from_armor(&body[..]).unwrap();

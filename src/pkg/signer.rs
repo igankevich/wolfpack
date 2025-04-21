@@ -23,6 +23,12 @@ pub type PackageSigner = SigningKey;
 pub struct SigningKey(pub(crate) secp256k1::SecretKey);
 
 impl SigningKey {
+    pub fn from_bytes(bytes: &[u8; 32]) -> Result<Self, Error> {
+        Ok(Self(
+            secp256k1::SecretKey::from_byte_array(bytes).map_err(|_| Error)?,
+        ))
+    }
+
     pub fn generate() -> (Self, PackageVerifier) {
         let (signing_key, verifying_key) = generate_keypair(&mut OsRng);
         (Self(signing_key), VerifyingKey(verifying_key))
@@ -150,6 +156,8 @@ mod tests {
     use std::process::Stdio;
 
     use arbtest::arbtest;
+    use command_error::ChildExt;
+    use command_error::CommandExt;
     use tempfile::TempDir;
 
     use super::*;
@@ -160,11 +168,11 @@ mod tests {
         let (signing_key, verifying_key) = SigningKey::generate();
         let workdir = TempDir::new().unwrap();
         let private_key_file = workdir.path().join("private-key");
-        std::fs::write(private_key_file.as_path(), signing_key.to_der().unwrap()).unwrap();
+        fs_err::write(private_key_file.as_path(), signing_key.to_der().unwrap()).unwrap();
         assert!(Command::new("ls")
             .arg("-l")
             .arg(private_key_file.as_path())
-            .status()
+            .status_checked()
             .unwrap()
             .success());
         assert!(Command::new("openssl")
@@ -174,7 +182,7 @@ mod tests {
             .arg("-i")
             .arg("-in")
             .arg(private_key_file.as_path())
-            .status()
+            .status_checked()
             .unwrap()
             .success());
         let output = Command::new("pkg")
@@ -184,7 +192,7 @@ mod tests {
             .arg("ecdsa")
             .arg(private_key_file.as_path())
             .stdout(Stdio::piped())
-            .output()
+            .output_checked()
             .unwrap();
         assert_eq!(verifying_key.to_der().unwrap(), output.stdout);
         let pkg_verifying_key = VerifyingKey::from_der(&output.stdout[..]).unwrap();
@@ -203,12 +211,12 @@ mod tests {
             .arg("ecdsa")
             .arg(private_key_file.as_path())
             .stdout(Stdio::piped())
-            .output()
+            .output_checked()
             .unwrap();
         assert!(Command::new("ls")
             .arg("-l")
             .arg(private_key_file.as_path())
-            .status()
+            .status_checked()
             .unwrap()
             .success());
         assert!(Command::new("openssl")
@@ -218,12 +226,12 @@ mod tests {
             .arg("-i")
             .arg("-in")
             .arg(private_key_file.as_path())
-            .status()
+            .status_checked()
             .unwrap()
             .success());
         let verifying_key = VerifyingKey::from_der(&output.stdout[..]).unwrap();
         let signing_key =
-            SigningKey::from_der(&std::fs::read(private_key_file.as_path()).unwrap()).unwrap();
+            SigningKey::from_der(&fs_err::read(private_key_file.as_path()).unwrap()).unwrap();
         assert_eq!(verifying_key, signing_key.verifying_key())
     }
 
@@ -234,7 +242,7 @@ mod tests {
             let (signing_key, verifying_key) = SigningKey::generate();
             let workdir = TempDir::new().unwrap();
             let private_key_file = workdir.path().join("private-key");
-            std::fs::write(private_key_file.as_path(), signing_key.to_der().unwrap()).unwrap();
+            fs_err::write(private_key_file.as_path(), signing_key.to_der().unwrap()).unwrap();
             let mut child = Command::new("pkg")
                 .arg("key")
                 .arg("--sign")
@@ -243,14 +251,14 @@ mod tests {
                 .arg(private_key_file.as_path())
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .spawn()
+                .spawn_checked()
                 .unwrap();
             let message = b"hello world";
             {
-                let mut stdin = child.stdin.take().unwrap();
+                let mut stdin = child.child_mut().stdin.take().unwrap();
                 stdin.write_all(message).unwrap();
             }
-            let output = child.wait_with_output().unwrap();
+            let output = child.output_checked().unwrap();
             let signature = output.stdout;
             let signature = Signature::from_der(&signature[..]).unwrap();
             verifying_key.verify_data(message, &signature).unwrap();

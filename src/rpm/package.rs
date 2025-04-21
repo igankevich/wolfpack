@@ -21,6 +21,7 @@ use crate::hash::Sha256Reader;
 use crate::rpm::get_zeroes;
 use crate::rpm::pad;
 use crate::rpm::xml;
+use crate::rpm::Arch;
 use crate::rpm::Entry;
 use crate::rpm::EntryIo;
 use crate::rpm::HashAlgorithm;
@@ -31,6 +32,7 @@ use crate::rpm::SignatureEntry;
 use crate::rpm::SignatureTag;
 use crate::rpm::Tag;
 use crate::rpm::ALIGN;
+use crate::wolf;
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq, Clone))]
@@ -41,7 +43,7 @@ pub struct Package {
     pub description: String,
     pub license: String,
     pub url: String,
-    pub arch: String,
+    pub arch: Arch,
 }
 
 impl Package {
@@ -102,7 +104,7 @@ impl Package {
                 let hash = if path.is_dir() {
                     String::new()
                 } else {
-                    sha2::Sha256::compute(&std::fs::read(path)?).to_string()
+                    sha2::Sha256::compute(&fs_err::read(path)?).to_string()
                 };
                 filedigests.push(CString::new(hash).map_err(Error::other)?);
             }
@@ -222,6 +224,10 @@ impl Package {
             },
         }
     }
+
+    pub fn file_name(&self) -> String {
+        format!("{}-{}.{}.rpm", self.name, self.version, self.arch)
+    }
 }
 
 impl TryFrom<Package> for HashMap<Tag, Entry> {
@@ -237,7 +243,7 @@ impl TryFrom<Package> for HashMap<Tag, Entry> {
             License(CString::new(other.license).map_err(Error::other)?).into(),
             Url(CString::new(other.url).map_err(Error::other)?).into(),
             Os(c"linux".into()).into(),
-            Arch(CString::new(other.arch).map_err(Error::other)?).into(),
+            Arch(CString::new(other.arch.as_str()).map_err(Error::other)?).into(),
             PayloadFormat(c"cpio".into()).into(),
             PayloadCompressor(c"gzip".into()).into(),
         ]
@@ -270,7 +276,8 @@ impl TryFrom<Header<Entry>> for Package {
                 .map_err(Error::other)?,
             arch: get_entry!(entries, Arch)
                 .into_string()
-                .map_err(Error::other)?,
+                .map_err(Error::other)?
+                .parse()?,
         })
     }
 }
@@ -295,6 +302,21 @@ macro_rules! get_entry {
 
 use get_entry;
 
+impl TryFrom<wolf::Metadata> for Package {
+    type Error = Error;
+    fn try_from(other: wolf::Metadata) -> Result<Self, Self::Error> {
+        Ok(Self {
+            name: other.name,
+            version: other.version,
+            arch: Arch::Noarch,
+            summary: other.description.clone(),
+            description: other.description,
+            url: other.homepage,
+            license: other.license,
+        })
+    }
+}
+
 pub struct Signatures {
     pub signature_v3: Vec<u8>,
     pub signature_v4: Vec<u8>,
@@ -318,12 +340,13 @@ const _COMPRESSION_LEVEL: i32 = 22;
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
+    use fs_err::File;
     use std::process::Command;
 
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use arbtest::arbtest;
+    use command_error::CommandExt;
     use rand::Rng;
     use rand_mt::Mt64;
     use tempfile::TempDir;
@@ -374,7 +397,7 @@ mod tests {
                 .arg("--verbose")
                 .arg("--import")
                 .arg(verifying_key_file.as_path())
-                .status()
+                .status_checked()
                 .unwrap()
                 .success(),
             "verifying key:\n{}",
@@ -383,7 +406,7 @@ mod tests {
         eprintln!("added public key");
         arbtest(|u| {
             let mut package: Package = u.arbitrary()?;
-            package.arch = "x86_64".into();
+            package.arch = Arch::X86_64;
             package.name = "test".into();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             package
@@ -433,7 +456,7 @@ mod tests {
                     .arg("--query")
                     .arg("--dump")
                     .arg(package_file.as_path())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",
@@ -445,7 +468,7 @@ mod tests {
                     .arg("--verbose")
                     .arg("--install")
                     .arg(package_file.as_path())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",
@@ -456,7 +479,7 @@ mod tests {
                     .arg("--verbose")
                     .arg("--erase")
                     .arg(&package.name)
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",
@@ -483,8 +506,6 @@ mod tests {
             let license = valid_chars.random_string(&mut rng, len);
             let len = rng.gen_range(1..=10);
             let url = valid_chars.random_string(&mut rng, len);
-            let len = rng.gen_range(1..=10);
-            let arch = valid_chars.random_string(&mut rng, len);
             Ok(Self {
                 name,
                 version,
@@ -492,7 +513,7 @@ mod tests {
                 description,
                 license,
                 url,
-                arch,
+                arch: u.arbitrary()?,
             })
         }
     }

@@ -1,15 +1,21 @@
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::io::Error;
 use std::path::PathBuf;
+use std::str::FromStr;
 
+use serde::Deserialize;
+use serde::Serialize;
+
+use crate::deb::Error;
 use crate::deb::FoldedValue;
 use crate::deb::MultilineValue;
 use crate::deb::SimpleValue;
+use crate::macros::define_try_from_string_from_string;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[serde(try_from = "String", into = "String")]
 pub enum Value {
     Simple(SimpleValue),
     Folded(FoldedValue),
@@ -63,3 +69,13 @@ impl TryFrom<Value> for PathBuf {
         }
     }
 }
+
+impl FromStr for Value {
+    type Err = Error;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let value: SimpleValue = value.parse()?;
+        Ok(Value::Simple(value))
+    }
+}
+
+define_try_from_string_from_string!(Value);

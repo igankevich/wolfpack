@@ -1,3 +1,4 @@
+mod arch;
 mod constants;
 mod dependency;
 mod error;
@@ -15,6 +16,7 @@ mod simple_value;
 mod value;
 mod version;
 
+pub use self::arch::*;
 pub use self::constants::*;
 pub use self::dependency::*;
 pub use self::error::*;

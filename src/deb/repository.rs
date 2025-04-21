@@ -1,33 +1,43 @@
+use fs_err::create_dir_all;
+use fs_err::File;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::fs::create_dir_all;
-use std::fs::File;
+use std::io::BufRead;
 use std::io::ErrorKind;
 use std::io::Read;
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use pgp::types::PublicKeyTrait;
+use tempfile::TempDir;
 use walkdir::WalkDir;
 
+use crate::deb::Arch;
 use crate::deb::DependencyChoice;
 use crate::deb::Error;
+use crate::deb::MultilineValue;
 use crate::deb::Package;
+use crate::deb::PackageSigner;
 use crate::deb::PackageVerifier;
 use crate::deb::Release;
 use crate::deb::SimpleValue;
+use crate::deb::VerifyingKey;
+use crate::deb::Version;
 use crate::hash::AnyHash;
 use crate::hash::Md5Hash;
 use crate::hash::MultiHashReader;
 use crate::hash::Sha1Hash;
 use crate::hash::Sha256Hash;
+use crate::hash::UpperHex;
 use crate::sign::PgpCleartextSigner;
 
 pub struct Repository {
-    packages: HashMap<SimpleValue, PerArchPackages>,
+    packages: HashMap<Arch, PerArchPackages>,
 }
 
 impl Repository {
@@ -41,7 +51,7 @@ impl Repository {
         P: AsRef<Path>,
         P2: AsRef<Path>,
     {
-        let mut packages: HashMap<SimpleValue, PerArchPackages> = HashMap::new();
+        let mut packages: HashMap<Arch, PerArchPackages> = HashMap::new();
         let mut push_package = |path: &Path| -> Result<(), Error> {
             let mut reader = MultiHashReader::new(File::open(path)?);
             let (package, _data) = Package::read(reader.by_ref(), verifier)?;
@@ -52,7 +62,7 @@ impl Repository {
             create_dir_all(output_dir.as_ref().join(&filename))?;
             filename.push(path.file_name().ok_or(ErrorKind::InvalidData)?);
             let new_path = output_dir.as_ref().join(&filename);
-            std::fs::rename(path, new_path)?;
+            fs_err::rename(path, new_path)?;
             let package = ExtendedPackage {
                 inner: package,
                 size,
@@ -62,7 +72,7 @@ impl Repository {
                 filename,
             };
             packages
-                .entry(package.inner.architecture.clone())
+                .entry(package.inner.architecture)
                 .or_insert_with(|| PerArchPackages {
                     packages: Vec::new(),
                 })
@@ -102,10 +112,23 @@ impl Repository {
         let output_dir = dists_dir.join(suite.to_string());
         create_dir_all(output_dir.as_path())?;
         let packages_string = self.to_string();
-        std::fs::write(output_dir.join("Packages"), packages_string.as_bytes())?;
+        for (format, extension) in [
+            (deko::Format::Verbatim, ""),
+            (deko::Format::Gz, ".gz"),
+            (deko::Format::Xz, ".xz"),
+        ] {
+            let filename = format!("Packages{}", extension);
+            let mut writer = deko::AnyEncoder::new(
+                File::create(output_dir.join(filename))?,
+                format,
+                deko::write::Compression::Best,
+            )?;
+            writer.write_all(packages_string.as_bytes())?;
+            writer.finish()?;
+        }
         let release = Release::new(suite, self, packages_string.as_str())?;
         let release_string = release.to_string();
-        std::fs::write(output_dir.join("Release"), release_string.as_bytes())?;
+        fs_err::write(output_dir.join("Release"), release_string.as_bytes())?;
         let signed_release = signer
             .sign(release_string.as_str())
             .map_err(|_| Error::other("failed to sign the release"))?;
@@ -125,12 +148,70 @@ impl Repository {
         Ok(())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&SimpleValue, &PerArchPackages)> {
+    pub fn release_package(
+        suite: &SimpleValue,
+        version: Version,
+        description: MultilineValue,
+        verifying_key: &VerifyingKey,
+        url: String,
+        signer: &PackageSigner,
+        output_dir: &Path,
+    ) -> Result<PathBuf, Error> {
+        let workdir = TempDir::new()?;
+        let rootfs_dir = workdir.path();
+        let fingerprint = verifying_key.fingerprint();
+        // Write verifying key.
+        let verifying_key_file = rootfs_dir.join(format!(
+            "etc/apt/trusted.gpg.d/{}-{}.asc",
+            suite,
+            UpperHex(fingerprint.as_bytes())
+        ));
+        create_dir_all(verifying_key_file.parent().expect("Parent dir exists"))?;
+        verifying_key
+            .to_armored_writer(&mut File::create(&verifying_key_file)?, Default::default())
+            .map_err(std::io::Error::other)?;
+        // Write repository configuration.
+        let sources_list_file = rootfs_dir.join(format!("etc/apt/sources.list.d/{}.list", suite));
+        create_dir_all(sources_list_file.parent().expect("Parent dir exists"))?;
+        fs_err::write(
+            &sources_list_file,
+            format!(
+                "deb [signed-by={}] {url} {suite}/\n",
+                UpperHex(fingerprint.as_bytes()),
+            ),
+        )?;
+        // Generate the package.
+        let package = Package {
+            name: format!("{}-repo", suite).parse()?,
+            version,
+            architecture: Arch::All,
+            description,
+            // TODO
+            license: Default::default(),
+            maintainer: Default::default(),
+            installed_size: Default::default(),
+            provides: Default::default(),
+            pre_depends: Default::default(),
+            depends: if url.starts_with("https://") {
+                // TODO add other types
+                "apt-transport-https".parse()?
+            } else {
+                Default::default()
+            },
+            homepage: Default::default(),
+            other: Default::default(),
+        };
+        let repo_package_file = output_dir.join(package.file_name());
+        package.write(File::create(&repo_package_file)?, rootfs_dir, signer)?;
+        Ok(repo_package_file)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&Arch, &PerArchPackages)> {
         self.packages.iter()
     }
 
-    pub fn architectures(&self) -> HashSet<SimpleValue> {
-        self.packages.keys().cloned().collect()
+    pub fn architectures(&self) -> HashSet<Arch> {
+        self.packages.keys().copied().collect()
     }
 }
 
@@ -268,90 +349,124 @@ impl FromStr for ExtendedPackage {
     }
 }
 
+#[derive(Debug)]
+pub struct PackageContents {
+    table: HashMap<String, Vec<PathBuf>>,
+}
+
+impl PackageContents {
+    pub fn read<R: BufRead>(reader: R) -> Result<Self, Error> {
+        let mut table: HashMap<String, Vec<PathBuf>> = HashMap::new();
+        for line in reader.lines() {
+            let line = line?;
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            // Format: "path category/package-name,category/package-name"
+            // Path might contain any characters, so we parse from the end.
+            let mut columns = line.rsplitn(2, char::is_whitespace);
+            let packages = columns
+                .next()
+                .ok_or_else(|| Error::other(format!("No package names in {:?}", line)))?;
+            let path = columns
+                .next()
+                .ok_or_else(|| Error::other("No file path"))?
+                .trim();
+            for token in packages.split(',') {
+                let mut tokens = token.splitn(2, '/');
+                let _category = tokens
+                    .next()
+                    .ok_or_else(|| Error::other(format!("No category in {:?}", line)))?;
+                let package_name = tokens
+                    .next()
+                    .ok_or_else(|| Error::other(format!("No package name in {:?}", line)))?;
+                table
+                    .entry(package_name.to_string())
+                    .or_default()
+                    .push(path.into());
+            }
+        }
+        Ok(Self { table })
+    }
+
+    pub fn into_inner(self) -> HashMap<String, Vec<PathBuf>> {
+        self.table
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::fs::remove_dir_all;
-    use std::fs::remove_file;
+    use fs_err::remove_dir_all;
+    use fs_err::remove_file;
     use std::process::Command;
 
     use arbtest::arbtest;
-    use pgp::types::PublicKeyTrait;
-    use tempfile::TempDir;
+    use command_error::CommandExt;
 
     use super::*;
     use crate::deb::SimpleValue;
     use crate::deb::*;
     use crate::test::DirectoryOfFiles;
-    use crate::test::UpperHex;
 
     #[ignore = "Needs `apt`"]
     #[test]
     fn apt_adds_random_repositories() {
         let (signing_key, verifying_key) = SigningKey::generate("wolfpack-pgp-id".into()).unwrap();
         let signer = PackageSigner::new(signing_key.clone());
-        let verifier = PackageVerifier::new(verifying_key.clone());
+        let verifier = PackageVerifier::new(vec![verifying_key.clone()], Verify::Always);
         let release_signer = PgpCleartextSigner::new(signing_key.clone().into());
         let workdir = TempDir::new().unwrap();
         let root = workdir.path().join("root");
-        let verifying_key_file = Path::new("/etc/apt/trusted.gpg.d/test.asc");
-        verifying_key
-            .to_armored_writer(
-                &mut File::create(verifying_key_file).unwrap(),
-                Default::default(),
-            )
-            .unwrap();
         remove_file("/etc/apt/sources.list.d/debian.sources").unwrap();
         arbtest(|u| {
             let mut package: Package = u.arbitrary()?;
-            package.architecture = "amd64".parse().unwrap();
+            package.architecture = "all".parse().unwrap();
             package.depends.clear();
+            package.pre_depends.clear();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let deb_path = workdir.path().join("test.deb");
-            let _ = remove_dir_all(root.as_path());
+            let _ = remove_dir_all(&root);
+            create_dir_all(&root).unwrap();
             let package_name = package.name();
             package
                 .write(
-                    directory.path(),
                     File::create(deb_path.as_path()).unwrap(),
+                    directory.path(),
                     &signer,
                 )
                 .unwrap();
             let suite: SimpleValue = "meta".parse().unwrap();
-            Repository::new(root.as_path(), [deb_path.as_path()], &verifier)
-                .unwrap()
-                .write(root.as_path(), suite.clone(), &release_signer)
-                .unwrap();
-            let fingerprint = verifying_key.fingerprint();
-            std::fs::write(
-                "/etc/apt/sources.list.d/test.list",
-                format!(
-                    "deb [signed-by={1}] file://{0} meta/\n",
-                    root.display(),
-                    UpperHex(fingerprint.as_bytes()),
-                ),
+            let repo_package_file = Repository::release_package(
+                &suite,
+                "1.0".parse().unwrap(),
+                "My repo".into(),
+                &verifying_key,
+                format!("file://{}", root.display()),
+                &signer,
+                &root,
             )
             .unwrap();
+            let repo = Repository::new(root.as_path(), [deb_path.as_path()], &verifier).unwrap();
+            repo.write(root.as_path(), suite.clone(), &release_signer)
+                .unwrap();
+            assert!(Command::new("dpkg")
+                .arg("--install")
+                .arg(&repo_package_file)
+                .status_checked()
+                .unwrap()
+                .success());
             assert!(Command::new("find")
                 .arg(root.as_path())
-                .status()
+                .status_checked()
                 .unwrap()
                 .success());
-            assert!(Command::new("cat")
-                .arg(root.join("meta/Release"))
-                .status()
-                .unwrap()
-                .success());
-            assert!(Command::new("cat")
-                .arg(root.join("meta/Packages"))
-                .status()
-                .unwrap()
-                .success());
-            assert!(apt_get().arg("update").status().unwrap().success());
+            assert!(apt_get().arg("update").status_checked().unwrap().success());
             assert!(
                 apt_get()
                     .arg("install")
                     .arg(package_name.to_string())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package = {:?}",
@@ -361,7 +476,7 @@ mod tests {
                 apt_get()
                     .arg("remove")
                     .arg(package_name.to_string())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package = {:?}",

@@ -1,7 +1,7 @@
+use fs_err::read_dir;
+use fs_err::File;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::fs::read_dir;
-use std::fs::File;
 use std::fs::Metadata;
 use std::io::Read;
 use std::io::Write;
@@ -60,7 +60,7 @@ impl Package {
                 let mut reader = Sha256Reader::new(File::open(entry.path())?);
                 let mut contents = Vec::new();
                 reader.read_to_end(&mut contents)?;
-                let metadata = std::fs::metadata(entry.path())?;
+                let metadata = fs_err::metadata(entry.path())?;
                 file_contents.insert(absolute_path.clone(), (metadata, contents));
                 let (sha256, _) = reader.digest()?;
                 files.insert(absolute_path, format!("1${}", sha256));
@@ -96,6 +96,10 @@ impl Package {
         }
         Err(std::io::Error::other("missing file: +COMPACT_MANIFEST"))
     }
+
+    pub fn file_name(&self) -> String {
+        format!("{}-{}.pkg", self.manifest.name, self.manifest.version)
+    }
 }
 
 const COMPRESSION_LEVEL: i32 = 22;
@@ -105,6 +109,7 @@ mod tests {
     use std::process::Command;
 
     use arbtest::arbtest;
+    use command_error::CommandExt;
     use tempfile::TempDir;
 
     use super::*;
@@ -146,7 +151,7 @@ mod tests {
                     .arg("install")
                     .arg("-y")
                     .arg(package_file.as_path())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",
@@ -157,7 +162,7 @@ mod tests {
                     .arg("remove")
                     .arg("-y")
                     .arg(package.name.to_string())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",

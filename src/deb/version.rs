@@ -250,13 +250,13 @@ fn version_cmp(mut s1: &str, mut s2: &str) -> Ordering {
             .unwrap_or(s2.len());
         let (i1, i2) = if n1 < n2 {
             (
-                std::iter::repeat('0').take(n2 - n1),
-                std::iter::repeat('0').take(0),
+                std::iter::repeat_n('0', n2 - n1),
+                std::iter::repeat_n('0', 0),
             )
         } else {
             (
-                std::iter::repeat('0').take(0),
-                std::iter::repeat('0').take(n1 - n2),
+                std::iter::repeat_n('0', 0),
+                std::iter::repeat_n('0', n1 - n2),
             )
         };
         let ret = numerical_cmp(i1.chain(s1.chars().take(n1)), i2.chain(s2.chars().take(n2)));

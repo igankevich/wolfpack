@@ -9,9 +9,12 @@ use deko::bufread::AnyDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use normalize_path::NormalizePath;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::archive::ArchiveRead;
 use crate::archive::ArchiveWrite;
+use crate::deb::Arch;
 use crate::deb::Dependencies;
 use crate::deb::Error;
 use crate::deb::Fields;
@@ -19,6 +22,7 @@ use crate::deb::MultilineValue;
 use crate::deb::PackageName;
 use crate::deb::PackageSigner;
 use crate::deb::PackageVerifier;
+use crate::deb::ParseField;
 use crate::deb::Provides;
 use crate::deb::SimpleValue;
 use crate::deb::Version;
@@ -26,20 +30,28 @@ use crate::deb::DEBIAN_BINARY_CONTENTS;
 use crate::deb::DEBIAN_BINARY_FILE_NAME;
 use crate::sign::Signer;
 use crate::sign::Verifier;
+use crate::wolf;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
 pub struct Package {
     pub name: PackageName,
     pub version: Version,
     pub license: SimpleValue,
-    pub architecture: SimpleValue,
+    pub architecture: Arch,
     pub maintainer: SimpleValue,
     pub description: MultilineValue,
+    #[serde(default)]
     pub installed_size: Option<u64>,
+    #[serde(default)]
     pub provides: Provides,
+    #[serde(default)]
     pub depends: Dependencies,
+    #[serde(default)]
+    pub pre_depends: Dependencies,
+    #[serde(default)]
     pub homepage: Option<SimpleValue>,
+    #[serde(flatten)]
     pub other: Fields,
 }
 
@@ -50,10 +62,11 @@ impl Package {
 
     pub fn write<W: Write, P: AsRef<Path>>(
         &self,
-        directory: P,
         writer: W,
+        directory: P,
         signer: &PackageSigner,
     ) -> Result<(), std::io::Error> {
+        let directory = directory.as_ref();
         let data = TarGz::from_directory(directory, gz_writer())?.finish()?;
         let control = TarGz::from_files([("control", self.to_string())], gz_writer())?.finish()?;
         let mut message_bytes: Vec<u8> = Vec::new();
@@ -130,7 +143,7 @@ impl Package {
             .verify_any(&message[..], signatures.iter())
             .is_err()
         {
-            return Err(Error::other("signature verification failed"));
+            return Err(Error::other("Signature verification failed"));
         }
         let data = data.ok_or_else(|| Error::MissingFile("data.tar*".into()))?;
         let mut tar_archive = tar::Archive::new(AnyDecoder::new(&control[..]));
@@ -150,6 +163,10 @@ impl Package {
         self.name.as_str().to_lowercase().contains(keyword)
             || self.description.as_str().to_lowercase().contains(keyword)
     }
+
+    pub fn file_name(&self) -> String {
+        format!("{}_{}_{}.deb", self.name, self.version, self.architecture)
+    }
 }
 
 impl Display for Package {
@@ -164,6 +181,9 @@ impl Display for Package {
         }
         if !self.provides.is_empty() {
             writeln!(f, "Provides: {}", self.provides)?;
+        }
+        if !self.pre_depends.is_empty() {
+            writeln!(f, "Pre-Depends: {}", self.pre_depends)?;
         }
         if !self.depends.is_empty() {
             writeln!(f, "Depends: {}", self.depends)?;
@@ -187,16 +207,41 @@ impl FromStr for Package {
             name: fields.remove_any("package")?.try_into()?,
             version: fields.remove_any("version")?.try_into()?,
             license: fields.remove_some("license")?.unwrap_or_default(),
-            architecture: fields.remove_any("architecture")?.try_into()?,
+            architecture: fields.remove_any("architecture")?.as_str().parse()?,
             description: fields.remove_any("description")?.try_into()?,
             maintainer: fields.remove_any("maintainer")?.try_into()?,
             installed_size: fields.remove_some("installed-size")?,
             provides: fields.remove_some("provides")?.unwrap_or_default(),
+            pre_depends: fields.remove_some("pre-depends")?.unwrap_or_default(),
             depends: fields.remove_some("depends")?.unwrap_or_default(),
             homepage: fields.remove_some("homepage")?,
             other: fields,
         };
         Ok(control)
+    }
+}
+
+impl TryFrom<wolf::Metadata> for Package {
+    type Error = Error;
+    fn try_from(other: wolf::Metadata) -> Result<Self, Self::Error> {
+        Ok(Self {
+            name: other.name.parse_field("name")?,
+            version: other.version.parse_field("version")?,
+            architecture: Arch::All,
+            description: other.description.into(),
+            homepage: if other.homepage.is_empty() {
+                None
+            } else {
+                Some(other.homepage.parse_field("homepage")?)
+            },
+            license: other.license.parse_field("license")?,
+            pre_depends: Default::default(),
+            depends: Default::default(),
+            provides: Default::default(),
+            maintainer: "Wolfpack <wolfpack@wolfpack.com>".parse()?,
+            other: Default::default(),
+            installed_size: Default::default(),
+        })
     }
 }
 
@@ -208,13 +253,14 @@ fn gz_writer() -> GzEncoder<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::create_dir_all;
-    use std::fs::remove_dir_all;
-    use std::fs::File;
+    use fs_err::create_dir_all;
+    use fs_err::remove_dir_all;
+    use fs_err::File;
     use std::process::Command;
     use std::process::Stdio;
 
     use arbtest::arbtest;
+    use command_error::CommandExt;
     use pgp::types::PublicKeyTrait;
     use tempfile::TempDir;
 
@@ -223,8 +269,9 @@ mod tests {
     use crate::deb::PackageVerifier;
     use crate::deb::SigningKey;
     use crate::deb::Value;
+    use crate::deb::Verify;
+    use crate::hash::UpperHex;
     use crate::test::DirectoryOfFiles;
-    use crate::test::UpperHex;
 
     #[test]
     fn value_eq() {
@@ -254,12 +301,12 @@ mod tests {
     fn write_read() {
         let (signing_key, verifying_key) = SigningKey::generate("wolfpack-pgp-id".into()).unwrap();
         let signer = PackageSigner::new(signing_key);
-        let verifier = PackageVerifier::new(verifying_key);
+        let verifier = PackageVerifier::new(vec![verifying_key], Verify::Always);
         arbtest(|u| {
             let control: Package = u.arbitrary()?;
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let mut buf: Vec<u8> = Vec::new();
-            control.write(directory.path(), &mut buf, &signer).unwrap();
+            control.write(&mut buf, directory.path(), &signer).unwrap();
             let (actual, ..) = Package::read(&buf[..], &verifier).unwrap();
             similar_asserts::assert_eq!(control, actual);
             Ok(())
@@ -284,6 +331,7 @@ mod tests {
             let mut control: Package = u.arbitrary()?;
             control.architecture = "all".parse().unwrap();
             control.depends.clear();
+            control.pre_depends.clear();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let path = workdir.path().join("test.deb");
             let _ = remove_dir_all(root.as_path());
@@ -291,7 +339,7 @@ mod tests {
             create_dir_all(debsig_policies.as_path()).unwrap();
             create_dir_all(keyring_file.parent().unwrap()).unwrap();
             create_dir_all(policy_file.parent().unwrap()).unwrap();
-            std::fs::write(
+            fs_err::write(
                 policy_file.as_path(),
                 format!(
                     r#"<?xml version="1.0"?>
@@ -318,8 +366,8 @@ mod tests {
                 .unwrap();
             control
                 .write(
-                    directory.path(),
                     File::create(path.as_path()).unwrap(),
+                    directory.path(),
                     &signer,
                 )
                 .unwrap();
@@ -329,7 +377,7 @@ mod tests {
                     .arg("--output")
                     .arg(keyring_file.as_path())
                     .arg(verifying_key_file.as_path())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "control:\n========{}========",
@@ -341,7 +389,7 @@ mod tests {
                     .arg("--root")
                     .arg(root.as_path())
                     .arg(path.as_path())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "control:\n========{}========",
@@ -353,7 +401,7 @@ mod tests {
                     .arg(root.as_path())
                     .arg("--install")
                     .arg(path.as_path())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "control:\n========{}========",
@@ -366,7 +414,7 @@ mod tests {
                     .arg("-L")
                     .arg(control.name().as_str())
                     .stdout(Stdio::null())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "control:\n========{}========",

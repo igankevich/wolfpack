@@ -1,31 +1,29 @@
+use fs_err::create_dir_all;
+use fs_err::File;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::fs::create_dir_all;
-use std::fs::File;
 use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
-use flate2::write::GzEncoder;
-use flate2::Compression;
 use ksign::IO;
 use walkdir::WalkDir;
 
 use crate::hash::Sha256Hash;
 use crate::hash::Sha256Reader;
+use crate::ipk::Arch;
 use crate::ipk::Error;
 use crate::ipk::Package;
 use crate::ipk::PackageSigner;
 use crate::ipk::PackageVerifier;
-use crate::ipk::SimpleValue;
 
 pub struct Repository {
-    packages: HashMap<SimpleValue, PerArchPackages>,
+    packages: HashMap<Arch, PerArchPackages>,
 }
 
 impl Repository {
@@ -39,17 +37,28 @@ impl Repository {
         P: AsRef<Path>,
         P2: AsRef<Path>,
     {
-        let mut packages: HashMap<SimpleValue, PerArchPackages> = HashMap::new();
+        let mut packages: HashMap<Arch, PerArchPackages> = HashMap::new();
         let mut push_package = |path: &Path| -> Result<(), Error> {
             let mut reader = Sha256Reader::new(File::open(path)?);
             let control = Package::read_control(reader.by_ref(), path, verifier)?;
             let (hash, size) = reader.digest()?;
             let mut filename = PathBuf::new();
+            filename.push("data");
             filename.push(hash.to_string());
             create_dir_all(output_dir.as_ref().join(&filename))?;
             filename.push(path.file_name().ok_or(ErrorKind::InvalidData)?);
             let new_path = output_dir.as_ref().join(&filename);
-            std::fs::rename(path, new_path)?;
+            fs_err::rename(path, new_path)?;
+            let file_name = path.file_name().expect("File name exists");
+            let file_name_sig = {
+                let mut name = file_name.to_os_string();
+                name.push(".sig");
+                name
+            };
+            fs_err::rename(
+                path.parent().expect("Parent exists").join(&file_name_sig),
+                output_dir.as_ref().join(&file_name_sig),
+            )?;
             let control = ExtendedPackage {
                 control,
                 size,
@@ -57,7 +66,7 @@ impl Repository {
                 filename,
             };
             packages
-                .entry(control.control.architecture.clone())
+                .entry(control.control.arch)
                 .or_insert_with(|| PerArchPackages {
                     packages: Vec::new(),
                 })
@@ -71,7 +80,7 @@ impl Repository {
                 for entry in WalkDir::new(path).into_iter() {
                     let entry = entry?;
                     if entry.file_type().is_dir()
-                        || entry.path().extension() != Some(OsStr::new("deb"))
+                        || entry.path().extension() != Some(OsStr::new("ipk"))
                     {
                         continue;
                     }
@@ -92,12 +101,13 @@ impl Repository {
         let output_dir = output_dir.as_ref();
         create_dir_all(output_dir)?;
         let packages_string = self.to_string();
-        std::fs::write(output_dir.join("Packages"), packages_string.as_bytes())?;
-        {
-            let mut writer = GzEncoder::new(
-                File::create(output_dir.join("Packages.gz"))?,
-                Compression::best(),
-            );
+        for (format, extension) in [(deko::Format::Verbatim, ""), (deko::Format::Gz, ".gz")] {
+            let filename = format!("Packages{}", extension);
+            let mut writer = deko::AnyEncoder::new(
+                File::create(output_dir.join(filename))?,
+                format,
+                deko::write::Compression::Best,
+            )?;
             writer.write_all(packages_string.as_bytes())?;
             writer.finish()?;
         }
@@ -108,11 +118,11 @@ impl Repository {
         Ok(())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&SimpleValue, &PerArchPackages)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&Arch, &PerArchPackages)> {
         self.packages.iter()
     }
 
-    pub fn architectures(&self) -> HashSet<SimpleValue> {
+    pub fn architectures(&self) -> HashSet<Arch> {
         self.packages.keys().cloned().collect()
     }
 }
@@ -159,10 +169,11 @@ impl Display for ExtendedPackage {
 #[cfg(test)]
 mod tests {
 
-    use std::fs::remove_dir_all;
+    use fs_err::remove_dir_all;
     use std::process::Command;
 
     use arbtest::arbtest;
+    use command_error::CommandExt;
     use tempfile::TempDir;
 
     use super::*;
@@ -179,25 +190,28 @@ mod tests {
         let signing_key = SigningKey::generate(Some("wolfpack".into()));
         let verifying_key = signing_key.to_verifying_key();
         // speed up opkg update
-        std::fs::remove_file("/etc/opkg/distfeeds.conf").unwrap();
+        fs_err::remove_file("/etc/opkg/distfeeds.conf").unwrap();
         arbtest(|u| {
             let mut package: Package = u.arbitrary()?;
-            package.architecture = "all".parse().unwrap();
+            package.arch = "all".parse().unwrap();
             package.depends.clear();
             package.installed_size = Some(100);
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let package_path = workdir.path().join("test.ipk");
             package
-                .write(directory.path(), package_path.as_path(), &signing_key)
+                .write(package_path.as_path(), directory.path(), &signing_key)
                 .unwrap();
             let _ = remove_dir_all(&repo_dir);
             Repository::new(&repo_dir, [&package_path], &verifying_key)
                 .unwrap()
                 .write(&repo_dir, &signing_key)
                 .unwrap();
-            Command::new("find").arg(workdir.path()).status().unwrap();
-            std::fs::write(
-                "/etc/opkg/customfeeds.conf",
+            Command::new("find")
+                .arg(workdir.path())
+                .status_checked()
+                .unwrap();
+            fs_err::write(
+                "/etc/opkg/test.conf",
                 format!("src/gz test file://{}\n", repo_dir.display()),
             )
             .unwrap();
@@ -205,19 +219,19 @@ mod tests {
                 .write_to_file(format!("/etc/opkg/keys/{}", verifying_key.fingerprint()))
                 .unwrap();
             Command::new("cat")
-                .arg("/etc/opkg/customfeeds.conf")
-                .status()
+                .arg("/etc/opkg/test.conf")
+                .status_checked()
                 .unwrap();
             Command::new("sh")
                 .arg("-c")
                 .arg("cat /etc/opkg/keys/*")
-                .status()
+                .status_checked()
                 .unwrap();
             assert!(
                 Command::new("opkg")
                     .arg("update")
                     .arg(package_path.as_path())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package:\n========{}========",
@@ -226,8 +240,8 @@ mod tests {
             assert!(
                 Command::new("opkg")
                     .arg("install")
-                    .arg(package.name().to_string())
-                    .status()
+                    .arg(package.name.to_string())
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package:\n========{}========",
@@ -236,8 +250,8 @@ mod tests {
             assert!(
                 Command::new("opkg")
                     .arg("remove")
-                    .arg(package.name().to_string())
-                    .status()
+                    .arg(package.name.to_string())
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package:\n========{}========",

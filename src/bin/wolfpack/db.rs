@@ -1,4 +1,4 @@
-use log::error;
+use fs_err::create_dir_all;
 use parking_lot::Mutex;
 use rusqlite::functions::FunctionFlags;
 use rusqlite::types::FromSql;
@@ -6,13 +6,11 @@ use rusqlite::types::FromSqlResult;
 use rusqlite::types::ToSql;
 use rusqlite::types::ToSqlOutput;
 use rusqlite::types::ValueRef;
-use rusqlite::DatabaseName;
 use rusqlite::OptionalExtension;
 use rusqlite_migration::{Migrations, M};
 use sql_minifier::macros::load_sql;
 use std::cmp::Ordering;
 use std::ffi::OsString;
-use std::fs::create_dir_all;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -52,6 +50,12 @@ impl Connection {
             self.inner.path().expect("Was created with path"),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )?;
+        Self::configure(&conn)?;
+        Ok(Arc::new(Mutex::new(Self { inner: conn })))
+    }
+
+    pub fn clone_read_write(&self) -> Result<ConnectionArc, Error> {
+        let conn = rusqlite::Connection::open(self.inner.path().expect("Was created with path"))?;
         Self::configure(&conn)?;
         Ok(Arc::new(Mutex::new(Self { inner: conn })))
     }
@@ -151,16 +155,16 @@ impl Connection {
             .ensure_num_rows_modified(1)?;
         Ok(())
     }
-}
 
-impl Drop for Connection {
-    fn drop(&mut self) {
-        if self.inner.is_readonly(DatabaseName::Main).unwrap_or(true) {
-            return;
-        }
-        if let Err(e) = self.inner.execute_batch(POSTAMBLE) {
-            error!("Failed to execute SQL postamble: {e}");
-        }
+    pub fn optimize(&self) -> Result<(), Error> {
+        self.inner.execute_batch(
+            "PRAGMA incremental_vacuum; \
+PRAGMA analysis_limit=1000; \
+PRAGMA optimize; \
+ANALYZE;
+VACUUM;",
+        )?;
+        Ok(())
     }
 }
 
@@ -248,7 +252,6 @@ impl PathFromBytes for PathBuf {
 }
 
 const PREAMBLE: &str = load_sql!("src/bin/wolfpack/sql/preamble.sql");
-const POSTAMBLE: &str = load_sql!("src/bin/wolfpack/sql/postamble.sql");
 const POST_MIGRATIONS: &str = load_sql!("src/bin/wolfpack/sql/post-migrations.sql");
 const MIGRATIONS: [M<'static>; 1] = [M::up(include_str!("sql/migrations/01-initial.sql"))];
 

@@ -35,7 +35,7 @@ impl<S: Signer, W: Write> SignatureWriter<S, W> {
             .signer
             .sign(&self.buffer[..])
             .map_err(|_| std::io::Error::other("failed to sign"))?;
-        std::fs::write(self.signature_file.as_path(), signature)?;
+        fs_err::write(self.signature_file.as_path(), signature)?;
         self.signed = true;
         Ok(())
     }

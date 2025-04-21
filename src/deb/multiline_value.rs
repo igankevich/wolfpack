@@ -2,11 +2,15 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::io::ErrorKind;
 
+use serde::Deserialize;
+use serde::Serialize;
+
 use crate::deb::Error;
 use crate::deb::SimpleValue;
 use crate::deb::Value;
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct MultilineValue(String);
 
 impl MultilineValue {

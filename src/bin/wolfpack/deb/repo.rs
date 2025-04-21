@@ -1,8 +1,7 @@
 use deko::bufread::AnyDecoder;
-use elf::abi::EI_NIDENT;
-use elf::abi::ET_DYN;
-use elf::abi::ET_EXEC;
-use elf::endian::AnyEndian;
+use fs_err::create_dir_all;
+use fs_err::read_to_string;
+use fs_err::File;
 use indicatif::MultiProgress;
 use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
@@ -11,27 +10,27 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use std::fs::create_dir_all;
-use std::fs::read_to_string;
-use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::ErrorKind;
 use std::io::Read;
 use std::ops::RangeInclusive;
 use std::path::Path;
-use std::process::Command;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::oneshot;
 use uname_rs::Uname;
 use wolfpack::deb;
+use wolfpack::elf::change_root;
 use wolfpack::sign::VerifierV2;
 
 use crate::db::Connection;
 use crate::db::ConnectionArc;
-use crate::db::Id;
+use crate::deb as db_deb;
 use crate::deb::DebDependencyMatch;
 use crate::deb::DebMatch;
+use crate::deb::RepoId;
 use crate::download_file;
 use crate::print_table;
 use crate::Config;
@@ -39,6 +38,7 @@ use crate::DebConfig;
 use crate::Error;
 use crate::Repo;
 use crate::Row;
+use crate::SearchBy;
 use crate::ToRow;
 
 pub struct DebRepo {
@@ -61,9 +61,9 @@ impl DebRepo {
     #[allow(clippy::too_many_arguments)]
     fn index_packages(
         packages_file: &Path,
-        arch_dir: &Path,
+        repo_dir: &Path,
         base_url: String,
-        component_id: Id,
+        repo_id: RepoId,
         db_conn: ConnectionArc,
         dependency_resolution_tasks: Arc<Mutex<Vec<Task>>>,
         repo_name: String,
@@ -81,13 +81,16 @@ impl DebRepo {
         // Insert the packages into the database.
         for package in packages.iter() {
             let url = format!("{}/{}", base_url, package.filename.display());
-            let package_file = arch_dir.join(&package.filename);
-            db_conn
+            let package_file = repo_dir.join(&package.filename);
+            if let Err(e) = db_conn
                 .lock()
-                .insert_deb_package(package, &url, &package_file, component_id)?;
+                .insert_deb_package(package, &url, &package_file, repo_id)
+            {
+                log::error!("Failed to index {:?}: {e}", package.inner.name.as_str());
+                continue;
+            }
             indexing_progress_bar.lock().inc(1);
         }
-        //log::info!("Indexed {:?}", packages_file);
         // Resolve dependencies in batches.
         progress_bar.lock().inc_length(packages.len() as u64);
         let batch_size = 1_000;
@@ -111,6 +114,33 @@ impl DebRepo {
         Ok(())
     }
 
+    fn index_package_contents(
+        contents_file: &Path,
+        arch: String,
+        repo_id: RepoId,
+        db_conn: ConnectionArc,
+        progress_bar: Arc<Mutex<ProgressBar>>,
+    ) -> Result<(), Error> {
+        let decoder = AnyDecoder::new(BufReader::new(File::open(contents_file)?));
+        let contents = deb::PackageContents::read(BufReader::new(decoder))?.into_inner();
+        progress_bar.lock().inc_length(contents.len() as u64);
+        let db_conn = db_conn.lock().clone_read_write()?;
+        db_conn.lock().inner.execute_batch("BEGIN")?;
+        for (package_name, files) in contents.iter() {
+            if let Err(e) =
+                db_conn
+                    .lock()
+                    .insert_deb_package_contents(package_name, files, &arch, repo_id)
+            {
+                log::error!("Failed to index the contents of {package_name:?}: {e}");
+                continue;
+            }
+            progress_bar.lock().inc(1);
+        }
+        db_conn.lock().inner.execute_batch("COMMIT")?;
+        Ok(())
+    }
+
     fn resolve_dependencies(
         packages: &[deb::ExtendedPackage],
         repo_name: String,
@@ -121,7 +151,12 @@ impl DebRepo {
         let ro_conn = db_conn.lock().clone_read_only()?;
         let ro_conn = ro_conn.lock();
         for package in packages.iter() {
-            for dep in package.inner.depends.iter() {
+            for dep in package
+                .inner
+                .depends
+                .iter()
+                .chain(package.inner.pre_depends.iter())
+            {
                 let matches = ro_conn.select_deb_dependencies(&repo_name, dep)?;
                 if matches.len() != 1 {
                     continue;
@@ -168,6 +203,16 @@ impl Repo for DebRepo {
                     ),
             ),
         ));
+        let index_contents_progress_bar = Arc::new(Mutex::new(
+            progress.add(
+                ProgressBar::with_draw_target(Some(0), ProgressDrawTarget::stderr())
+                    .with_message("Indexing package contents")
+                    .with_style(
+                        ProgressStyle::with_template("{msg} {wide_bar} {pos}/{len}")
+                            .expect("Template is correct"),
+                    ),
+            ),
+        ));
         let progress_bar = Arc::new(Mutex::new(
             ProgressBar::with_draw_target(Some(0), ProgressDrawTarget::hidden())
                 .with_message("Resolving dependencies")
@@ -179,11 +224,15 @@ impl Repo for DebRepo {
         let dependency_resolution_tasks = Arc::new(Mutex::new(Vec::new()));
         let db_conn = Connection::new(config)?;
         let arch = Self::native_arch()?;
+        let repo_dir = config.cache_dir.join(name);
+        let mut index_rxs = Vec::new();
+        let mut releases = HashMap::new();
         #[allow(clippy::never_loop)]
         for base_url in self.config.base_urls.iter() {
+            let repo_id = db_conn.lock().insert_deb_repo(name, base_url)?;
             for suite in self.config.suites.iter() {
                 let suite_url = format!("{}/dists/{}", base_url, suite);
-                let suite_dir = config.cache_dir.join(name).join(suite);
+                let suite_dir = repo_dir.join(suite);
                 create_dir_all(&suite_dir)?;
                 let release_file = suite_dir.join("Release");
                 download_file(
@@ -206,7 +255,7 @@ impl Repo for DebRepo {
                         Some(downloading_progress_bar.clone()),
                     )
                     .await?;
-                    let message = std::fs::read(&release_file)?;
+                    let message = fs_err::read(&release_file)?;
                     let signature =
                         deb::Signature::read_armored_one(File::open(&release_gpg_file)?)?;
                     let verifying_keys = deb::VerifyingKey::read_binary_all(File::open(
@@ -218,7 +267,7 @@ impl Repo for DebRepo {
                         &signature,
                     )
                     .map_err(|_| Error::Verify(release_gpg_file.clone()))?;
-                    log::info!(
+                    log::debug!(
                         "Verified {} against {}",
                         release_file.display(),
                         release_gpg_file.display()
@@ -232,17 +281,18 @@ impl Repo for DebRepo {
                         let files = release.get_files(&packages_prefix, "Packages");
                         let arch_dir = component_dir.join(format!("binary-{}", arch));
                         create_dir_all(&arch_dir)?;
+                        let component_url = format!("{}/{}", suite_url, packages_prefix);
+                        db_conn.lock().insert_deb_component(
+                            &component_url,
+                            suite,
+                            component.as_str(),
+                            arch,
+                            repo_id,
+                        )?;
+                        let (index_tx, index_rx) = oneshot::channel();
+                        index_rxs.push(index_rx);
                         for (candidate, hash, _file_size) in files.into_iter() {
                             let file_name = candidate.file_name().ok_or(ErrorKind::InvalidData)?;
-                            let component_url = format!("{}/{}", suite_url, packages_prefix);
-                            let component_id = db_conn.lock().insert_deb_component(
-                                &component_url,
-                                name,
-                                base_url,
-                                suite,
-                                component.as_str(),
-                                arch,
-                            )?;
                             let packages_url = format!(
                                 "{}/{}",
                                 component_url,
@@ -266,12 +316,13 @@ impl Repo for DebRepo {
                                     let tasks = dependency_resolution_tasks.clone();
                                     let progress_bar = progress_bar.clone();
                                     let indexing_progress_bar = indexing_progress_bar.clone();
+                                    let repo_dir = repo_dir.clone();
                                     threads.execute(move || {
                                         if let Err(e) = Self::index_packages(
                                             &packages_file,
-                                            &arch_dir,
+                                            &repo_dir,
                                             base_url,
-                                            component_id,
+                                            repo_id,
                                             db_conn,
                                             tasks,
                                             name,
@@ -280,6 +331,7 @@ impl Repo for DebRepo {
                                         ) {
                                             log::error!("Failed to index packages: {}", e)
                                         }
+                                        let _ = index_tx.send(());
                                     });
                                     break;
                                 }
@@ -289,13 +341,78 @@ impl Repo for DebRepo {
                         }
                     }
                 }
+                releases.insert((base_url, suite), release);
+            }
+        }
+        for index_rx in index_rxs.into_iter() {
+            index_rx.await?;
+        }
+        db_conn.lock().optimize()?;
+        #[allow(clippy::never_loop)]
+        for base_url in self.config.base_urls.iter() {
+            let repo_id = db_conn.lock().insert_deb_repo(name, base_url)?;
+            for suite in self.config.suites.iter() {
+                let mut contents_files = Vec::new();
+                let suite_url = format!("{}/dists/{}", base_url, suite);
+                let suite_dir = repo_dir.join(suite);
+                let release = releases.get(&(base_url, suite)).expect("Inserted above");
+                for component in release.components().intersection(&self.config.components) {
+                    let component_dir = suite_dir.join(component.as_str());
+                    for arch in [arch.as_str(), "all"] {
+                        let file_stem = format!("Contents-{}", arch);
+                        let files = release.get_files(component.as_str(), &file_stem);
+                        for (candidate, hash, _file_size) in files.into_iter() {
+                            let file_name = candidate.file_name().ok_or(ErrorKind::InvalidData)?;
+                            let contents_url = format!(
+                                "{}/{}/{}",
+                                suite_url,
+                                component,
+                                file_name.to_str().ok_or(ErrorKind::InvalidData)?,
+                            );
+                            let contents_file = component_dir.join(file_name);
+                            match download_file(
+                                &contents_url,
+                                &contents_file,
+                                Some(hash),
+                                db_conn.clone(),
+                                config,
+                                Some(downloading_progress_bar.clone()),
+                            )
+                            .await
+                            {
+                                Ok(..) => {
+                                    contents_files.push((arch.to_string(), contents_file));
+                                    break;
+                                }
+                                Err(Error::ResourceNotFound(..)) => continue,
+                                Err(e) => return Err(e),
+                            }
+                        }
+                    }
+                }
+                let db_conn = db_conn.clone();
+                let index_contents_progress_bar = index_contents_progress_bar.clone();
+                threads.execute(move || {
+                    for (arch, contents_file) in contents_files.into_iter() {
+                        if let Err(e) = Self::index_package_contents(
+                            &contents_file,
+                            arch,
+                            repo_id,
+                            db_conn.clone(),
+                            index_contents_progress_bar.clone(),
+                        ) {
+                            log::error!("Failed to index package contents: {}", e)
+                        }
+                    }
+                });
             }
             // TODO Only one URL is used.
             break;
         }
-        downloading_progress_bar.lock().finish();
         threads.join();
+        downloading_progress_bar.lock().finish();
         indexing_progress_bar.lock().finish();
+        index_contents_progress_bar.lock().finish();
         {
             let progress_bar = progress_bar.lock();
             progress_bar.reset_elapsed();
@@ -311,9 +428,10 @@ impl Repo for DebRepo {
             threads.execute(task);
         }
         threads.join();
+        db_conn.lock().optimize()?;
         let progress_bar = progress_bar.lock();
         progress_bar.finish();
-        log::info!(
+        log::debug!(
             "Resolved dependencies of {} packages in {:.2}s",
             progress_bar.length().unwrap_or(0),
             progress_bar.elapsed().as_secs_f32()
@@ -338,6 +456,54 @@ impl Repo for DebRepo {
         Ok(())
     }
 
+    async fn download(
+        &mut self,
+        config: &Config,
+        name: &str,
+        packages: Vec<String>,
+    ) -> Result<Vec<PathBuf>, Error> {
+        let db_conn = Connection::new(config)?;
+        let mut matches: Vec<DebDependencyMatch> = Vec::new();
+        for package_name in packages.iter() {
+            let candidates: Vec<_> = db_conn
+                .lock()
+                .find_deb_packages_by_name(name, package_name)?
+                .into_iter()
+                .collect();
+            matches.extend(candidates);
+        }
+        let verifying_keys =
+            deb::VerifyingKey::read_binary_all(File::open(&self.config.public_key_file)?)?;
+        let mut filenames = Vec::with_capacity(matches.len());
+        for package in matches.into_iter() {
+            if let Some(dirname) = package.filename.parent() {
+                create_dir_all(dirname)?;
+            }
+            download_file(
+                &package.url,
+                &package.filename,
+                package.hash.clone(),
+                db_conn.clone(),
+                config,
+                None,
+            )
+            .await
+            .inspect_err(|_| {
+                let _ = fs_err::remove_file(&package.filename);
+            })?;
+            let verifier =
+                deb::PackageVerifier::new(verifying_keys.clone(), deb::Verify::OnlyIfPresent);
+            let _ = deb::Package::read(File::open(&package.filename)?, &verifier).inspect_err(
+                |_| {
+                    let _ = fs_err::remove_file(&package.filename);
+                },
+            )?;
+            log::debug!("Verified {}", package.filename.display());
+            filenames.push(package.filename);
+        }
+        Ok(filenames)
+    }
+
     async fn install(
         &mut self,
         config: &Config,
@@ -354,6 +520,8 @@ impl Repo for DebRepo {
                 .collect();
             matches.insert(package_name.clone(), candidates);
         }
+        let verifying_keys =
+            deb::VerifyingKey::read_binary_all(File::open(&self.config.public_key_file)?)?;
         for (package_name, mut matches) in matches.into_iter() {
             for (i, package) in matches.iter().enumerate() {
                 println!(
@@ -397,7 +565,6 @@ impl Repo for DebRepo {
                     }
                 }
             }
-            // Add dependencies.
             let mut dependencies = VecDeque::new();
             // Select dependencies that has already been resolved on repository pull.
             let resolved_dependencies = db_conn
@@ -412,7 +579,9 @@ impl Repo for DebRepo {
                     .position(|dep| dep.version_matches(&resolved.name, &version));
                 if let Some(i) = i {
                     let dep = depends.remove(i);
-                    log::info!(
+                    log::debug!("Recurse into {}", resolved.name);
+                    dependencies.extend(resolved.depends.clone().into_inner());
+                    log::debug!(
                         "Already resolved \"{}\" as {}({})",
                         dep,
                         resolved.name,
@@ -425,10 +594,10 @@ impl Repo for DebRepo {
             dependencies.extend(depends);
             let mut visited = HashSet::new();
             'outer: while let Some(dep) = dependencies.pop_front() {
-                log::info!("Resolving {}", dep);
+                log::debug!("Resolving {}", dep);
                 let t = Instant::now();
                 let mut candidates = db_conn.lock().select_deb_dependencies(name, &dep)?;
-                log::info!("{}s", t.elapsed().as_secs_f32());
+                log::debug!("{}s", t.elapsed().as_secs_f32());
                 if candidates.is_empty() {
                     return Err(Error::DependencyNotFound(dep.to_string()));
                 }
@@ -472,19 +641,19 @@ impl Repo for DebRepo {
                 for package in candidates.into_iter() {
                     // TODO unique `dependencies`
                     if visited.insert(package.hash.clone()) {
-                        log::info!("Recurse into {}", package.name);
+                        log::debug!("Recurse into {}", package.name);
                         dependencies.extend(package.depends.clone().into_inner());
                         matches.push(package);
                     }
                 }
             }
-            log::info!("Installing...");
+            log::debug!("Installing...");
             // Install in topological (reverse) order.
             for package in matches.into_iter().rev() {
                 if let Some(dirname) = package.filename.parent() {
                     create_dir_all(dirname)?;
                 }
-                match download_file(
+                download_file(
                     &package.url,
                     &package.filename,
                     package.hash.clone(),
@@ -493,72 +662,70 @@ impl Repo for DebRepo {
                     None,
                 )
                 .await
-                {
-                    Ok(..) => {
-                        let verifier = deb::PackageVerifier::none();
-                        let (_control, data) =
-                            deb::Package::read(File::open(&package.filename)?, &verifier)?;
-                        log::info!("Installing {}", package.filename.display());
-                        let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
-                        let dst = config.store_dir.join(name);
-                        create_dir_all(&dst)?;
-                        tar_archive.unpack(&dst)?;
-                        drop(tar_archive);
-                        let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
-                        for entry in tar_archive.entries()? {
-                            let entry = entry?;
-                            let path = dst.join(entry.path()?);
-                            if get_elf_type(&path).is_some() {
-                                log::info!("patching {:?}", path);
-                                let status = Command::new("./patchelf.sh")
-                                    .arg(&path)
-                                    .arg(&dst)
-                                    .status()?;
-                                if !status.success() {
-                                    return Err(Error::Patch(path));
-                                }
-                            }
-                        }
+                .inspect_err(|_| {
+                    let _ = fs_err::remove_file(&package.filename);
+                })?;
+                let verifier =
+                    deb::PackageVerifier::new(verifying_keys.clone(), deb::Verify::OnlyIfPresent);
+                let (_control, data) =
+                    deb::Package::read(File::open(&package.filename)?, &verifier).inspect_err(
+                        |_| {
+                            let _ = fs_err::remove_file(&package.filename);
+                        },
+                    )?;
+                log::debug!("Installing {}", package.filename.display());
+                let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
+                let dst = config.store_dir.join(name);
+                create_dir_all(&dst)?;
+                tar_archive.unpack(&dst)?;
+                drop(tar_archive);
+                let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
+                for entry in tar_archive.entries()? {
+                    let entry = entry?;
+                    let path = dst.join(entry.path()?);
+                    let metadata = fs_err::symlink_metadata(&path)?;
+                    if metadata.is_file() {
+                        change_root(path, &dst)?;
                     }
-                    Err(..) => continue,
                 }
             }
         }
         Ok(())
     }
 
-    fn search(&mut self, config: &Config, name: &str, keyword: &str) -> Result<(), Error> {
+    fn search(
+        &mut self,
+        config: &Config,
+        name: &str,
+        by: SearchBy,
+        keyword: &str,
+    ) -> Result<(), Error> {
         let db_conn = Connection::new(config)?;
         let architecture = Self::native_arch()?;
-        let matches = db_conn
-            .lock()
-            .find_deb_packages(name, &architecture, keyword)?;
-        print_table(matches.iter(), std::io::stdout())?;
+        match by {
+            SearchBy::Name => {
+                let matches = db_conn
+                    .lock()
+                    .find_deb_packages(name, &architecture, keyword)?;
+                print_table(matches.iter(), std::io::stdout())?;
+            }
+            SearchBy::File => {
+                let matches =
+                    db_conn
+                        .lock()
+                        .find_deb_packages_by_file(name, &architecture, keyword)?;
+                print_table(matches.iter(), std::io::stdout())?;
+            }
+            SearchBy::Command => {
+                let matches =
+                    db_conn
+                        .lock()
+                        .find_deb_packages_by_command(name, &architecture, keyword)?;
+                print_table(matches.iter(), std::io::stdout())?;
+            }
+        };
         Ok(())
     }
-}
-
-fn get_elf_type(path: &Path) -> Option<ElfType> {
-    let mut file = File::open(path).ok()?;
-    let mut buf = [0; 64];
-    let n = file.read(&mut buf[..]).ok()?;
-    let buf = &mut buf[..n];
-    drop(file);
-    if buf.len() < 4 {
-        return None;
-    }
-    let ident = elf::file::parse_ident::<AnyEndian>(buf).ok()?;
-    let header = elf::file::FileHeader::<AnyEndian>::parse_tail(ident, &buf[EI_NIDENT..]).ok()?;
-    match header.e_type {
-        ET_EXEC => Some(ElfType::Executable),
-        ET_DYN => Some(ElfType::Library),
-        _ => None,
-    }
-}
-
-enum ElfType {
-    Executable,
-    Library,
 }
 
 fn ask_number(prompt: &str, valid_range: RangeInclusive<usize>) -> Result<usize, Error> {
@@ -605,6 +772,15 @@ impl ToRow<3> for DebDependencyMatch {
                 .map(|line| line.trim())
                 .unwrap_or_default()
                 .into(),
+        ])
+    }
+}
+
+impl ToRow<2> for db_deb::PackageFileMatch {
+    fn to_row(&self) -> Row<'_, 2> {
+        Row([
+            self.file.to_str().unwrap_or_default().into(),
+            self.package_name.as_str().into(),
         ])
     }
 }

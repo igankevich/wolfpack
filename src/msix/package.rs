@@ -1,5 +1,5 @@
-use std::fs::File;
-use std::fs::OpenOptions;
+use fs_err::File;
+use fs_err::OpenOptions;
 use std::io::Error;
 use std::io::Write;
 use std::path::Path;
@@ -12,10 +12,10 @@ use zip::write::ZipWriter;
 
 use crate::hash::Sha256Reader;
 use crate::msix::xml;
+use crate::wolf;
 
 #[derive(Clone)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary, PartialEq, Eq, Debug))]
-#[allow(unused)]
 pub struct Package {
     pub name: String,
     pub description: String,
@@ -26,7 +26,6 @@ pub struct Package {
 }
 
 impl Package {
-    #[allow(unused)]
     pub fn write<P2: AsRef<Path>, P: AsRef<Path>>(
         &self,
         file: P2,
@@ -138,6 +137,25 @@ impl Package {
         writer.finish()?;
         Ok(())
     }
+
+    pub fn file_name(&self) -> String {
+        // TODO arch?
+        format!("{}_{}.msix", self.name, self.version)
+    }
+}
+
+impl TryFrom<wolf::Metadata> for Package {
+    type Error = Error;
+    fn try_from(other: wolf::Metadata) -> Result<Self, Self::Error> {
+        Ok(Self {
+            name: other.name,
+            version: other.version,
+            description: other.description,
+            publisher: Default::default(),
+            executable: Default::default(),
+            logo: Default::default(),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -146,6 +164,7 @@ mod tests {
     use std::process::Command;
 
     use arbtest::arbtest;
+    use command_error::CommandExt;
     use tempfile::TempDir;
 
     use super::*;
@@ -176,7 +195,7 @@ mod tests {
                     .arg("msixmgr")
                     .arg("-AddPackage")
                     .arg(&package_file)
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",

@@ -4,6 +4,7 @@ use rusqlite::types::FromSql;
 use rusqlite::types::FromSqlResult;
 use rusqlite::types::ValueRef;
 use rusqlite::OptionalExtension;
+use std::cmp::Ordering;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::path::Path;
@@ -18,39 +19,69 @@ use crate::db::PathAsBytes;
 use crate::db::PathFromBytes;
 use crate::Error;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RepoId(pub Id);
+
 impl Connection {
+    pub fn insert_deb_repo(&self, name: &str, url: &str) -> Result<RepoId, Error> {
+        let id = self
+            .inner
+            .prepare_cached(
+                "INSERT INTO deb_repos(name, url) \
+                VALUES(?1, ?2) \
+                ON CONFLICT DO NOTHING \
+                RETURNING id",
+            )?
+            .query_row((name, url), |row| {
+                let id: Id = row.get(0)?;
+                Ok(id)
+            })
+            .optional()?;
+        match id {
+            Some(id) => Ok(RepoId(id)),
+            None => self
+                .inner
+                .prepare_cached("SELECT id FROM deb_repos WHERE name = ?1")?
+                .query_row((name,), |row| {
+                    let id: Id = row.get(0)?;
+                    Ok(id)
+                })
+                .map(RepoId)
+                .map_err(Into::into),
+        }
+    }
+
     pub fn insert_deb_component(
         &self,
         url: &str,
-        repo_name: &str,
-        base_url: &str,
         suite: &str,
         component: &str,
         architecture: &str,
+        repo_id: RepoId,
     ) -> Result<Id, Error> {
-        let id = self.inner
+        let id = self
+            .inner
             .prepare_cached(
-                "INSERT INTO deb_components(url, repo_name, base_url, suite, component, architecture) \
-                VALUES(?1, ?2, ?3, ?4, ?5, ?6) \
+                "INSERT INTO deb_components(url, suite, component, architecture, repo_id) \
+                VALUES(?1, ?2, ?3, ?4, ?5) \
                 ON CONFLICT(url) DO NOTHING \
                 RETURNING id",
             )?
-            .query_row((url, repo_name, base_url, suite, component, architecture), |row| {
+            .query_row((url, suite, component, architecture, repo_id.0), |row| {
                 let id: Id = row.get(0)?;
                 Ok(id)
             })
             .optional()?;
         match id {
             Some(id) => Ok(id),
-            None => Ok(self
+            None => self
                 .inner
                 .prepare_cached("SELECT id FROM deb_components WHERE url = ?1")?
                 .query_row((url,), |row| {
                     let id: Id = row.get(0)?;
                     Ok(id)
                 })
-                .optional()?
-                .expect("Should return id")),
+                .map_err(Into::into),
         }
     }
 
@@ -59,16 +90,22 @@ impl Connection {
         package: &deb::ExtendedPackage,
         url: &str,
         filename: &Path,
-        component_id: Id,
+        repo_id: RepoId,
     ) -> Result<(), Error> {
         let hash = package.hash();
+        let all_dependencies = {
+            let mut all = Vec::new();
+            all.extend(package.inner.pre_depends.iter().cloned());
+            all.extend(package.inner.depends.iter().cloned());
+            deb::Dependencies::new(all)
+        };
         let id = self
             .inner
             .prepare_cached(
                 "INSERT INTO deb_packages(name, version, architecture, description, \
-                installed_size, depends, url, filename, hash, homepage, component_id) \
+                installed_size, depends, url, filename, hash, homepage, repo_id) \
                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
-                ON CONFLICT(url) DO NOTHING
+                ON CONFLICT DO NOTHING
                 RETURNING id",
             )?
             .query_row(
@@ -78,8 +115,8 @@ impl Connection {
                     package.inner.architecture.as_str(),
                     package.inner.description.as_str(),
                     package.inner.installed_size.map(|s| s.saturating_mul(1024)), // Convert from KiB.
-                    if !package.inner.depends.is_empty() {
-                        Some(package.inner.depends.to_string())
+                    if !all_dependencies.is_empty() {
+                        Some(all_dependencies.to_string())
                     } else {
                         None
                     },
@@ -87,7 +124,7 @@ impl Connection {
                     filename.as_bytes(),
                     hash.as_ref().map(|x| x.as_bytes()).ok_or(Error::NoHash)?,
                     package.inner.homepage.as_ref().map(|x| x.as_str()),
-                    component_id,
+                    repo_id.0,
                 ),
                 |row| {
                     let id: Id = row.get(0)?;
@@ -108,6 +145,53 @@ impl Connection {
         Ok(())
     }
 
+    pub fn insert_deb_package_contents(
+        &self,
+        package_name: &str,
+        files: &[PathBuf],
+        arch: &str,
+        repo_id: RepoId,
+    ) -> Result<(), Error> {
+        for file in files {
+            // Index commands separately for faster search.
+            let command = if let Some(parent) = file.parent() {
+                match parent.file_name() {
+                    Some(dirname) => {
+                        if dirname == Path::new("bin") || dirname == Path::new("sbin") {
+                            Some(file.file_name().expect("File name exists"))
+                        } else {
+                            None
+                        }
+                    }
+                    None => None,
+                }
+            } else {
+                None
+            };
+            self.inner
+                .prepare_cached(
+                    "INSERT INTO deb_files(path, command, package_name, arch, repo_id) \
+                    VALUES (?1, ?2, ?3, ?4, ?5) \
+                    ON CONFLICT DO NOTHING",
+                )?
+                .query_row(
+                    (
+                        file.as_bytes(),
+                        command.map(|x| x.as_encoded_bytes()),
+                        package_name,
+                        arch,
+                        repo_id.0,
+                    ),
+                    |row| {
+                        let id: Id = row.get(0)?;
+                        Ok(id)
+                    },
+                )
+                .optional()?;
+        }
+        Ok(())
+    }
+
     pub fn find_deb_packages(
         &self,
         repo_name: &str,
@@ -121,7 +205,7 @@ impl Connection {
                 JOIN deb_packages
                   ON id=deb_packages_fts.rowid
                 WHERE architecture IN (?3, 'all')
-                  AND EXISTS(SELECT repo_name FROM deb_components WHERE component_id=id AND repo_name=?2)
+                  AND repo_id IN (SELECT id FROM deb_repos WHERE name=?2)
                   AND deb_packages_fts MATCH ?1
                 ORDER BY rank",
             )?
@@ -142,11 +226,13 @@ impl Connection {
         name: &str,
     ) -> Result<Vec<DebDependencyMatch>, Error> {
         self.inner
-            .prepare_cached("SELECT name, version, description, depends, url ,filename, hash, id
+            .prepare_cached(
+                "SELECT name, version, description, depends, url ,filename, hash, id
                 FROM deb_packages
                 WHERE name=?1
-                  AND EXISTS(SELECT repo_name FROM deb_components WHERE component_id=id AND repo_name=?2)
-                ORDER BY name ASC, version DESC")?
+                  AND repo_id IN (SELECT id FROM deb_repos WHERE name=?2)
+                ORDER BY name ASC, version DESC",
+            )?
             .query_map((name, repo_name), |row| {
                 Ok(DebDependencyMatch {
                     name: row.get(0)?,
@@ -157,6 +243,57 @@ impl Connection {
                     filename: PathBuf::from_bytes(row.get::<usize, Vec<u8>>(5)?),
                     hash: row.get::<usize, OptionAnyHash>(6)?.into_inner(),
                     id: row.get(7)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    pub fn find_deb_packages_by_file(
+        &self,
+        repo_name: &str,
+        architecture: &str,
+        glob: &str,
+    ) -> Result<Vec<PackageFileMatch>, Error> {
+        let glob = glob.strip_prefix("/").unwrap_or(glob);
+        self.inner
+            .prepare_cached(
+                "SELECT path, package_name
+                FROM deb_packages
+                WHERE arch IN (?1, 'all')
+                  AND repo_id IN (SELECT id FROM deb_repos WHERE name=?2)
+                  AND path GLOB ?3
+                ORDER BY path ASC, package_name ASC",
+            )?
+            .query_map((architecture, repo_name, glob), |row| {
+                Ok(PackageFileMatch {
+                    file: PathBuf::from_bytes(row.get::<usize, Vec<u8>>(0)?),
+                    package_name: row.get(1)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    pub fn find_deb_packages_by_command(
+        &self,
+        repo_name: &str,
+        architecture: &str,
+        glob: &str,
+    ) -> Result<Vec<PackageFileMatch>, Error> {
+        self.inner
+            .prepare_cached(
+                "SELECT path, package_name
+                FROM deb_files
+                WHERE arch IN (?1, 'all')
+                  AND repo_id IN (SELECT id FROM deb_repos WHERE name=?2)
+                  AND command GLOB ?3
+                ORDER BY path ASC, package_name ASC",
+            )?
+            .query_map((architecture, repo_name, glob), |row| {
+                Ok(PackageFileMatch {
+                    file: PathBuf::from_bytes(row.get::<usize, Vec<u8>>(0)?),
+                    package_name: row.get(1)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()
@@ -205,13 +342,14 @@ impl Connection {
         trace!("Condition: {:?}", condition);
         trace!("Params: {:?}", params);
         self.inner
-            .prepare(
-                &format!("SELECT name, version, description, depends, url, filename, hash, id
+            .prepare(&format!(
+                "SELECT name, version, description, depends, url, filename, hash, id
                 FROM deb_packages
-                WHERE EXISTS(SELECT repo_name FROM deb_components WHERE component_id=id AND repo_name=?1)
+                WHERE repo_id IN (SELECT id FROM deb_repos WHERE name=?1)
                   AND ({})
-                ORDER BY name ASC, version DESC", condition)
-            )?
+                ORDER BY name ASC, version DESC",
+                condition
+            ))?
             .query_map(params_from_iter(params.into_iter()), |row| {
                 Ok(DebDependencyMatch {
                     name: row.get(0)?,
@@ -262,13 +400,14 @@ impl Connection {
         trace!("Condition: {:?}", condition);
         trace!("Params: {:?}", params);
         self.inner
-            .prepare(
-                &format!("SELECT name, version, description, depends, url, filename, hash, id
+            .prepare(&format!(
+                "SELECT name, version, description, depends, url, filename, hash, id
                 FROM deb_packages
-                WHERE EXISTS(SELECT repo_name FROM deb_components WHERE component_id=id AND repo_name=?1)
+                WHERE repo_id IN (SELECT id FROM deb_repos WHERE name=?1)
                   AND ({})
-                ORDER BY name ASC, version DESC", condition)
-            )?
+                ORDER BY name ASC, version DESC",
+                condition
+            ))?
             .query_map(params_from_iter(params.into_iter()), |row| {
                 Ok(DebDependencyMatch {
                     name: row.get(0)?,
@@ -300,8 +439,8 @@ impl Connection {
                     WHERE child IN (
                         SELECT id
                         FROM deb_packages
-                        WHERE name=?1 AND component_id IN
-                            (SELECT component_id FROM deb_components WHERE repo_name=?2)))",
+                        WHERE name=?1 AND repo_id IN
+                            (SELECT id FROM deb_repos WHERE name=?2)))",
             )?
             .query_map((package_name, repo_name), |row| {
                 Ok(DebDependencyMatch {
@@ -330,7 +469,7 @@ impl Connection {
                 "INSERT INTO deb_dependencies(child, parent)
                 VALUES(
                     (SELECT id FROM deb_packages
-                     WHERE component_id IN (SELECT component_id FROM deb_components WHERE repo_name=?1)
+                     WHERE repo_id IN (SELECT id FROM deb_repos WHERE name=?1)
                        AND name=?2),
                     ?3
                 )
@@ -355,12 +494,19 @@ impl FromSql for DebDependencies {
     }
 }
 
+#[derive(Debug)]
+pub struct PackageFileMatch {
+    pub file: PathBuf,
+    pub package_name: String,
+}
+
 pub struct DebMatch {
     pub name: String,
     pub version: String,
     pub description: String,
 }
 
+#[derive(Debug)]
 pub struct DebDependencyMatch {
     pub id: Id,
     pub name: String,
@@ -379,6 +525,18 @@ impl PartialEq for DebDependencyMatch {
 }
 
 impl Eq for DebDependencyMatch {}
+
+impl PartialOrd for DebDependencyMatch {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DebDependencyMatch {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.id.cmp(&other.id)
+    }
+}
 
 impl Hash for DebDependencyMatch {
     fn hash<H>(&self, state: &mut H)

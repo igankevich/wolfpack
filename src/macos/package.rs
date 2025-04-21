@@ -1,4 +1,4 @@
-use std::fs::File;
+use fs_err::File;
 use std::io::Error;
 use std::io::Write;
 use std::path::Path;
@@ -7,6 +7,9 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use stuckliste::receipt::ReceiptBuilder;
 use tempfile::TempDir;
+pub use zar::rsa::RsaPrivateKey as SigningKey;
+pub use zar::rsa::RsaPublicKey as VerifyingKey;
+pub use zar::ChecksumAlgo;
 pub use zar::RsaSigner as PackageSigner;
 
 use crate::macos::xml;
@@ -18,7 +21,6 @@ pub struct Package {
 }
 
 impl Package {
-    #[allow(unused)]
     pub fn write<W: Write, P: AsRef<Path>>(
         &self,
         writer: W,
@@ -30,7 +32,7 @@ impl Package {
             install_location: Some("/".into()),
             identifier: self.identifier.clone(),
             version: self.version.clone(),
-            generator_version: Some("wolfpack".into()),
+            generator_version: Some(GENERATOR_VERSION.into()),
             auth: xml::Auth::Root,
             payload: xml::Payload {
                 number_of_files: 0,
@@ -70,16 +72,23 @@ impl Package {
         xar.finish()?;
         Ok(())
     }
+
+    pub fn file_name(&self) -> String {
+        format!("{}-{}.pkg", self.identifier, self.version)
+    }
 }
+
+const GENERATOR_VERSION: &str = concat!("Wolfpack/", env!("CARGO_PKG_VERSION"));
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
+    use fs_err::File;
     use std::process::Command;
 
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
     use arbtest::arbtest;
+    use command_error::CommandExt;
     use rand::rngs::OsRng;
     use rand::Rng;
     use rand_mt::Mt64;
@@ -102,7 +111,7 @@ mod tests {
             .arg("tmpfs")
             .arg("tmpfs")
             .arg("/root")
-            .status()
+            .status_checked()
             .unwrap()
             .success());
         let _guard = prevent_concurrency("macos");
@@ -127,7 +136,7 @@ mod tests {
                     .arg("xar")
                     .arg("-tf")
                     .arg(format!("/Volumes/SystemRoot{}", package_file.display()))
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",
@@ -142,7 +151,7 @@ mod tests {
                     .arg("/")
                     .arg("-pkg")
                     .arg(format!("/Volumes/SystemRoot{}", package_file.display()))
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "manifest:\n========{:?}========",

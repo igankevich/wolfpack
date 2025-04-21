@@ -5,17 +5,26 @@ use std::io::ErrorKind;
 use std::ops::Deref;
 use std::str::FromStr;
 
+use serde::Deserialize;
+use serde::Serialize;
+
 use crate::deb::Error;
 use crate::deb::Package;
 use crate::deb::PackageName;
 use crate::deb::SimpleValue;
 use crate::deb::Version;
+use crate::macros::define_try_from_string_from_string;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
+#[serde(try_from = "String", into = "String")]
 pub struct Dependencies(Vec<DependencyChoice>);
 
 impl Dependencies {
+    pub fn new(deps: Vec<DependencyChoice>) -> Self {
+        Self(deps)
+    }
+
     pub fn into_inner(self) -> Vec<DependencyChoice> {
         self.0
     }
@@ -53,6 +62,8 @@ impl FromStr for Dependencies {
     }
 }
 
+define_try_from_string_from_string!(Dependencies);
+
 impl Deref for Dependencies {
     type Target = [DependencyChoice];
 
@@ -61,8 +72,9 @@ impl Deref for Dependencies {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
+#[serde(try_from = "String", into = "String")]
 pub struct Provides(Vec<Dependency>);
 
 impl Provides {
@@ -98,6 +110,8 @@ impl FromStr for Provides {
         Ok(Self(deps))
     }
 }
+
+define_try_from_string_from_string!(Provides);
 
 impl Deref for Provides {
     type Target = [Dependency];
@@ -263,8 +277,7 @@ impl FromStr for Dependency {
             } else {
                 version_range.start - 1
             };
-            let range = value[..arch_end]
-                .as_bytes()
+            let range = value.as_bytes()[..arch_end]
                 .iter()
                 .position(|ch| *ch == b':')
                 .map(|i| i + 1..arch_end)

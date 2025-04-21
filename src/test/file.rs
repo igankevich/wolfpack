@@ -1,4 +1,4 @@
-use std::fs::create_dir_all;
+use fs_err::create_dir_all;
 use std::path::Path;
 use std::path::MAIN_SEPARATOR;
 
@@ -59,7 +59,7 @@ impl<'a> Arbitrary<'a> for DirectoryOfFiles {
             if create_dir_all(path.parent().unwrap()).is_ok() {
                 let mut contents: ByteArray = [0; 4096];
                 rng.fill_bytes(&mut contents);
-                std::fs::write(path, &contents[..]).unwrap();
+                fs_err::write(path, &contents[..]).unwrap();
             }
         }
         Ok(Self { dir })

@@ -1,12 +1,11 @@
+use fs_err::File;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
-use std::ops::Deref;
-use std::ops::DerefMut;
 use std::path::Path;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use deko::bufread::AnyDecoder;
 use flate2::read::GzDecoder;
@@ -16,24 +15,44 @@ use normalize_path::NormalizePath;
 
 use crate::archive::ArchiveRead;
 use crate::archive::ArchiveWrite;
-use crate::deb;
+use crate::deb::Dependencies;
+use crate::deb::Fields;
+use crate::deb::MultilineValue;
+use crate::deb::PackageName;
+use crate::deb::ParseField;
+use crate::deb::Provides;
+use crate::deb::SimpleValue;
+use crate::deb::Version;
 use crate::deb::DEBIAN_BINARY_CONTENTS;
 use crate::deb::DEBIAN_BINARY_FILE_NAME;
+use crate::ipk::Arch;
 use crate::ipk::Error;
 use crate::ipk::PackageSigner;
 use crate::ipk::PackageVerifier;
 use crate::sign::SignatureWriter;
 use crate::sign::VerifyingReader;
+use crate::wolf;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq, arbitrary::Arbitrary))]
-pub struct Package(deb::Package);
+pub struct Package {
+    pub name: PackageName,
+    pub version: Version,
+    pub license: SimpleValue,
+    pub arch: Arch,
+    pub maintainer: SimpleValue,
+    pub description: MultilineValue,
+    pub installed_size: Option<u64>,
+    pub provides: Provides,
+    pub depends: Dependencies,
+    pub other: Fields,
+}
 
 impl Package {
     pub fn write<P1: AsRef<Path>, P2: Into<PathBuf>>(
         &self,
-        directory: P1,
         output_file: P2,
+        directory: P1,
         signer: &PackageSigner,
     ) -> Result<(), std::io::Error> {
         let output_file: PathBuf = output_file.into();
@@ -43,7 +62,7 @@ impl Package {
         let writer = GzEncoder::new(writer, Compression::best());
         let data = tar::Builder::from_directory(directory, gz_writer())?.finish()?;
         let control =
-            tar::Builder::from_files([("control", self.0.to_string())], gz_writer())?.finish()?;
+            tar::Builder::from_files([("control", self.to_string())], gz_writer())?.finish()?;
         tar::Builder::from_files(
             [
                 (DEBIAN_BINARY_FILE_NAME, DEBIAN_BINARY_CONTENTS.as_bytes()),
@@ -79,8 +98,7 @@ impl Package {
                             let mut buf = String::with_capacity(4096);
                             entry.read_to_string(&mut buf)?;
                             return buf
-                                .parse::<deb::Package>()
-                                .map(Into::into)
+                                .parse::<Package>()
                                 .map(Some)
                                 .map_err(std::io::Error::other);
                         }
@@ -90,31 +108,71 @@ impl Package {
             })?
             .ok_or_else(|| Error::MissingFile("missing control.tar*".into()))
     }
-}
 
-impl Deref for Package {
-    type Target = deb::Package;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Package {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+    pub fn file_name(&self) -> String {
+        format!("{}_{}_{}.ipk", self.name, self.version, self.arch)
     }
 }
 
 impl Display for Package {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        Display::fmt(&self.0, f)
+        writeln!(f, "Package: {}", self.name)?;
+        writeln!(f, "Version: {}", self.version)?;
+        writeln!(f, "License: {}", self.license)?;
+        writeln!(f, "Architecture: {}", self.arch)?;
+        writeln!(f, "Maintainer: {}", self.maintainer)?;
+        if let Some(installed_size) = self.installed_size.as_ref() {
+            writeln!(f, "Installed-Size: {}", installed_size)?;
+        }
+        if !self.provides.is_empty() {
+            writeln!(f, "Provides: {}", self.provides)?;
+        }
+        if !self.depends.is_empty() {
+            writeln!(f, "Depends: {}", self.depends)?;
+        }
+        for (name, value) in self.other.iter() {
+            writeln!(f, "{}: {}", name, value)?;
+        }
+        writeln!(f, "Description: {}", self.description)?;
+        Ok(())
     }
 }
 
-impl From<deb::Package> for Package {
-    fn from(other: deb::Package) -> Self {
-        Self(other)
+impl FromStr for Package {
+    type Err = Error;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let mut fields: Fields = value.parse()?;
+        let control = Package {
+            name: fields.remove_any("package")?.try_into()?,
+            version: fields.remove_any("version")?.try_into()?,
+            license: fields.remove_some("license")?.unwrap_or_default(),
+            arch: fields.remove_any("architecture")?.as_str().parse()?,
+            description: fields.remove_any("description")?.try_into()?,
+            maintainer: fields.remove_any("maintainer")?.try_into()?,
+            installed_size: fields.remove_some("installed-size")?,
+            provides: fields.remove_some("provides")?.unwrap_or_default(),
+            depends: fields.remove_some("depends")?.unwrap_or_default(),
+            other: fields,
+        };
+        Ok(control)
+    }
+}
+
+impl TryFrom<wolf::Metadata> for Package {
+    type Error = Error;
+    fn try_from(other: wolf::Metadata) -> Result<Self, Self::Error> {
+        Ok(Self {
+            name: other.name.parse_field("name")?,
+            version: other.version.parse_field("version")?,
+            arch: Arch::All,
+            description: other.description.into(),
+            license: other.license.parse_field("license")?,
+            depends: Default::default(),
+            provides: Default::default(),
+            maintainer: "Wolfpack <wolfpack@wolfpack.com>".parse()?,
+            other: Default::default(),
+            installed_size: Default::default(),
+        })
     }
 }
 
@@ -140,6 +198,7 @@ mod tests {
     use std::process::Command;
 
     use arbtest::arbtest;
+    use command_error::CommandExt;
     use tempfile::TempDir;
 
     use super::*;
@@ -158,8 +217,8 @@ mod tests {
             let file_path = workdir.path().join("test.ipk");
             Package::write(
                 &control,
-                directory.path(),
                 file_path.as_path(),
+                directory.path(),
                 &signing_key,
             )
             .unwrap();
@@ -183,19 +242,19 @@ mod tests {
         let _verifying_key = signing_key.to_verifying_key();
         arbtest(|u| {
             let mut package: Package = u.arbitrary()?;
-            package.architecture = "all".parse().unwrap();
+            package.arch = "all".parse().unwrap();
             package.installed_size = Some(100);
             package.depends.clear();
             let directory: DirectoryOfFiles = u.arbitrary()?;
             let package_path = workdir.path().join("test.ipk");
             package
-                .write(directory.path(), package_path.as_path(), &signing_key)
+                .write(package_path.as_path(), directory.path(), &signing_key)
                 .unwrap();
             assert!(
                 Command::new("opkg")
                     .arg("install")
                     .arg(package_path.as_path())
-                    .status()
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package:\n========{}========",
@@ -204,8 +263,8 @@ mod tests {
             assert!(
                 Command::new("opkg")
                     .arg("remove")
-                    .arg(package.name().to_string())
-                    .status()
+                    .arg(package.name.to_string())
+                    .status_checked()
                     .unwrap()
                     .success(),
                 "package:\n========{}========",

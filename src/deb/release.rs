@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::OsStr;
@@ -12,6 +13,7 @@ use std::time::SystemTime;
 use chrono::DateTime;
 use chrono::Utc;
 
+use crate::deb::Arch;
 use crate::deb::Error;
 use crate::deb::Fields;
 use crate::deb::Repository;
@@ -27,7 +29,7 @@ use crate::hash::Sha256Hash;
 pub struct Release {
     date: Option<SystemTime>,
     valid_until: Option<SystemTime>,
-    architectures: HashSet<SimpleValue>,
+    architectures: HashSet<Arch>,
     components: HashSet<SimpleValue>,
     suite: SimpleValue,
     md5: HashMap<PathBuf, (Md5Hash, u64)>,
@@ -87,9 +89,26 @@ impl Release {
         get_files(&self.md5, prefix, file_stem, &mut files);
         get_files(&self.sha1, prefix, file_stem, &mut files);
         get_files(&self.sha256, prefix, file_stem, &mut files);
-        files.sort_by_key(|(_path, hash, size)| {
-            // smallest size, largest hash
-            (*size, usize::MAX - hash.len())
+        files.sort_by(|a, b| {
+            let a_size = a.2;
+            let b_size = b.2;
+            // Check zero-sized files last because zero size might mean the absence of the
+            // file.
+            if a_size == 0 {
+                return if b_size == 0 {
+                    Ordering::Equal
+                } else {
+                    Ordering::Greater
+                };
+            }
+            if b_size == 0 {
+                return Ordering::Less;
+            }
+            let a_hash_len = a.1.len();
+            let b_hash_len = b.1.len();
+            let smallest_size = a_size.cmp(&b_size);
+            let largest_hash_len = a_hash_len.cmp(&b_hash_len).reverse();
+            smallest_size.then(largest_hash_len)
         });
         files
     }

@@ -8,11 +8,15 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::SystemTime;
 
+use serde::Deserialize;
+use serde::Serialize;
+
 use crate::deb::Error;
 use crate::deb::FieldName;
 use crate::deb::Value;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 pub struct Fields {
     fields: HashMap<FieldName, Value>,

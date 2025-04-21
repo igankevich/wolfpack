@@ -67,8 +67,10 @@ run_in() {
     root="$1"
     shift
     uid="$(id -u)"
-    if test "$uid" = "0" || test -e /.dockerenv || test "$GITHUB_ACTIONS" = "true"; then
+    if test "$uid" = "0" || test -e /.dockerenv; then
         chroot "$root" "$@"
+    elif test "$GITHUB_ACTIONS" = "true"; then
+        sudo --non-interactive chroot "$root" "$@"
     else
         unshare -r /bin/sh -c "chroot $root $*"
     fi

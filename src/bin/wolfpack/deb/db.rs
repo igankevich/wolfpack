@@ -4,6 +4,7 @@ use rusqlite::types::FromSql;
 use rusqlite::types::FromSqlResult;
 use rusqlite::types::ValueRef;
 use rusqlite::OptionalExtension;
+use std::cmp::Ordering;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::path::Path;
@@ -386,6 +387,18 @@ impl PartialEq for DebDependencyMatch {
 }
 
 impl Eq for DebDependencyMatch {}
+
+impl PartialOrd for DebDependencyMatch {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DebDependencyMatch {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.id.cmp(&other.id)
+    }
+}
 
 impl Hash for DebDependencyMatch {
     fn hash<H>(&self, state: &mut H)

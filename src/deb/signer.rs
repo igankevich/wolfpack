@@ -40,34 +40,37 @@ impl Signer for PackageSigner {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verify {
+    Always,
+    Never,
+    OnlyIfPresent,
+}
+
 pub struct PackageVerifier {
     verifying_keys: Vec<VerifyingKey>,
-    no_verify: bool,
+    verify: Verify,
 }
 
 impl PackageVerifier {
-    pub fn new(verifying_key: VerifyingKey) -> Self {
-        Self::new_v2(vec![verifying_key])
-    }
-
-    pub fn new_v2(verifying_keys: Vec<VerifyingKey>) -> Self {
+    pub fn new(verifying_keys: Vec<VerifyingKey>, verify: Verify) -> Self {
         Self {
             verifying_keys,
-            no_verify: false,
+            verify,
         }
     }
 
     pub fn none() -> Self {
         Self {
             verifying_keys: Default::default(),
-            no_verify: true,
+            verify: Verify::Never,
         }
     }
 }
 
 impl Verifier for PackageVerifier {
     fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
-        if self.no_verify {
+        if self.verify == Verify::Never {
             return Ok(());
         }
         let signature = PgpSignature::read_armored_one(signature).map_err(|_| Error)?;
@@ -79,13 +82,18 @@ impl Verifier for PackageVerifier {
         I: Iterator<Item = S>,
         S: AsRef<[u8]>,
     {
-        if self.no_verify {
+        if self.verify == Verify::Never {
             return Ok(());
         }
+        let mut has_signatures = false;
         for sig in signatures {
+            has_signatures = true;
             if self.verify(message, sig.as_ref()).is_ok() {
                 return Ok(());
             }
+        }
+        if !has_signatures && self.verify == Verify::OnlyIfPresent {
+            return Ok(());
         }
         Err(Error)
     }

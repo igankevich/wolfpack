@@ -16,6 +16,7 @@ use std::io::ErrorKind;
 use std::io::Read;
 use std::ops::RangeInclusive;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use uname_rs::Uname;
@@ -339,6 +340,54 @@ impl Repo for DebRepo {
         Ok(())
     }
 
+    async fn download(
+        &mut self,
+        config: &Config,
+        name: &str,
+        packages: Vec<String>,
+    ) -> Result<Vec<PathBuf>, Error> {
+        let db_conn = Connection::new(config)?;
+        let mut matches: Vec<DebDependencyMatch> = Vec::new();
+        for package_name in packages.iter() {
+            let candidates: Vec<_> = db_conn
+                .lock()
+                .find_deb_packages_by_name(name, package_name)?
+                .into_iter()
+                .collect();
+            matches.extend(candidates);
+        }
+        let verifying_keys =
+            deb::VerifyingKey::read_binary_all(File::open(&self.config.public_key_file)?)?;
+        let mut filenames = Vec::with_capacity(matches.len());
+        for package in matches.into_iter() {
+            if let Some(dirname) = package.filename.parent() {
+                create_dir_all(dirname)?;
+            }
+            download_file(
+                &package.url,
+                &package.filename,
+                package.hash.clone(),
+                db_conn.clone(),
+                config,
+                None,
+            )
+            .await
+            .inspect_err(|_| {
+                let _ = fs_err::remove_file(&package.filename);
+            })?;
+            let verifier =
+                deb::PackageVerifier::new(verifying_keys.clone(), deb::Verify::OnlyIfPresent);
+            let _ = deb::Package::read(File::open(&package.filename)?, &verifier).inspect_err(
+                |_| {
+                    let _ = fs_err::remove_file(&package.filename);
+                },
+            )?;
+            log::debug!("Verified {}", package.filename.display());
+            filenames.push(package.filename);
+        }
+        Ok(filenames)
+    }
+
     async fn install(
         &mut self,
         config: &Config,
@@ -355,6 +404,8 @@ impl Repo for DebRepo {
                 .collect();
             matches.insert(package_name.clone(), candidates);
         }
+        let verifying_keys =
+            deb::VerifyingKey::read_binary_all(File::open(&self.config.public_key_file)?)?;
         for (package_name, mut matches) in matches.into_iter() {
             for (i, package) in matches.iter().enumerate() {
                 println!(
@@ -486,7 +537,7 @@ impl Repo for DebRepo {
                 if let Some(dirname) = package.filename.parent() {
                     create_dir_all(dirname)?;
                 }
-                match download_file(
+                download_file(
                     &package.url,
                     &package.filename,
                     package.hash.clone(),
@@ -495,28 +546,31 @@ impl Repo for DebRepo {
                     None,
                 )
                 .await
-                {
-                    Ok(..) => {
-                        let verifier = deb::PackageVerifier::none();
-                        let (_control, data) =
-                            deb::Package::read(File::open(&package.filename)?, &verifier)?;
-                        log::debug!("Installing {}", package.filename.display());
-                        let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
-                        let dst = config.store_dir.join(name);
-                        create_dir_all(&dst)?;
-                        tar_archive.unpack(&dst)?;
-                        drop(tar_archive);
-                        let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
-                        for entry in tar_archive.entries()? {
-                            let entry = entry?;
-                            let path = dst.join(entry.path()?);
-                            let metadata = fs_err::symlink_metadata(&path)?;
-                            if metadata.is_file() {
-                                change_root(path, &dst)?;
-                            }
-                        }
+                .inspect_err(|_| {
+                    let _ = fs_err::remove_file(&package.filename);
+                })?;
+                let verifier =
+                    deb::PackageVerifier::new(verifying_keys.clone(), deb::Verify::OnlyIfPresent);
+                let (_control, data) =
+                    deb::Package::read(File::open(&package.filename)?, &verifier).inspect_err(
+                        |_| {
+                            let _ = fs_err::remove_file(&package.filename);
+                        },
+                    )?;
+                log::debug!("Installing {}", package.filename.display());
+                let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
+                let dst = config.store_dir.join(name);
+                create_dir_all(&dst)?;
+                tar_archive.unpack(&dst)?;
+                drop(tar_archive);
+                let mut tar_archive = tar::Archive::new(AnyDecoder::new(&data[..]));
+                for entry in tar_archive.entries()? {
+                    let entry = entry?;
+                    let path = dst.join(entry.path()?);
+                    let metadata = fs_err::symlink_metadata(&path)?;
+                    if metadata.is_file() {
+                        change_root(path, &dst)?;
                     }
-                    Err(..) => continue,
                 }
             }
         }

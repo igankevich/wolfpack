@@ -7,8 +7,10 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use tempfile::TempDir;
 
+use crate::download;
 use crate::exec;
 use crate::Config;
+use crate::DownloadArgs;
 use crate::Error;
 use crate::ExecArgs;
 use crate::Logger;
@@ -83,6 +85,8 @@ enum Command {
     BuildRepo(BuildRepoArgs),
     /// Execute foreign binary.
     Exec(ExecArgs),
+    /// Download package archive, but don't install it.
+    Download(DownloadArgs),
 }
 
 #[derive(clap::Args)]
@@ -217,6 +221,7 @@ pub fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Command::BuildRepo(more_args) => build_repo(more_args),
         Command::Key(more_args) => key(more_args),
         Command::Exec(more_args) => Ok(exec(more_args)?),
+        Command::Download(more_args) => download(config, more_args),
     }
 }
 

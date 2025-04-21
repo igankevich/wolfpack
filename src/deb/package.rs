@@ -143,7 +143,7 @@ impl Package {
             .verify_any(&message[..], signatures.iter())
             .is_err()
         {
-            return Err(Error::other("signature verification failed"));
+            return Err(Error::other("Signature verification failed"));
         }
         let data = data.ok_or_else(|| Error::MissingFile("data.tar*".into()))?;
         let mut tar_archive = tar::Archive::new(AnyDecoder::new(&control[..]));
@@ -269,6 +269,7 @@ mod tests {
     use crate::deb::PackageVerifier;
     use crate::deb::SigningKey;
     use crate::deb::Value;
+    use crate::deb::Verify;
     use crate::hash::UpperHex;
     use crate::test::DirectoryOfFiles;
 
@@ -300,7 +301,7 @@ mod tests {
     fn write_read() {
         let (signing_key, verifying_key) = SigningKey::generate("wolfpack-pgp-id".into()).unwrap();
         let signer = PackageSigner::new(signing_key);
-        let verifier = PackageVerifier::new(verifying_key);
+        let verifier = PackageVerifier::new(vec![verifying_key], Verify::Always);
         arbtest(|u| {
             let control: Package = u.arbitrary()?;
             let directory: DirectoryOfFiles = u.arbitrary()?;

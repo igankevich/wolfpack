@@ -289,7 +289,7 @@ impl PackageFormat {
         match self {
             Self::Deb => {
                 let (signing_key, verifying_key) = signing_key_generator.deb()?;
-                let verifier = deb::PackageVerifier::new(verifying_key);
+                let verifier = deb::PackageVerifier::new(vec![verifying_key], deb::Verify::Always);
                 let repo = deb::Repository::new(&output_dir, [input_dir], &verifier)?;
                 let suite = metadata.common.name.try_into()?;
                 let signer = sign::PgpCleartextSigner::new(signing_key.into());

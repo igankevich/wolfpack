@@ -32,7 +32,7 @@ impl<R: Read, V: Verifier> Read for VerifyingReader<R, V> {
             let signature = fs_err::read(self.signature_file.as_path())?;
             self.verifier
                 .verify(&self.buffer[..], &signature[..])
-                .map_err(|_| std::io::Error::other("signature verification failed"))?;
+                .map_err(|_| std::io::Error::other("Signature verification failed"))?;
             self.verified = true;
         }
         let n = Read::read(&mut &self.buffer[self.nread..], buf)?;

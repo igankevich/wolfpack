@@ -367,7 +367,7 @@ mod tests {
     fn apt_adds_random_repositories() {
         let (signing_key, verifying_key) = SigningKey::generate("wolfpack-pgp-id".into()).unwrap();
         let signer = PackageSigner::new(signing_key.clone());
-        let verifier = PackageVerifier::new(verifying_key.clone());
+        let verifier = PackageVerifier::new(vec![verifying_key.clone()], Verify::Always);
         let release_signer = PgpCleartextSigner::new(signing_key.clone().into());
         let workdir = TempDir::new().unwrap();
         let root = workdir.path().join("root");

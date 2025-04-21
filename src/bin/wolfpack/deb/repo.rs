@@ -27,6 +27,7 @@ use wolfpack::sign::VerifierV2;
 
 use crate::db::Connection;
 use crate::db::ConnectionArc;
+use crate::deb as db_deb;
 use crate::deb::DebDependencyMatch;
 use crate::deb::DebMatch;
 use crate::deb::RepoId;
@@ -116,26 +117,26 @@ impl DebRepo {
 
     fn index_package_contents(
         contents_file: &Path,
+        arch: String,
         repo_id: RepoId,
         db_conn: ConnectionArc,
-        indexing_progress_bar: Arc<Mutex<ProgressBar>>,
+        progress_bar: Arc<Mutex<ProgressBar>>,
     ) -> Result<(), Error> {
         let decoder = AnyDecoder::new(BufReader::new(File::open(contents_file)?));
         let contents = deb::PackageContents::read(BufReader::new(decoder))?.into_inner();
-        indexing_progress_bar
-            .lock()
-            .inc_length(contents.len() as u64);
+        progress_bar.lock().inc_length(contents.len() as u64);
         let db_conn = db_conn.lock().clone_read_write()?;
         db_conn.lock().inner.execute_batch("BEGIN")?;
         for (package_name, files) in contents.iter() {
-            if let Err(e) = db_conn
-                .lock()
-                .insert_deb_package_contents(package_name, files, repo_id)
+            if let Err(e) =
+                db_conn
+                    .lock()
+                    .insert_deb_package_contents(package_name, files, &arch, repo_id)
             {
                 log::error!("Failed to index the contents of {package_name:?}: {e}");
                 continue;
             }
-            indexing_progress_bar.lock().inc(1);
+            progress_bar.lock().inc(1);
         }
         db_conn.lock().inner.execute_batch("COMMIT")?;
         Ok(())
@@ -197,6 +198,16 @@ impl Repo for DebRepo {
             progress.add(
                 ProgressBar::with_draw_target(Some(0), ProgressDrawTarget::stderr())
                     .with_message("Indexing packages")
+                    .with_style(
+                        ProgressStyle::with_template("{msg} {wide_bar} {pos}/{len}")
+                            .expect("Template is correct"),
+                    ),
+            ),
+        ));
+        let index_contents_progress_bar = Arc::new(Mutex::new(
+            progress.add(
+                ProgressBar::with_draw_target(Some(0), ProgressDrawTarget::stderr())
+                    .with_message("Indexing package contents")
                     .with_style(
                         ProgressStyle::with_template("{msg} {wide_bar} {pos}/{len}")
                             .expect("Template is correct"),
@@ -371,7 +382,7 @@ impl Repo for DebRepo {
                             .await
                             {
                                 Ok(..) => {
-                                    contents_files.push(contents_file);
+                                    contents_files.push((arch.to_string(), contents_file));
                                     break;
                                 }
                                 Err(Error::ResourceNotFound(..)) => continue,
@@ -381,14 +392,15 @@ impl Repo for DebRepo {
                     }
                 }
                 let db_conn = db_conn.clone();
-                let indexing_progress_bar = indexing_progress_bar.clone();
+                let index_contents_progress_bar = index_contents_progress_bar.clone();
                 threads.execute(move || {
-                    for contents_file in contents_files.into_iter() {
+                    for (arch, contents_file) in contents_files.into_iter() {
                         if let Err(e) = Self::index_package_contents(
                             &contents_file,
+                            arch,
                             repo_id,
                             db_conn.clone(),
-                            indexing_progress_bar.clone(),
+                            index_contents_progress_bar.clone(),
                         ) {
                             log::error!("Failed to index package contents: {}", e)
                         }
@@ -398,9 +410,10 @@ impl Repo for DebRepo {
             // TODO Only one URL is used.
             break;
         }
-        downloading_progress_bar.lock().finish();
         threads.join();
+        downloading_progress_bar.lock().finish();
         indexing_progress_bar.lock().finish();
+        index_contents_progress_bar.lock().finish();
         {
             let progress_bar = progress_bar.lock();
             progress_bar.reset_elapsed();
@@ -764,21 +777,11 @@ impl ToRow<3> for DebDependencyMatch {
     }
 }
 
-impl ToRow<4> for (PathBuf, DebMatch) {
-    fn to_row(&self) -> Row<'_, 4> {
-        let (path, package) = self;
+impl ToRow<2> for db_deb::PackageFileMatch {
+    fn to_row(&self) -> Row<'_, 2> {
         Row([
-            path.to_str().unwrap_or_default().into(),
-            package.name.as_str().into(),
-            package.version.as_str().into(),
-            package
-                .description
-                .as_str()
-                .lines()
-                .next()
-                .map(|line| line.trim())
-                .unwrap_or_default()
-                .into(),
+            self.file.to_str().unwrap_or_default().into(),
+            self.package_name.as_str().into(),
         ])
     }
 }

@@ -79,24 +79,18 @@ CREATE INDEX deb_provisions_name ON deb_provisions(name);
 
 -- Package contents.
 CREATE TABLE deb_files (
-    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-    path BLOB NOT NULL UNIQUE,
-    command BLOB
+    path BLOB NOT NULL,
+    package_name TEXT NOT NULL,
+    -- The architecture specified in the file name (e.g. "Contents-ARCH.gz").
+    arch TEXT NOT NULL,
+    repo_id INTEGER NOT NULL,
+    command BLOB,
+    PRIMARY KEY (path, package_name)
 );
 
+CREATE INDEX deb_files_path ON deb_files(path);
 CREATE INDEX deb_files_command ON deb_files(command);
-
-CREATE TABLE deb_package_files (
-    package_id INTEGER NOT NULL
-        REFERENCES deb_packages(id)
-        ON DELETE CASCADE
-        ON UPDATE CASCADE,
-    file_id INTEGER NOT NULL
-        REFERENCES deb_files(id)
-        ON DELETE CASCADE
-        ON UPDATE CASCADE,
-    PRIMARY KEY (package_id, file_id)
-);
+CREATE INDEX deb_files_package_name ON deb_files(package_name);
 
 -- Full-text search for DEB packages. {{{
 CREATE VIRTUAL TABLE deb_packages_fts
@@ -112,23 +106,25 @@ USING fts5(
 CREATE TRIGGER deb_packages_after_insert
 AFTER INSERT ON deb_packages
 BEGIN
-    INSERT INTO deb_packages_fts(rowid, name, description)
-    VALUES (new.id, new.name, new.description);
+    INSERT INTO deb_packages_fts(rowid, name, description, homepage)
+    VALUES (new.id, new.name, new.description, new.homepage);
 END;
 
 CREATE TRIGGER deb_packages_after_delete
 AFTER DELETE ON deb_packages
 BEGIN
-    INSERT INTO deb_packages_fts(deb_packages_fts, rowid, name, description)
-    VALUES('delete', old.name, old.description, old.description);
+    INSERT INTO deb_packages_fts(deb_packages_fts, rowid, name, description, homepage)
+    VALUES('delete', old.id, old.name, old.description, old.homepage);
+    -- We can't have foreign key references package name, hence this workaround.
+    DELETE FROM deb_files WHERE package_name = old.name;
 END;
 
 CREATE TRIGGER deb_packages_after_update
 AFTER UPDATE ON deb_packages
 BEGIN
-    INSERT INTO deb_packages_fts(deb_packages_fts, rowid, name, description)
-    VALUES('delete', old.name, old.name, old.description);
-    INSERT INTO deb_packages_fts(rowid, name, description)
-    VALUES (new.name, new.name, new.description);
+    INSERT INTO deb_packages_fts(deb_packages_fts, rowid, name, description, homepage)
+    VALUES('delete', old.id, old.name, old.description, old.homepage);
+    INSERT INTO deb_packages_fts(rowid, name, description, homepage)
+    VALUES (new.id, new.name, new.description, new.homepage);
 END;
 -- }}}

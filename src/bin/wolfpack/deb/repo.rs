@@ -116,8 +116,6 @@ impl DebRepo {
 
     fn index_package_contents(
         contents_file: &Path,
-        arch: String,
-        repo_id: RepoId,
         db_conn: ConnectionArc,
         progress_bar: Arc<Mutex<ProgressBar>>,
     ) -> Result<(), Error> {
@@ -127,10 +125,9 @@ impl DebRepo {
         let db_conn = db_conn.lock().clone_read_write()?;
         db_conn.lock().inner.execute_batch("BEGIN")?;
         for (package_name, files) in contents.iter() {
-            if let Err(e) =
-                db_conn
-                    .lock()
-                    .insert_deb_package_contents(package_name, files, &arch, repo_id)
+            if let Err(e) = db_conn
+                .lock()
+                .insert_deb_package_contents(package_name, files)
             {
                 log::error!("Failed to index the contents of {package_name:?}: {e}");
                 continue;
@@ -350,7 +347,6 @@ impl Repo for DebRepo {
         db_conn.lock().optimize()?;
         #[allow(clippy::never_loop)]
         for base_url in self.config.base_urls.iter() {
-            let repo_id = db_conn.lock().insert_deb_repo(name, base_url)?;
             for suite in self.config.suites.iter() {
                 let mut contents_files = Vec::new();
                 let suite_url = format!("{}/dists/{}", base_url, suite);
@@ -381,7 +377,7 @@ impl Repo for DebRepo {
                             .await
                             {
                                 Ok(..) => {
-                                    contents_files.push((arch.to_string(), contents_file));
+                                    contents_files.push(contents_file);
                                     break;
                                 }
                                 Err(Error::ResourceNotFound(..)) => continue,
@@ -393,11 +389,9 @@ impl Repo for DebRepo {
                 let db_conn = db_conn.clone();
                 let index_contents_progress_bar = index_contents_progress_bar.clone();
                 threads.execute(move || {
-                    for (arch, contents_file) in contents_files.into_iter() {
+                    for contents_file in contents_files.into_iter() {
                         if let Err(e) = Self::index_package_contents(
                             &contents_file,
-                            arch,
-                            repo_id,
                             db_conn.clone(),
                             index_contents_progress_bar.clone(),
                         ) {
@@ -703,7 +697,7 @@ impl Repo for DebRepo {
         let db_conn = Connection::new(config)?;
         let architecture = Self::native_arch()?;
         match by {
-            SearchBy::Name => {
+            SearchBy::Keyword => {
                 let matches = db_conn
                     .lock()
                     .find_deb_packages(name, &architecture, keyword)?;
@@ -776,11 +770,14 @@ impl ToRow<3> for DebDependencyMatch {
     }
 }
 
-impl ToRow<2> for db_deb::PackageFileMatch {
-    fn to_row(&self) -> Row<'_, 2> {
+impl ToRow<4> for db_deb::PackageFileMatch {
+    fn to_row(&self) -> Row<'_, 4> {
+        let Row([name, version, description]) = self.package.to_row();
         Row([
             self.file.to_str().unwrap_or_default().into(),
-            self.package_name.as_str().into(),
+            name,
+            version,
+            description,
         ])
     }
 }

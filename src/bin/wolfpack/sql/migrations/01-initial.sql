@@ -77,21 +77,6 @@ CREATE TABLE deb_provisions (
 
 CREATE INDEX deb_provisions_name ON deb_provisions(name);
 
--- Package contents.
-CREATE TABLE deb_files (
-    path BLOB NOT NULL,
-    package_name TEXT NOT NULL,
-    -- The architecture specified in the file name (e.g. "Contents-ARCH.gz").
-    arch TEXT NOT NULL,
-    repo_id INTEGER NOT NULL,
-    command BLOB,
-    PRIMARY KEY (path, package_name)
-);
-
-CREATE INDEX deb_files_path ON deb_files(path);
-CREATE INDEX deb_files_command ON deb_files(command);
-CREATE INDEX deb_files_package_name ON deb_files(package_name);
-
 -- Full-text search for DEB packages. {{{
 CREATE VIRTUAL TABLE deb_packages_fts
 USING fts5(
@@ -115,8 +100,8 @@ AFTER DELETE ON deb_packages
 BEGIN
     INSERT INTO deb_packages_fts(deb_packages_fts, rowid, name, description, homepage)
     VALUES('delete', old.id, old.name, old.description, old.homepage);
-    -- We can't have foreign key references package name, hence this workaround.
-    DELETE FROM deb_files WHERE package_name = old.name;
+    INSERT INTO deb_files_fts(deb_files_fts, package_id) VALUES('delete', old.id);
+    INSERT INTO deb_commands_fts(deb_commands_fts, package_id) VALUES('delete', old.id);
 END;
 
 CREATE TRIGGER deb_packages_after_update
@@ -127,4 +112,12 @@ BEGIN
     INSERT INTO deb_packages_fts(rowid, name, description, homepage)
     VALUES (new.id, new.name, new.description, new.homepage);
 END;
+-- }}}
+
+-- Full-text search for DEB files and commands. {{{
+CREATE VIRTUAL TABLE deb_files_fts
+USING fts5(path, package_id UNINDEXED, tokenize = 'porter unicode61 remove_diacritics 2');
+
+CREATE VIRTUAL TABLE deb_commands_fts
+USING fts5(command, package_id UNINDEXED, tokenize = 'trigram case_sensitive 1');
 -- }}}

@@ -158,10 +158,6 @@ impl Connection {
                 Ok(id)
             })?;
         for file in files {
-            self.inner
-                .prepare_cached("INSERT INTO deb_files_fts(path, package_id) VALUES (?1, ?2)")?
-                .execute((file.as_bytes(), package_id))
-                .optional()?;
             // Index commands separately for faster search.
             let command = if let Some(parent) = file.parent() {
                 match parent.file_name() {
@@ -177,14 +173,17 @@ impl Connection {
             } else {
                 None
             };
-            if let Some(command) = command {
-                self.inner
-                    .prepare_cached(
-                        "INSERT INTO deb_commands_fts(command, package_id) VALUES (?1, ?2)",
-                    )?
-                    .execute((command.as_encoded_bytes(), package_id))
-                    .optional()?;
-            }
+            self.inner
+                .prepare_cached(
+                    "INSERT INTO deb_files(path, command, package_id) VALUES (?1, ?2, ?3) \
+                    ON CONFLICT DO NOTHING",
+                )?
+                .execute((
+                    file.as_bytes(),
+                    command.map(|x| x.as_encoded_bytes()),
+                    package_id,
+                ))
+                .optional()?;
         }
         Ok(())
     }
@@ -258,8 +257,10 @@ impl Connection {
                   deb_files_fts.path,
                   deb_packages.name, deb_packages.version, deb_packages.description
                 FROM deb_files_fts
+                JOIN deb_files
+                  ON deb_files.id=deb_files_fts.rowid
                 JOIN deb_packages
-                  ON id=deb_files_fts.package_id
+                  ON deb_packages.id=deb_files.package_id
                 WHERE architecture IN (?1, 'all')
                   AND repo_id IN (SELECT id FROM deb_repos WHERE name=?2)
                   AND deb_files_fts MATCH ?3
@@ -288,15 +289,17 @@ impl Connection {
         self.inner
             .prepare_cached(
                 "SELECT
-                  deb_commands_fts.command,
+                  deb_files.command,
                   deb_packages.name, deb_packages.version, deb_packages.description
                 FROM deb_commands_fts
+                JOIN deb_files
+                  ON deb_files.id=deb_commands_fts.rowid
                 JOIN deb_packages
-                  ON id=deb_commands_fts.package_id
+                  ON deb_packages.id=deb_files.package_id
                 WHERE architecture IN (?1, 'all')
                   AND repo_id IN (SELECT id FROM deb_repos WHERE name=?2)
-                  AND command GLOB ?3
-                ORDER BY deb_commands_fts.command",
+                  AND deb_commands_fts.command GLOB ?3
+                ORDER BY deb_files.command",
             )?
             .query_map((architecture, repo_name, glob), |row| {
                 Ok(PackageFileMatch {

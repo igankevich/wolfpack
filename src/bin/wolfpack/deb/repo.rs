@@ -123,7 +123,10 @@ impl DebRepo {
         let contents = deb::PackageContents::read(BufReader::new(decoder))?.into_inner();
         progress_bar.lock().inc_length(contents.len() as u64);
         let db_conn = db_conn.lock().clone_read_write()?;
-        db_conn.lock().inner.execute_batch("BEGIN")?;
+        db_conn
+            .lock()
+            .inner
+            .execute_batch("PRAGMA foreign_keys=OFF; BEGIN;")?;
         for (package_name, files) in contents.iter() {
             if let Err(e) = db_conn
                 .lock()
@@ -134,7 +137,10 @@ impl DebRepo {
             }
             progress_bar.lock().inc(1);
         }
-        db_conn.lock().inner.execute_batch("COMMIT")?;
+        db_conn
+            .lock()
+            .inner
+            .execute_batch("COMMIT; PRAGMA foreign_keys=ON;")?;
         Ok(())
     }
 
@@ -286,6 +292,7 @@ impl Repo for DebRepo {
                             arch,
                             repo_id,
                         )?;
+                        // TODO DAG of jobs
                         let (index_tx, index_rx) = oneshot::channel();
                         index_rxs.push(index_rx);
                         for (candidate, hash, _file_size) in files.into_iter() {

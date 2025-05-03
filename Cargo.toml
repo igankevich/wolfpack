@@ -94,3 +94,8 @@ pretty-hex = "0.4.1"
 [lints.clippy]
 unwrap_used = "deny"
 panic = "deny"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1

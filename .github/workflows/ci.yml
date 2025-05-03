@@ -19,6 +19,8 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Test
         run: ./ci/test.sh
+      - name: Release
+        run: ./ci/build.sh
       - name: Publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}

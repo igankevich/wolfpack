@@ -126,10 +126,9 @@ wolfpack_release() {
 main() {
     . ./ci/preamble.sh
 
-    # TODO
-    #if test "$GITHUB_ACTIONS" = "true" && test "$GITHUB_REF_TYPE" != "tag"; then
-    #    return
-    #fi
+    if test "$GITHUB_ACTIONS" = "true" && test "$GITHUB_REF_TYPE" != "tag"; then
+        return
+    fi
 
     musl_install
     rustup_install

@@ -162,6 +162,6 @@ BEGIN
     INSERT INTO deb_files_fts(rowid, path) VALUES (new.id, new.path);
     INSERT INTO deb_commands_fts(deb_commands_fts, rowid, command) VALUES('delete', old.id, old.command);
     INSERT INTO deb_commands_fts(rowid, command)
-        (SELECT id, command FROM new WHERE command IS NOT NULL);
+        SELECT id, command FROM new WHERE command IS NOT NULL;
 END;
 -- }}}

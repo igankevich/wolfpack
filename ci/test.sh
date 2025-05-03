@@ -1,8 +1,6 @@
 #!/bin/sh
 
-apt_get() {
-    sudo --non-interactive env DEBIAN_FRONTEND=noninteractive apt-get "$@"
-}
+. ./ci/apt.sh
 
 install_dependencies() {
     if test "$GITHUB_ACTIONS" != "true"; then

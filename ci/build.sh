@@ -1,12 +1,14 @@
 #!/bin/sh
 
+. ./ci/apt.sh
+
 toolchain=stable
 target=x86_64-unknown-linux-musl
 nix_version=2.28.3
 
 musl_install() {
-    sudo apt-get update -qq
-    sudo apt-get install -qqy musl-tools jq curl
+    apt_get update
+    apt_get install -y musl-tools jq curl
     export CC=musl-gcc
 }
 
@@ -78,7 +80,7 @@ wolfpack_release() {
     release_id="$(jq -r .id /tmp/response)"
     {
         printf "# Release %s\n" "$GITHUB_REF_NAME"
-        printf "## Nix hashes\n"
+        printf "<details><summary>Nix hashes</summary>\n\n"
         printf '```'"\n"
     } >>"$workdir"/assets
     # shellcheck disable=SC2043
@@ -99,7 +101,7 @@ wolfpack_release() {
             nix_hash "$file"
         } >>"$workdir"/assets
     done
-    printf '```'"\n" >>"$workdir"/assets
+    printf '```'"\n\n</details>" >>"$workdir"/assets
     cat "$workdir"/assets
     # Add asset URLs to the release.
     run_curl \

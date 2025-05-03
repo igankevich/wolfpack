@@ -20,7 +20,7 @@ pub struct SearchArgs {
 
 #[derive(Clone, Copy, ValueEnum)]
 pub enum SearchBy {
-    Name,
+    Keyword,
     File,
     Command,
 }

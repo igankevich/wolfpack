@@ -149,9 +149,14 @@ impl Connection {
         &self,
         package_name: &str,
         files: &[PathBuf],
-        arch: &str,
-        repo_id: RepoId,
     ) -> Result<(), Error> {
+        let package_id = self
+            .inner
+            .prepare_cached("SELECT id FROM deb_packages WHERE name = ?1")?
+            .query_row((package_name,), |row| {
+                let id: Id = row.get(0)?;
+                Ok(id)
+            })?;
         for file in files {
             // Index commands separately for faster search.
             let command = if let Some(parent) = file.parent() {
@@ -170,23 +175,14 @@ impl Connection {
             };
             self.inner
                 .prepare_cached(
-                    "INSERT INTO deb_files(path, command, package_name, arch, repo_id) \
-                    VALUES (?1, ?2, ?3, ?4, ?5) \
+                    "INSERT INTO deb_files(path, command, package_id) VALUES (?1, ?2, ?3) \
                     ON CONFLICT DO NOTHING",
                 )?
-                .query_row(
-                    (
-                        file.as_bytes(),
-                        command.map(|x| x.as_encoded_bytes()),
-                        package_name,
-                        arch,
-                        repo_id.0,
-                    ),
-                    |row| {
-                        let id: Id = row.get(0)?;
-                        Ok(id)
-                    },
-                )
+                .execute((
+                    file.as_bytes(),
+                    command.map(|x| x.as_encoded_bytes()),
+                    package_id,
+                ))
                 .optional()?;
         }
         Ok(())
@@ -253,22 +249,31 @@ impl Connection {
         &self,
         repo_name: &str,
         architecture: &str,
-        glob: &str,
+        query: &str,
     ) -> Result<Vec<PackageFileMatch>, Error> {
-        let glob = glob.strip_prefix("/").unwrap_or(glob);
         self.inner
             .prepare_cached(
-                "SELECT path, package_name
-                FROM deb_packages
-                WHERE arch IN (?1, 'all')
+                "SELECT
+                  deb_files_fts.path,
+                  deb_packages.name, deb_packages.version, deb_packages.description
+                FROM deb_files_fts
+                JOIN deb_files
+                  ON deb_files.id=deb_files_fts.rowid
+                JOIN deb_packages
+                  ON deb_packages.id=deb_files.package_id
+                WHERE architecture IN (?1, 'all')
                   AND repo_id IN (SELECT id FROM deb_repos WHERE name=?2)
-                  AND path GLOB ?3
-                ORDER BY path ASC, package_name ASC",
+                  AND deb_files_fts MATCH ?3
+                ORDER BY rank",
             )?
-            .query_map((architecture, repo_name, glob), |row| {
+            .query_map((architecture, repo_name, query), |row| {
                 Ok(PackageFileMatch {
                     file: PathBuf::from_bytes(row.get::<usize, Vec<u8>>(0)?),
-                    package_name: row.get(1)?,
+                    package: DebMatch {
+                        name: row.get(1)?,
+                        version: row.get(2)?,
+                        description: row.get(3)?,
+                    },
                 })
             })?
             .collect::<Result<Vec<_>, _>>()
@@ -283,17 +288,27 @@ impl Connection {
     ) -> Result<Vec<PackageFileMatch>, Error> {
         self.inner
             .prepare_cached(
-                "SELECT path, package_name
-                FROM deb_files
-                WHERE arch IN (?1, 'all')
+                "SELECT
+                  deb_files.command,
+                  deb_packages.name, deb_packages.version, deb_packages.description
+                FROM deb_commands_fts
+                JOIN deb_files
+                  ON deb_files.id=deb_commands_fts.rowid
+                JOIN deb_packages
+                  ON deb_packages.id=deb_files.package_id
+                WHERE architecture IN (?1, 'all')
                   AND repo_id IN (SELECT id FROM deb_repos WHERE name=?2)
-                  AND command GLOB ?3
-                ORDER BY path ASC, package_name ASC",
+                  AND deb_commands_fts.command GLOB ?3
+                ORDER BY deb_files.command",
             )?
             .query_map((architecture, repo_name, glob), |row| {
                 Ok(PackageFileMatch {
                     file: PathBuf::from_bytes(row.get::<usize, Vec<u8>>(0)?),
-                    package_name: row.get(1)?,
+                    package: DebMatch {
+                        name: row.get(1)?,
+                        version: row.get(2)?,
+                        description: row.get(3)?,
+                    },
                 })
             })?
             .collect::<Result<Vec<_>, _>>()
@@ -497,9 +512,10 @@ impl FromSql for DebDependencies {
 #[derive(Debug)]
 pub struct PackageFileMatch {
     pub file: PathBuf,
-    pub package_name: String,
+    pub package: DebMatch,
 }
 
+#[derive(Debug)]
 pub struct DebMatch {
     pub name: String,
     pub version: String,

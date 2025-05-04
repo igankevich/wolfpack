@@ -302,7 +302,8 @@ impl Repo for DebRepo {
                     let component_dir = suite_dir.join(component.as_str());
                     for arch in [arch.as_str(), "all"] {
                         let packages_prefix = format!("{}/binary-{}", component, arch);
-                        let files = release.get_files(&packages_prefix, "Packages");
+                        let file_prefix = format!("{}/Packages", packages_prefix);
+                        let files = release.get_files(&file_prefix);
                         let arch_dir = component_dir.join(format!("binary-{}", arch));
                         create_dir_all(&arch_dir)?;
                         let component_url = format!("{}/{}", suite_url, packages_prefix);
@@ -390,8 +391,8 @@ impl Repo for DebRepo {
                 let mut urls = Vec::new();
                 for prefix in prefixes.into_iter() {
                     for arch in [arch.as_str(), "all"] {
-                        let file_stem = format!("Contents-{}", arch);
-                        let files = release.get_files(&prefix, &file_stem);
+                        let file_prefix = format!("{}/Contents-{}", prefix.display(), arch);
+                        let files = release.get_files(&file_prefix);
                         for (candidate, hash, _file_size) in files.into_iter() {
                             let file_name = candidate.file_name().ok_or(ErrorKind::InvalidData)?;
                             let url = format!(

@@ -1,11 +1,9 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::ffi::OsStr;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
-use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::SystemTime;
@@ -83,18 +81,12 @@ impl Release {
         })
     }
 
-    pub fn get_files<P: AsRef<Path>>(
-        &self,
-        prefix: P,
-        file_stem: &str,
-    ) -> Vec<(PathBuf, AnyHash, u64)> {
-        let prefix = prefix.as_ref();
-        let file_stem = OsStr::new(file_stem);
+    pub fn get_files(&self, file_prefix: &str) -> Vec<(PathBuf, AnyHash, u64)> {
         let mut files = Vec::new();
-        get_files(&self.md5, prefix, file_stem, &mut files);
-        get_files(&self.sha1, prefix, file_stem, &mut files);
-        get_files(&self.sha256, prefix, file_stem, &mut files);
-        get_files(&self.sha512, prefix, file_stem, &mut files);
+        get_files(&self.md5, file_prefix, &mut files);
+        get_files(&self.sha1, file_prefix, &mut files);
+        get_files(&self.sha256, file_prefix, &mut files);
+        get_files(&self.sha512, file_prefix, &mut files);
         files.sort_by(|a, b| {
             let a_size = a.2;
             let b_size = b.2;
@@ -195,13 +187,15 @@ struct Checksums {
 
 fn get_files<H: Into<AnyHash> + Clone>(
     hashes: &HashMap<PathBuf, (H, u64)>,
-    prefix: &Path,
-    file_stem: &OsStr,
+    file_prefix: &str,
     files: &mut Vec<(PathBuf, AnyHash, u64)>,
 ) {
     files.extend(hashes.iter().filter_map(|(path, (hash, size))| {
-        if path.starts_with(prefix) && path.file_stem() == Some(file_stem) {
-            Some((path.clone(), hash.clone().into(), *size))
+        let Some(path) = path.to_str() else {
+            return None;
+        };
+        if path.starts_with(file_prefix) {
+            Some((path.into(), hash.clone().into(), *size))
         } else {
             None
         }

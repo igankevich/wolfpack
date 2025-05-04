@@ -167,7 +167,7 @@ async fn do_download_file<P: AsRef<Path>>(
     if let (Some(hash), Some(hasher)) = (hash, hasher) {
         let actual_hash = hasher.finalize();
         if hash != actual_hash {
-            remove_file(path)?;
+            remove_file(&temporary_path)?;
             return Err(Error::HashMismatch(hash.into(), actual_hash.into()));
         }
     }

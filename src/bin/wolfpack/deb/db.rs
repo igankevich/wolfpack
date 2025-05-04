@@ -14,6 +14,7 @@ use wolfpack::hash::AnyHash;
 
 use crate::db::Connection;
 use crate::db::Id;
+use crate::db::IgnoreConstraintViolations;
 use crate::db::OptionAnyHash;
 use crate::db::PathAsBytes;
 use crate::db::PathFromBytes;
@@ -156,6 +157,10 @@ impl Connection {
             .query_row((package_name,), |row| {
                 let id: Id = row.get(0)?;
                 Ok(id)
+            })
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Error::PackageNotFound(package_name.into()),
+                e => e.into(),
             })?;
         for file in files {
             // Index commands separately for faster search.
@@ -183,7 +188,7 @@ impl Connection {
                     command.map(|x| x.as_encoded_bytes()),
                     package_id,
                 ))
-                .optional()?;
+                .ignore_constraint_violations()?;
         }
         Ok(())
     }
@@ -491,7 +496,7 @@ impl Connection {
                 ON CONFLICT DO NOTHING",
             )?
             .execute((repo_name, child, parent))
-            .optional()?;
+            .ignore_constraint_violations()?;
         Ok(())
     }
 }

@@ -54,7 +54,8 @@ impl Connection {
         Ok(Arc::new(Mutex::new(Self { inner: conn })))
     }
 
-    pub fn clone_read_write(&self) -> Result<ConnectionArc, Error> {
+    #[allow(unused)]
+    pub fn reopen_read_write(&self) -> Result<ConnectionArc, Error> {
         let conn = rusqlite::Connection::open(self.inner.path().expect("Was created with path"))?;
         Self::configure(&conn)?;
         Ok(Arc::new(Mutex::new(Self { inner: conn })))
@@ -179,6 +180,25 @@ impl EnsureNumRowsModified for Result<usize, rusqlite::Error> {
     fn ensure_num_rows_modified(self, num_rows: usize) -> Self {
         match self {
             Ok(n) if n != num_rows => Err(rusqlite::Error::QueryReturnedNoRows),
+            other => other,
+        }
+    }
+}
+
+pub trait IgnoreConstraintViolations {
+    fn ignore_constraint_violations(self) -> Self;
+}
+
+impl IgnoreConstraintViolations for Result<usize, rusqlite::Error> {
+    fn ignore_constraint_violations(self) -> Self {
+        match self {
+            Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error {
+                    code: rusqlite::ffi::ErrorCode::ConstraintViolation,
+                    ..
+                },
+                ..,
+            )) => Ok(0),
             other => other,
         }
     }

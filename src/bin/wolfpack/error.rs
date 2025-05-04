@@ -45,7 +45,7 @@ pub enum Error {
     NoHash,
     #[error("Task error: {0}")]
     Join(#[from] tokio::task::JoinError),
-    #[error("Task error: {0}")]
+    #[error("Task channel error: {0}")]
     OneShot(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("Signing error")]
     Sign,
@@ -59,6 +59,8 @@ pub enum Error {
     Command(#[from] command_error::Error),
     #[error("Directory traversing error: {0}")]
     WalkDir(#[from] walkdir::Error),
+    #[error("Package {0:?} not found")]
+    PackageNotFound(String),
     #[error("{0}")]
     Other(String),
 }

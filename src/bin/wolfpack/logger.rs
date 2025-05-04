@@ -1,6 +1,9 @@
 use std::io::stderr;
+use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::OnceLock;
 
+use indicatif::MultiProgress;
 use log::set_logger;
 use log::set_max_level;
 use log::Level;
@@ -9,6 +12,7 @@ use log::Log;
 use log::Metadata;
 use log::Record;
 use log::SetLoggerError;
+use parking_lot::Mutex;
 
 pub struct Logger;
 
@@ -30,7 +34,11 @@ impl Log for Logger {
             Level::Warn => "WARNING: ",
             _ => "",
         };
-        if writeln!(&mut buffer, "{prefix}{}", record.args()).is_ok() {
+        let _ = writeln!(&mut buffer, "{prefix}{}", record.args());
+        let logger = LOGGER_MUT.lock();
+        if logger.active {
+            let _ = logger.progress.println(buffer);
+        } else {
             use std::io::Write;
             let _ = stderr().write_all(buffer.as_bytes());
         }
@@ -43,3 +51,44 @@ impl Log for Logger {
 }
 
 static LOGGER: OnceLock<Logger> = OnceLock::new();
+
+pub fn get_logger() -> Arc<Mutex<LoggerMut>> {
+    LOGGER_MUT.clone()
+}
+
+pub struct LoggerMut {
+    progress: MultiProgress,
+    active: bool,
+}
+
+impl LoggerMut {
+    pub fn finish(&mut self) {
+        let _ = self.progress.clear();
+        self.active = false;
+    }
+
+    pub fn start(&mut self) -> ProgressGuard {
+        let _ = self.progress.clear();
+        self.active = true;
+        ProgressGuard
+    }
+
+    pub fn progress_mut(&mut self) -> &mut MultiProgress {
+        &mut self.progress
+    }
+}
+
+static LOGGER_MUT: LazyLock<Arc<Mutex<LoggerMut>>> = LazyLock::new(|| {
+    Arc::new(Mutex::new(LoggerMut {
+        progress: MultiProgress::new(),
+        active: false,
+    }))
+});
+
+pub struct ProgressGuard;
+
+impl Drop for ProgressGuard {
+    fn drop(&mut self) {
+        LOGGER_MUT.lock().finish();
+    }
+}

@@ -133,6 +133,8 @@ USING fts5(
     tokenize = 'porter unicode61 remove_diacritics 2'
 );
 
+INSERT INTO deb_files_fts(deb_files_fts, rank) VALUES('automerge', 0);
+
 CREATE VIRTUAL TABLE deb_commands_fts
 USING fts5(
     command,
@@ -141,11 +143,14 @@ USING fts5(
     tokenize = 'trigram case_sensitive 1'
 );
 
+INSERT INTO deb_commands_fts(deb_commands_fts, rank) VALUES('automerge', 0);
+
 CREATE TRIGGER deb_files_after_insert
 AFTER INSERT ON deb_files
 BEGIN
     INSERT INTO deb_files_fts(rowid, path) VALUES (new.id, new.path);
-    INSERT INTO deb_commands_fts(rowid, command) VALUES (new.id, new.command);
+    INSERT INTO deb_commands_fts(rowid, command)
+        SELECT new.id, new.command WHERE new.command IS NOT NULL;
 END;
 
 CREATE TRIGGER deb_files_after_delete
@@ -162,6 +167,6 @@ BEGIN
     INSERT INTO deb_files_fts(rowid, path) VALUES (new.id, new.path);
     INSERT INTO deb_commands_fts(deb_commands_fts, rowid, command) VALUES('delete', old.id, old.command);
     INSERT INTO deb_commands_fts(rowid, command)
-        SELECT id, command FROM new WHERE command IS NOT NULL;
+        SELECT new.id, new.command WHERE new.command IS NOT NULL;
 END;
 -- }}}

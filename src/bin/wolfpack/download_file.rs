@@ -1,3 +1,13 @@
+use std::ffi::OsString;
+use std::io::Write;
+use std::os::unix::fs::MetadataExt;
+use std::path::Path;
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
+use std::time::SystemTime;
+
 use fs_err::remove_file;
 use fs_err::File;
 use indicatif::ProgressBar;
@@ -12,13 +22,6 @@ use reqwest::header::IF_NONE_MATCH;
 use reqwest::header::LAST_MODIFIED;
 use reqwest::header::USER_AGENT;
 use reqwest::StatusCode;
-use std::io::Write;
-use std::os::unix::fs::MetadataExt;
-use std::path::Path;
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Duration;
-use std::time::SystemTime;
 use wolfpack::hash::AnyHash;
 use wolfpack::hash::Hasher;
 
@@ -140,7 +143,8 @@ async fn do_download_file<P: AsRef<Path>>(
         .and_then(|s| s.parse().ok());
     conn.lock()
         .insert_downloaded_file(url, etag, last_modified, real_max_age, content_length)?;
-    let mut file = File::create(path)?;
+    let temporary_path = to_temporary_path(path);
+    let mut file = File::create(&temporary_path)?;
     let mut hasher = hash.as_ref().map(|h| h.hasher());
     log::debug!("Downloading {} to {}", url, path.display());
     if let Some(progress_bar) = progress_bar.as_ref() {
@@ -167,6 +171,7 @@ async fn do_download_file<P: AsRef<Path>>(
             return Err(Error::HashMismatch(hash.into(), actual_hash.into()));
         }
     }
+    fs_err::rename(&temporary_path, path)?;
     Ok(())
 }
 
@@ -181,6 +186,17 @@ fn get_header_subvalue<T: FromStr>(header: &HeaderValue, name: &str) -> Option<T
         return iter.next().and_then(|value| value.parse::<T>().ok());
     }
     None
+}
+
+fn to_temporary_path(file: &Path) -> PathBuf {
+    let mut new_file = file.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let file_name = file.file_name().unwrap_or_default();
+    let mut new_file_name = OsString::new();
+    new_file_name.push(".");
+    new_file_name.push(file_name);
+    new_file_name.push(".tmp");
+    new_file.push(new_file_name);
+    new_file
 }
 
 const WOLFPACK_UA: HeaderValue =

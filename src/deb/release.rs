@@ -191,9 +191,7 @@ fn get_files<H: Into<AnyHash> + Clone>(
     files: &mut Vec<(PathBuf, AnyHash, u64)>,
 ) {
     files.extend(hashes.iter().filter_map(|(path, (hash, size))| {
-        let Some(path) = path.to_str() else {
-            return None;
-        };
+        let path = path.to_str()?;
         if path.starts_with(file_prefix) {
             Some((path.into(), hash.clone().into(), *size))
         } else {

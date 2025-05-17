@@ -228,7 +228,7 @@ impl DebRepo {
         let id_field = writer.lock().index().schema().get_field("id")?;
         let path_field = writer.lock().index().schema().get_field("path")?;
         let command_field = writer.lock().index().schema().get_field("command")?;
-        for contents_file in contents_files.into_iter() {
+        for contents_file in contents_files.iter() {
             let decoder = AnyDecoder::new(BufReader::new(File::open(contents_file)?));
             let contents: Vec<_> = deb::PackageContents::read(BufReader::new(decoder))?
                 .into_inner()

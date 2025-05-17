@@ -10,16 +10,11 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::io::BufRead;
-use std::io::BufReader;
 use std::io::ErrorKind;
-use std::io::Read;
 use std::ops::RangeInclusive;
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
-use tantivy::tokenizer::NgramTokenizer;
-use tantivy::IndexWriter;
 use tantivy::TantivyDocument;
 use tokio::sync::oneshot;
 use uname_rs::Uname;
@@ -28,12 +23,15 @@ use wolfpack::elf::change_root;
 use wolfpack::sign::VerifierV2;
 
 use crate::db::Connection;
-use crate::db::ConnectionArc;
 use crate::deb as db_deb;
+use crate::deb::index_package_files;
+use crate::deb::index_packages;
+use crate::deb::init_files_tokenizers;
+use crate::deb::new_files_index_writer;
+use crate::deb::new_package_index_writer;
 use crate::deb::DebDependencyMatch;
 use crate::deb::DebMatch;
 use crate::deb::PackageFileMatch;
-use crate::deb::RepoId;
 use crate::download_file;
 use crate::get_logger;
 use crate::print_table;
@@ -60,247 +58,6 @@ impl DebRepo {
             "x86_64" => Ok("amd64".into()),
             other => Err(Error::UnsupportedArchitecture(other.into())),
         }
-    }
-
-    fn new_package_index_writer(index_dir: &Path) -> Result<Arc<Mutex<IndexWriter>>, Error> {
-        use tantivy::directory::MmapDirectory;
-        use tantivy::schema::*;
-        use tantivy::Index;
-        let mut builder = Schema::builder();
-        builder.add_i64_field("id", NumericOptions::default().set_stored());
-        // TODO custom indexers
-        builder.add_text_field(
-            "name",
-            TextOptions::default().set_indexing_options(
-                TextFieldIndexing::default()
-                    .set_tokenizer("en_stem")
-                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
-            ),
-        );
-        builder.add_text_field(
-            "description",
-            TextOptions::default().set_indexing_options(
-                TextFieldIndexing::default()
-                    .set_tokenizer("en_stem")
-                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
-            ),
-        );
-        builder.add_text_field(
-            "homepage",
-            TextOptions::default().set_indexing_options(
-                TextFieldIndexing::default()
-                    .set_tokenizer("en_stem")
-                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
-            ),
-        );
-        let schema = builder.build();
-        fs_err::create_dir_all(index_dir)?;
-        let directory = MmapDirectory::open(index_dir)?;
-        let index = Index::open_or_create(directory, schema)?;
-        let mut writer: IndexWriter = index.writer(1_000_000_000)?;
-        // TODO delete_term doesn't work
-        writer.delete_all_documents()?;
-        writer.commit()?;
-        Ok(Arc::new(Mutex::new(writer)))
-    }
-
-    fn new_files_index_writer(index_dir: &Path) -> Result<Arc<Mutex<IndexWriter>>, Error> {
-        use tantivy::directory::MmapDirectory;
-        use tantivy::schema::*;
-        use tantivy::Index;
-        use tantivy::IndexWriter;
-        let mut builder = Schema::builder();
-        builder.add_i64_field("id", NumericOptions::default().set_stored());
-        builder.add_text_field(
-            "path",
-            TextOptions::default().set_stored().set_indexing_options(
-                TextFieldIndexing::default()
-                    .set_tokenizer("en_stem")
-                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
-            ),
-        );
-        builder.add_text_field(
-            "command",
-            TextOptions::default().set_indexing_options(
-                TextFieldIndexing::default()
-                    .set_tokenizer("trigram")
-                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
-            ),
-        );
-        let schema = builder.build();
-        fs_err::create_dir_all(index_dir)?;
-        let directory = MmapDirectory::open(index_dir)?;
-        let index = Index::open_or_create(directory, schema)?;
-        index
-            .tokenizers()
-            .register("trigram", NgramTokenizer::new(2, 3, false)?);
-        let mut writer: IndexWriter = index.writer(1_000_000_000)?;
-        // TODO delete_term doesn't work
-        writer.delete_all_documents()?;
-        writer.commit()?;
-        Ok(Arc::new(Mutex::new(writer)))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn index_packages(
-        writer: Arc<Mutex<IndexWriter>>,
-        packages_file: &Path,
-        repo_dir: &Path,
-        base_url: String,
-        repo_id: RepoId,
-        db_conn: ConnectionArc,
-        dependency_resolution_tasks: Arc<Mutex<Vec<Task>>>,
-        repo_name: String,
-        indexing_progress_bar: Arc<Mutex<ProgressBar>>,
-        progress_bar: Arc<Mutex<ProgressBar>>,
-    ) -> Result<(), Error> {
-        use tantivy::schema::*;
-        let id_field = writer.lock().index().schema().get_field("id")?;
-        let name_field = writer.lock().index().schema().get_field("name")?;
-        let description_field = writer.lock().index().schema().get_field("description")?;
-        let homepage_field = writer.lock().index().schema().get_field("homepage")?;
-        let mut packages_str = String::new();
-        let mut file = AnyDecoder::new(BufReader::new(File::open(packages_file)?));
-        file.read_to_string(&mut packages_str)?;
-        let packages: deb::PerArchPackages = packages_str.parse()?;
-        let packages = packages.into_inner();
-        indexing_progress_bar
-            .lock()
-            .inc_length(packages.len() as u64);
-        // Insert the packages into the database.
-        for package in packages.iter() {
-            let url = format!("{}/{}", base_url, package.filename.display());
-            let package_file = repo_dir.join(&package.filename);
-            let package_id =
-                match db_conn
-                    .lock()
-                    .insert_deb_package(package, &url, &package_file, repo_id)
-                {
-                    Ok(id) => id,
-                    Err(e) => {
-                        log::error!("Failed to index {:?}: {e}", package.inner.name.as_str());
-                        continue;
-                    }
-                };
-            let mut doc = TantivyDocument::new();
-            doc.add_field_value(id_field, &package_id);
-            doc.add_field_value(name_field, package.inner.name.as_str());
-            doc.add_field_value(description_field, package.inner.description.as_str());
-            if let Some(homepage) = package.inner.homepage.as_ref() {
-                doc.add_field_value(homepage_field, homepage.as_str());
-            }
-            writer.lock().add_document(doc)?;
-            indexing_progress_bar.lock().inc(1);
-        }
-        // TODO commit every N documents
-        writer.lock().commit()?;
-        // Resolve dependencies in batches.
-        progress_bar.lock().inc_length(packages.len() as u64);
-        let batch_size = 1_000;
-        let mut packages = packages;
-        while !packages.is_empty() {
-            let batch = packages.split_off(packages.len() - batch_size.min(packages.len()));
-            let repo_name = repo_name.clone();
-            let db_conn = db_conn.clone();
-            let progress_bar = progress_bar.clone();
-            dependency_resolution_tasks.lock().push(Box::new(move || {
-                if let Err(e) = Self::resolve_dependencies(
-                    &batch,
-                    repo_name.clone(),
-                    db_conn.clone(),
-                    progress_bar.clone(),
-                ) {
-                    log::error!("Failed to resolve dependencies: {e}");
-                }
-            }));
-        }
-        // Force update.
-        progress_bar.lock().tick();
-        Ok(())
-    }
-
-    fn index_package_files(
-        writer: Arc<Mutex<IndexWriter>>,
-        contents_files: &[PathBuf],
-        db_conn: ConnectionArc,
-        progress_bar: Arc<Mutex<ProgressBar>>,
-    ) -> Result<(), Error> {
-        let id_field = writer.lock().index().schema().get_field("id")?;
-        let path_field = writer.lock().index().schema().get_field("path")?;
-        let command_field = writer.lock().index().schema().get_field("command")?;
-        for contents_file in contents_files.iter() {
-            let decoder = AnyDecoder::new(BufReader::new(File::open(contents_file)?));
-            let contents: Vec<_> = deb::PackageContents::read(BufReader::new(decoder))?
-                .into_inner()
-                .into_iter()
-                .collect();
-            progress_bar.lock().inc_length(contents.len() as u64);
-            for (package_name, files) in contents.into_iter() {
-                let Some(package_id) = db_conn.lock().get_package_id_by_name(&package_name)? else {
-                    continue;
-                };
-                for file in files.into_iter() {
-                    let command = if let Some(parent) = file.parent() {
-                        match parent.file_name() {
-                            Some(dirname) => {
-                                if dirname == Path::new("bin") || dirname == Path::new("sbin") {
-                                    Some(file.file_name().expect("File name exists"))
-                                } else {
-                                    None
-                                }
-                            }
-                            None => None,
-                        }
-                    } else {
-                        None
-                    };
-                    let mut doc = TantivyDocument::new();
-                    doc.add_field_value(id_field, &package_id);
-                    doc.add_field_value(path_field, file.to_string_lossy().as_ref());
-                    if let Some(command) = command {
-                        doc.add_field_value(command_field, command.to_string_lossy().as_ref());
-                    }
-                    writer.lock().add_document(doc)?;
-                }
-                progress_bar.lock().inc(1);
-            }
-            // TODO commit every N documents
-            writer.lock().commit()?;
-        }
-        // Force update.
-        progress_bar.lock().tick();
-        Ok(())
-    }
-
-    fn resolve_dependencies(
-        packages: &[deb::ExtendedPackage],
-        repo_name: String,
-        db_conn: ConnectionArc,
-        progress_bar: Arc<Mutex<ProgressBar>>,
-    ) -> Result<(), Error> {
-        // Per-task read-only connection to make queries in parallel.
-        let ro_conn = db_conn.lock().clone_read_only()?;
-        let ro_conn = ro_conn.lock();
-        for package in packages.iter() {
-            for dep in package
-                .inner
-                .depends
-                .iter()
-                .chain(package.inner.pre_depends.iter())
-            {
-                let matches = ro_conn.select_deb_dependencies(&repo_name, dep)?;
-                if matches.len() != 1 {
-                    continue;
-                }
-                db_conn.lock().insert_deb_dependency(
-                    &repo_name,
-                    &package.inner.name,
-                    matches[0].id,
-                )?;
-            }
-            progress_bar.lock().inc(1);
-        }
-        Ok(())
     }
 }
 
@@ -359,9 +116,8 @@ impl Repo for DebRepo {
         let repo_dir = config.cache_dir.join(name);
         let mut index_rxs = Vec::new();
         let mut releases = HashMap::new();
-        let package_index_writer =
-            Self::new_package_index_writer(config.packages_index_dir().as_path())?;
-        let files_index_writer = Self::new_files_index_writer(config.files_index_dir().as_path())?;
+        let package_index_writer = new_package_index_writer(config.packages_index_dir().as_path())?;
+        let files_index_writer = new_files_index_writer(config.files_index_dir().as_path())?;
         #[allow(clippy::never_loop)]
         for base_url in self.config.base_urls.iter() {
             let repo_id = db_conn.lock().insert_deb_repo(name, base_url)?;
@@ -461,7 +217,7 @@ impl Repo for DebRepo {
                                     let repo_dir = repo_dir.clone();
                                     let package_index_writer = package_index_writer.clone();
                                     threads.execute(move || {
-                                        if let Err(e) = Self::index_packages(
+                                        if let Err(e) = index_packages(
                                             package_index_writer,
                                             &packages_file,
                                             &repo_dir,
@@ -557,7 +313,7 @@ impl Repo for DebRepo {
             let index_contents_progress_bar = index_contents_progress_bar.clone();
             let files_index_writer = files_index_writer.clone();
             threads.execute(move || {
-                if let Err(e) = Self::index_package_files(
+                if let Err(e) = index_package_files(
                     files_index_writer,
                     &contents_files,
                     db_conn.clone(),
@@ -902,10 +658,7 @@ impl Repo for DebRepo {
             }
             SearchBy::File | SearchBy::Command => {
                 let index = Index::open_in_dir(config.files_index_dir())?;
-
-                index
-                    .tokenizers()
-                    .register("trigram", NgramTokenizer::new(2, 3, false)?);
+                init_files_tokenizers(&index)?;
                 let reader = index.reader()?;
                 let searcher = reader.searcher();
                 let id = index.schema().get_field("id")?;
@@ -1008,5 +761,3 @@ impl ToRow<4> for db_deb::PackageFileMatch {
         ])
     }
 }
-
-type Task = Box<dyn FnMut() + Send>;

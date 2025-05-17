@@ -160,12 +160,10 @@ impl Connection {
     pub fn optimize(&self) -> Result<(), Error> {
         self.inner.execute_batch(
             "\
-INSERT INTO deb_files_fts(deb_files_fts) VALUES('optimize');
-INSERT INTO deb_commands_fts(deb_commands_fts) VALUES('optimize');
 PRAGMA incremental_vacuum; \
 PRAGMA analysis_limit=1000; \
 PRAGMA optimize; \
-ANALYZE;
+ANALYZE; \
 VACUUM;",
         )?;
         Ok(())

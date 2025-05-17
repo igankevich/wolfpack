@@ -59,8 +59,12 @@ pub enum Error {
     Command(#[from] command_error::Error),
     #[error("Directory traversing error: {0}")]
     WalkDir(#[from] walkdir::Error),
-    #[error("Package {0:?} not found")]
-    PackageNotFound(String),
+    #[error("Tantivy error: {0}")]
+    Tantivy(#[from] tantivy::TantivyError),
+    #[error("Tantivy open directory error: {0}")]
+    TantivyDir(#[from] tantivy::directory::error::OpenDirectoryError),
+    #[error("Tantivy query parse error: {0}")]
+    TantivyQueryParse(#[from] tantivy::query::QueryParserError),
     #[error("{0}")]
     Other(String),
 }

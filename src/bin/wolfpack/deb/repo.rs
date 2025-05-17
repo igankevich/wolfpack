@@ -18,6 +18,9 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
+use tantivy::tokenizer::NgramTokenizer;
+use tantivy::IndexWriter;
+use tantivy::TantivyDocument;
 use tokio::sync::oneshot;
 use uname_rs::Uname;
 use wolfpack::deb;
@@ -29,6 +32,7 @@ use crate::db::ConnectionArc;
 use crate::deb as db_deb;
 use crate::deb::DebDependencyMatch;
 use crate::deb::DebMatch;
+use crate::deb::PackageFileMatch;
 use crate::deb::RepoId;
 use crate::download_file;
 use crate::get_logger;
@@ -58,8 +62,88 @@ impl DebRepo {
         }
     }
 
+    fn new_package_index_writer(index_dir: &Path) -> Result<Arc<Mutex<IndexWriter>>, Error> {
+        use tantivy::directory::MmapDirectory;
+        use tantivy::schema::*;
+        use tantivy::Index;
+        let mut builder = Schema::builder();
+        builder.add_i64_field("id", NumericOptions::default().set_stored());
+        // TODO custom indexers
+        builder.add_text_field(
+            "name",
+            TextOptions::default().set_indexing_options(
+                TextFieldIndexing::default()
+                    .set_tokenizer("en_stem")
+                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+            ),
+        );
+        builder.add_text_field(
+            "description",
+            TextOptions::default().set_indexing_options(
+                TextFieldIndexing::default()
+                    .set_tokenizer("en_stem")
+                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+            ),
+        );
+        builder.add_text_field(
+            "homepage",
+            TextOptions::default().set_indexing_options(
+                TextFieldIndexing::default()
+                    .set_tokenizer("en_stem")
+                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+            ),
+        );
+        let schema = builder.build();
+        fs_err::create_dir_all(index_dir)?;
+        let directory = MmapDirectory::open(index_dir)?;
+        let index = Index::open_or_create(directory, schema)?;
+        let mut writer: IndexWriter = index.writer(1_000_000_000)?;
+        // TODO delete_term doesn't work
+        writer.delete_all_documents()?;
+        writer.commit()?;
+        Ok(Arc::new(Mutex::new(writer)))
+    }
+
+    fn new_files_index_writer(index_dir: &Path) -> Result<Arc<Mutex<IndexWriter>>, Error> {
+        use tantivy::directory::MmapDirectory;
+        use tantivy::schema::*;
+        use tantivy::Index;
+        use tantivy::IndexWriter;
+        let mut builder = Schema::builder();
+        builder.add_i64_field("id", NumericOptions::default().set_stored());
+        builder.add_text_field(
+            "path",
+            TextOptions::default().set_stored().set_indexing_options(
+                TextFieldIndexing::default()
+                    .set_tokenizer("en_stem")
+                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+            ),
+        );
+        builder.add_text_field(
+            "command",
+            TextOptions::default().set_indexing_options(
+                TextFieldIndexing::default()
+                    .set_tokenizer("trigram")
+                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+            ),
+        );
+        let schema = builder.build();
+        fs_err::create_dir_all(index_dir)?;
+        let directory = MmapDirectory::open(index_dir)?;
+        let index = Index::open_or_create(directory, schema)?;
+        index
+            .tokenizers()
+            .register("trigram", NgramTokenizer::new(2, 3, false)?);
+        let mut writer: IndexWriter = index.writer(1_000_000_000)?;
+        // TODO delete_term doesn't work
+        writer.delete_all_documents()?;
+        writer.commit()?;
+        Ok(Arc::new(Mutex::new(writer)))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn index_packages(
+        writer: Arc<Mutex<IndexWriter>>,
         packages_file: &Path,
         repo_dir: &Path,
         base_url: String,
@@ -70,6 +154,11 @@ impl DebRepo {
         indexing_progress_bar: Arc<Mutex<ProgressBar>>,
         progress_bar: Arc<Mutex<ProgressBar>>,
     ) -> Result<(), Error> {
+        use tantivy::schema::*;
+        let id_field = writer.lock().index().schema().get_field("id")?;
+        let name_field = writer.lock().index().schema().get_field("name")?;
+        let description_field = writer.lock().index().schema().get_field("description")?;
+        let homepage_field = writer.lock().index().schema().get_field("homepage")?;
         let mut packages_str = String::new();
         let mut file = AnyDecoder::new(BufReader::new(File::open(packages_file)?));
         file.read_to_string(&mut packages_str)?;
@@ -82,14 +171,29 @@ impl DebRepo {
         for package in packages.iter() {
             let url = format!("{}/{}", base_url, package.filename.display());
             let package_file = repo_dir.join(&package.filename);
-            if let Err(e) = db_conn
-                .lock()
-                .insert_deb_package(package, &url, &package_file, repo_id)
-            {
-                log::error!("Failed to index {:?}: {e}", package.inner.name.as_str());
+            let package_id =
+                match db_conn
+                    .lock()
+                    .insert_deb_package(package, &url, &package_file, repo_id)
+                {
+                    Ok(id) => id,
+                    Err(e) => {
+                        log::error!("Failed to index {:?}: {e}", package.inner.name.as_str());
+                        continue;
+                    }
+                };
+            let mut doc = TantivyDocument::new();
+            doc.add_field_value(id_field, &package_id);
+            doc.add_field_value(name_field, package.inner.name.as_str());
+            doc.add_field_value(description_field, package.inner.description.as_str());
+            if let Some(homepage) = package.inner.homepage.as_ref() {
+                doc.add_field_value(homepage_field, homepage.as_str());
             }
+            writer.lock().add_document(doc)?;
             indexing_progress_bar.lock().inc(1);
         }
+        // TODO commit every N documents
+        writer.lock().commit()?;
         // Resolve dependencies in batches.
         progress_bar.lock().inc_length(packages.len() as u64);
         let batch_size = 1_000;
@@ -115,44 +219,53 @@ impl DebRepo {
         Ok(())
     }
 
-    fn index_package_contents(
-        contents_file: &Path,
+    fn index_package_files(
+        writer: Arc<Mutex<IndexWriter>>,
+        contents_files: &[PathBuf],
         db_conn: ConnectionArc,
         progress_bar: Arc<Mutex<ProgressBar>>,
     ) -> Result<(), Error> {
-        let decoder = AnyDecoder::new(BufReader::new(File::open(contents_file)?));
-        let mut contents: Vec<_> = deb::PackageContents::read(BufReader::new(decoder))?
-            .into_inner()
-            .into_iter()
-            .collect();
-        progress_bar.lock().inc_length(contents.len() as u64);
-        let mut i = 0;
-        let mut batch_sizes = std::iter::from_fn(move || {
-            let j = match i {
-                0 => 1_000,
-                1 => 2_000,
-                2 => 4_000,
-                3 => 8_000,
-                _ => 16_000,
-            };
-            i += 1;
-            Some(j)
-        });
-        while !contents.is_empty() {
-            let batch_size = batch_sizes.next().unwrap();
-            let batch = contents.split_off(contents.len() - batch_size.min(contents.len()));
-            db_conn.lock().inner.execute("BEGIN", ())?;
-            for (package_name, files) in batch.iter() {
-                if let Err(e) = db_conn
-                    .lock()
-                    .insert_deb_package_contents(package_name, files)
-                {
-                    log::error!("Failed to index the contents of {package_name:?}: {e}");
+        let id_field = writer.lock().index().schema().get_field("id")?;
+        let path_field = writer.lock().index().schema().get_field("path")?;
+        let command_field = writer.lock().index().schema().get_field("command")?;
+        for contents_file in contents_files.into_iter() {
+            let decoder = AnyDecoder::new(BufReader::new(File::open(contents_file)?));
+            let contents: Vec<_> = deb::PackageContents::read(BufReader::new(decoder))?
+                .into_inner()
+                .into_iter()
+                .collect();
+            progress_bar.lock().inc_length(contents.len() as u64);
+            for (package_name, files) in contents.into_iter() {
+                let Some(package_id) = db_conn.lock().get_package_id_by_name(&package_name)? else {
+                    continue;
+                };
+                for file in files.into_iter() {
+                    let command = if let Some(parent) = file.parent() {
+                        match parent.file_name() {
+                            Some(dirname) => {
+                                if dirname == Path::new("bin") || dirname == Path::new("sbin") {
+                                    Some(file.file_name().expect("File name exists"))
+                                } else {
+                                    None
+                                }
+                            }
+                            None => None,
+                        }
+                    } else {
+                        None
+                    };
+                    let mut doc = TantivyDocument::new();
+                    doc.add_field_value(id_field, &package_id);
+                    doc.add_field_value(path_field, file.to_string_lossy().as_ref());
+                    if let Some(command) = command {
+                        doc.add_field_value(command_field, command.to_string_lossy().as_ref());
+                    }
+                    writer.lock().add_document(doc)?;
                 }
                 progress_bar.lock().inc(1);
             }
-            db_conn.lock().inner.execute("COMMIT", ())?;
-            db_conn.lock().optimize()?;
+            // TODO commit every N documents
+            writer.lock().commit()?;
         }
         // Force update.
         progress_bar.lock().tick();
@@ -246,6 +359,9 @@ impl Repo for DebRepo {
         let repo_dir = config.cache_dir.join(name);
         let mut index_rxs = Vec::new();
         let mut releases = HashMap::new();
+        let package_index_writer =
+            Self::new_package_index_writer(config.packages_index_dir().as_path())?;
+        let files_index_writer = Self::new_files_index_writer(config.files_index_dir().as_path())?;
         #[allow(clippy::never_loop)]
         for base_url in self.config.base_urls.iter() {
             let repo_id = db_conn.lock().insert_deb_repo(name, base_url)?;
@@ -343,8 +459,10 @@ impl Repo for DebRepo {
                                     let progress_bar = progress_bar.clone();
                                     let indexing_progress_bar = indexing_progress_bar.clone();
                                     let repo_dir = repo_dir.clone();
+                                    let package_index_writer = package_index_writer.clone();
                                     threads.execute(move || {
                                         if let Err(e) = Self::index_packages(
+                                            package_index_writer,
                                             &packages_file,
                                             &repo_dir,
                                             base_url,
@@ -437,15 +555,15 @@ impl Repo for DebRepo {
         {
             let db_conn = db_conn.clone();
             let index_contents_progress_bar = index_contents_progress_bar.clone();
+            let files_index_writer = files_index_writer.clone();
             threads.execute(move || {
-                for contents_file in contents_files.into_iter() {
-                    if let Err(e) = Self::index_package_contents(
-                        &contents_file,
-                        db_conn.clone(),
-                        index_contents_progress_bar.clone(),
-                    ) {
-                        log::error!("Failed to index package contents: {e}")
-                    }
+                if let Err(e) = Self::index_package_files(
+                    files_index_writer,
+                    &contents_files,
+                    db_conn.clone(),
+                    index_contents_progress_bar.clone(),
+                ) {
+                    log::error!("Failed to index package contents: {e}")
                 }
             });
         }
@@ -468,6 +586,8 @@ impl Repo for DebRepo {
             threads.execute(task);
         }
         threads.join();
+        package_index_writer.lock().garbage_collect_files().wait()?;
+        files_index_writer.lock().garbage_collect_files().wait()?;
         db_conn.lock().optimize()?;
         let progress_bar = progress_bar.lock();
         progress_bar.finish();
@@ -736,31 +856,92 @@ impl Repo for DebRepo {
     fn search(
         &mut self,
         config: &Config,
-        name: &str,
+        // TODO
+        _name: &str,
         by: SearchBy,
         keyword: &str,
     ) -> Result<(), Error> {
+        use tantivy::collector::TopDocs;
+        use tantivy::query::QueryParser;
+        use tantivy::schema::Value;
+        use tantivy::Index;
         let db_conn = Connection::new(config)?;
-        let architecture = Self::native_arch()?;
         match by {
             SearchBy::Keyword => {
-                let matches = db_conn
-                    .lock()
-                    .find_deb_packages(name, &architecture, keyword)?;
+                let index = Index::open_in_dir(config.packages_index_dir())?;
+                let reader = index.reader()?;
+                let searcher = reader.searcher();
+                let id = index.schema().get_field("id")?;
+                let name = index.schema().get_field("name")?;
+                let description = index.schema().get_field("description")?;
+                let homepage = index.schema().get_field("homepage")?;
+                let query_parser =
+                    QueryParser::for_index(&index, vec![name, description, homepage]);
+                let query = query_parser.parse_query(keyword)?;
+                let docs = searcher.search(&query, &TopDocs::with_limit(10_000))?;
+                // TODO Some documents and indexed mutliple times.
+                let mut package_ids = HashSet::new();
+                let mut matches = Vec::new();
+                for (_score, doc_address) in docs.into_iter() {
+                    let doc: TantivyDocument = searcher.doc(doc_address)?;
+                    let Some(package_id) = doc.get_first(id).and_then(|value| value.as_i64())
+                    else {
+                        continue;
+                    };
+                    if !package_ids.insert(package_id) {
+                        continue;
+                    }
+                    matches.extend(
+                        db_conn
+                            .lock()
+                            .get_deb_package_by_id(package_id)?
+                            .into_iter(),
+                    );
+                }
                 print_table(matches.iter(), std::io::stdout())?;
             }
-            SearchBy::File => {
-                let matches =
-                    db_conn
-                        .lock()
-                        .find_deb_packages_by_file(name, &architecture, keyword)?;
-                print_table(matches.iter(), std::io::stdout())?;
-            }
-            SearchBy::Command => {
-                let matches =
-                    db_conn
-                        .lock()
-                        .find_deb_packages_by_command(name, &architecture, keyword)?;
+            SearchBy::File | SearchBy::Command => {
+                let index = Index::open_in_dir(config.files_index_dir())?;
+
+                index
+                    .tokenizers()
+                    .register("trigram", NgramTokenizer::new(2, 3, false)?);
+                let reader = index.reader()?;
+                let searcher = reader.searcher();
+                let id = index.schema().get_field("id")?;
+                let command = index.schema().get_field("command")?;
+                let path = index.schema().get_field("path")?;
+                let default_field = if matches!(by, SearchBy::File) {
+                    path
+                } else {
+                    command
+                };
+                let query_parser = QueryParser::for_index(&index, vec![default_field]);
+                let query = query_parser.parse_query(keyword)?;
+                let docs = searcher.search(&query, &TopDocs::with_limit(10_000))?;
+                // TODO Some documents and indexed mutliple times.
+                let mut package_ids = HashSet::new();
+                let mut matches = Vec::new();
+                for (_score, doc_address) in docs.into_iter() {
+                    let doc: TantivyDocument = searcher.doc(doc_address)?;
+                    let Some(package_id) = doc.get_first(id).and_then(|value| value.as_i64())
+                    else {
+                        continue;
+                    };
+                    if !package_ids.insert(package_id) {
+                        continue;
+                    }
+                    let Some(path) = doc.get_first(path).and_then(|value| value.as_str()) else {
+                        continue;
+                    };
+                    let Some(package) = db_conn.lock().get_deb_package_by_id(package_id)? else {
+                        continue;
+                    };
+                    matches.push(PackageFileMatch {
+                        file: path.into(),
+                        package,
+                    });
+                }
                 print_table(matches.iter(), std::io::stdout())?;
             }
         };

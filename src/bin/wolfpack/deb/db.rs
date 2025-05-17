@@ -92,7 +92,7 @@ impl Connection {
         url: &str,
         filename: &Path,
         repo_id: RepoId,
-    ) -> Result<(), Error> {
+    ) -> Result<Id, Error> {
         let hash = package.hash();
         let all_dependencies = {
             let mut all = Vec::new();
@@ -143,81 +143,37 @@ impl Connection {
                     .optional()?;
             }
         }
-        Ok(())
+        match id {
+            Some(id) => Ok(id),
+            None => {
+                let id = self.get_package_id_by_name(package.inner.name.as_str())?;
+                Ok(id.expect("Inserted above"))
+            }
+        }
     }
 
-    pub fn insert_deb_package_contents(
-        &self,
-        package_name: &str,
-        files: &[PathBuf],
-    ) -> Result<(), Error> {
-        let package_id = self
-            .inner
+    pub fn get_package_id_by_name(&self, package_name: &str) -> Result<Option<Id>, Error> {
+        self.inner
             .prepare_cached("SELECT id FROM deb_packages WHERE name = ?1")?
             .query_row((package_name,), |row| {
                 let id: Id = row.get(0)?;
                 Ok(id)
             })
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => Error::PackageNotFound(package_name.into()),
-                e => e.into(),
-            })?;
-        for file in files {
-            // Index commands separately for faster search.
-            let command = if let Some(parent) = file.parent() {
-                match parent.file_name() {
-                    Some(dirname) => {
-                        if dirname == Path::new("bin") || dirname == Path::new("sbin") {
-                            Some(file.file_name().expect("File name exists"))
-                        } else {
-                            None
-                        }
-                    }
-                    None => None,
-                }
-            } else {
-                None
-            };
-            self.inner
-                .prepare_cached(
-                    "INSERT INTO deb_files(path, command, package_id) VALUES (?1, ?2, ?3) \
-                    ON CONFLICT DO NOTHING",
-                )?
-                .execute((
-                    file.as_bytes(),
-                    command.map(|x| x.as_encoded_bytes()),
-                    package_id,
-                ))
-                .ignore_constraint_violations()?;
-        }
-        Ok(())
+            .optional()
+            .map_err(Into::into)
     }
 
-    pub fn find_deb_packages(
-        &self,
-        repo_name: &str,
-        architecture: &str,
-        query: &str,
-    ) -> Result<Vec<DebMatch>, Error> {
+    pub fn get_deb_package_by_id(&self, package_id: Id) -> Result<Option<DebMatch>, Error> {
         self.inner
-            .prepare_cached(
-                "SELECT deb_packages.name, deb_packages.version, deb_packages.description
-                FROM deb_packages_fts
-                JOIN deb_packages
-                  ON id=deb_packages_fts.rowid
-                WHERE architecture IN (?3, 'all')
-                  AND repo_id IN (SELECT id FROM deb_repos WHERE name=?2)
-                  AND deb_packages_fts MATCH ?1
-                ORDER BY rank",
-            )?
-            .query_map((query, repo_name, architecture), |row| {
+            .prepare_cached("SELECT name, version, description FROM deb_packages WHERE id=?1")?
+            .query_row((package_id,), |row| {
                 Ok(DebMatch {
                     name: row.get(0)?,
                     version: row.get(1)?,
                     description: row.get(2)?,
                 })
-            })?
-            .collect::<Result<Vec<_>, _>>()
+            })
+            .optional()
             .map_err(Into::into)
     }
 
@@ -244,76 +200,6 @@ impl Connection {
                     filename: PathBuf::from_bytes(row.get::<usize, Vec<u8>>(5)?),
                     hash: row.get::<usize, OptionAnyHash>(6)?.into_inner(),
                     id: row.get(7)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Into::into)
-    }
-
-    pub fn find_deb_packages_by_file(
-        &self,
-        repo_name: &str,
-        architecture: &str,
-        query: &str,
-    ) -> Result<Vec<PackageFileMatch>, Error> {
-        self.inner
-            .prepare_cached(
-                "SELECT
-                  deb_files_fts.path,
-                  deb_packages.name, deb_packages.version, deb_packages.description
-                FROM deb_files_fts
-                JOIN deb_files
-                  ON deb_files.id=deb_files_fts.rowid
-                JOIN deb_packages
-                  ON deb_packages.id=deb_files.package_id
-                WHERE architecture IN (?1, 'all')
-                  AND repo_id IN (SELECT id FROM deb_repos WHERE name=?2)
-                  AND deb_files_fts MATCH ?3
-                ORDER BY rank",
-            )?
-            .query_map((architecture, repo_name, query), |row| {
-                Ok(PackageFileMatch {
-                    file: PathBuf::from_bytes(row.get::<usize, Vec<u8>>(0)?),
-                    package: DebMatch {
-                        name: row.get(1)?,
-                        version: row.get(2)?,
-                        description: row.get(3)?,
-                    },
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Into::into)
-    }
-
-    pub fn find_deb_packages_by_command(
-        &self,
-        repo_name: &str,
-        architecture: &str,
-        glob: &str,
-    ) -> Result<Vec<PackageFileMatch>, Error> {
-        self.inner
-            .prepare_cached(
-                "SELECT
-                  deb_files.command,
-                  deb_packages.name, deb_packages.version, deb_packages.description
-                FROM deb_commands_fts
-                JOIN deb_files
-                  ON deb_files.id=deb_commands_fts.rowid
-                JOIN deb_packages
-                  ON deb_packages.id=deb_files.package_id
-                WHERE architecture IN (?1, 'all')
-                  AND repo_id IN (SELECT id FROM deb_repos WHERE name=?2)
-                  AND deb_commands_fts.command GLOB ?3
-                ORDER BY deb_files.command",
-            )?
-            .query_map((architecture, repo_name, glob), |row| {
-                Ok(PackageFileMatch {
-                    file: PathBuf::from_bytes(row.get::<usize, Vec<u8>>(0)?),
-                    package: DebMatch {
-                        name: row.get(1)?,
-                        version: row.get(2)?,
-                        description: row.get(3)?,
-                    },
                 })
             })?
             .collect::<Result<Vec<_>, _>>()

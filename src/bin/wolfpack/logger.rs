@@ -23,12 +23,19 @@ impl Logger {
 }
 
 impl Log for Logger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        if metadata.level() <= Level::Info && metadata.target().contains("tantivy") {
+            // Silence tantivy.
+            return false;
+        }
         true
     }
 
     fn log(&self, record: &Record) {
         use std::fmt::Write;
+        if !self.enabled(record.metadata()) {
+            return;
+        }
         let mut buffer = String::with_capacity(4096);
         let prefix = match record.level() {
             Level::Warn => "WARNING: ",

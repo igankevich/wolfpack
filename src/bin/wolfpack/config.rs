@@ -46,6 +46,20 @@ impl Config {
         self.cache_dir.join("cache.sqlite3")
     }
 
+    pub fn packages_index_dir(&self) -> PathBuf {
+        let mut path = self.cache_dir.clone();
+        path.push("index");
+        path.push("packages");
+        path
+    }
+
+    pub fn files_index_dir(&self) -> PathBuf {
+        let mut path = self.cache_dir.clone();
+        path.push("index");
+        path.push("files");
+        path
+    }
+
     pub fn max_age(&self) -> Duration {
         Duration::from_secs(self.max_age)
     }

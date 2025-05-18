@@ -13,23 +13,17 @@ use wolfpack::deb;
 use crate::Error;
 use crate::Repo;
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(deny_unknown_fields)]
 pub struct Config {
-    #[serde(default)]
     pub store_dir: PathBuf,
-    #[serde(default)]
     pub cache_dir: PathBuf,
-    #[serde(rename = "repo", default)]
     pub repos: BTreeMap<String, RepoConfig>,
-    #[serde(default)]
     max_age: u64,
 }
 
 impl Config {
     pub fn open<P: AsRef<Path>>(config_dir: P) -> Result<Self, Error> {
         match fs_err::read_to_string(config_dir.as_ref().join("config.toml")) {
-            Ok(s) => Ok(toml::from_str(&s)?),
+            Ok(s) => Ok(toml::from_str::<ConfigToml>(&s)?.into()),
             Err(ref e) if e.kind() == ErrorKind::NotFound => Ok(Default::default()),
             Err(e) => Err(e.into()),
         }
@@ -43,7 +37,7 @@ impl Config {
     }
 
     pub fn database_path(&self) -> PathBuf {
-        self.cache_dir.join("cache.sqlite3")
+        self.cache_dir.join("wolfpack.sqlite3")
     }
 
     pub fn packages_index_dir(&self) -> PathBuf {
@@ -76,6 +70,28 @@ impl Default for Config {
     }
 }
 
+#[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+struct ConfigToml {
+    pub store_dir: Option<PathBuf>,
+    pub cache_dir: Option<PathBuf>,
+    #[serde(rename = "repo", default)]
+    pub repos: BTreeMap<String, RepoConfig>,
+    max_age: Option<u64>,
+}
+
+impl From<ConfigToml> for Config {
+    fn from(other: ConfigToml) -> Self {
+        let def = Self::default();
+        Self {
+            store_dir: other.store_dir.unwrap_or(def.store_dir),
+            cache_dir: other.cache_dir.unwrap_or(def.cache_dir),
+            repos: other.repos,
+            max_age: other.max_age.unwrap_or(def.max_age),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "format", rename_all = "lowercase")]
 #[serde(deny_unknown_fields)]
@@ -103,43 +119,5 @@ impl Default for DebConfig {
             public_key_file: Default::default(),
             verify: true,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn config_gen() {
-        let config = Config {
-            store_dir: "/wolfpack".into(),
-            cache_dir: "/tmp/wolfpack".into(),
-            max_age: 1000,
-            repos: [
-                (
-                    "debian".into(),
-                    RepoConfig::Deb(DebConfig {
-                        base_urls: vec!["https://deb.debian.org/debian".into()],
-                        suites: vec!["bookworm".into(), "bookworm-updates".into()],
-                        components: ["main".try_into().unwrap()].into(),
-                        public_key_file: "".into(), // TODO
-                        verify: true,
-                    }),
-                ),
-                (
-                    "debian-security".into(),
-                    RepoConfig::Deb(DebConfig {
-                        base_urls: vec!["https://deb.debian.org/debian-security".into()],
-                        suites: vec!["bookworm-security".into()],
-                        components: ["main".try_into().unwrap()].into(),
-                        public_key_file: "".into(), // TODO
-                        verify: true,
-                    }),
-                ),
-            ]
-            .into(),
-        };
-        eprintln!("{}", toml::to_string(&config).unwrap());
     }
 }

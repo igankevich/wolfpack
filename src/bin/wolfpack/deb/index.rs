@@ -51,10 +51,7 @@ pub fn new_package_index_writer(index_dir: &Path) -> Result<Arc<Mutex<IndexWrite
     fs_err::create_dir_all(index_dir)?;
     let directory = MmapDirectory::open(index_dir)?;
     let index = Index::open_or_create(directory, schema)?;
-    let mut writer: IndexWriter = index.writer(1_000_000_000)?;
-    // TODO delete_term doesn't work
-    writer.delete_all_documents()?;
-    writer.commit()?;
+    let writer: IndexWriter = index.writer(1_000_000_000)?;
     Ok(Arc::new(Mutex::new(writer)))
 }
 
@@ -83,8 +80,6 @@ pub fn new_files_index_writer(index_dir: &Path) -> Result<Arc<Mutex<IndexWriter>
     let index = Index::open_or_create(directory, schema)?;
     init_files_tokenizers(&index)?;
     let mut writer: IndexWriter = index.writer(1_000_000_000)?;
-    // TODO delete_term doesn't work
-    writer.delete_all_documents()?;
     writer.commit()?;
     Ok(Arc::new(Mutex::new(writer)))
 }
@@ -215,6 +210,8 @@ fn do_index_package_files(
         let Some(package_id) = db_conn.lock().get_package_id_by_name(&package_name)? else {
             continue;
         };
+        let writer = writer.lock();
+        writer.delete_term(Term::from_field_i64(id_field, package_id));
         for file in files.into_iter() {
             let command = if let Some(parent) = file.parent() {
                 match parent.file_name() {
@@ -236,7 +233,7 @@ fn do_index_package_files(
             if let Some(command) = command {
                 doc.add_field_value(command_field, command.to_string_lossy().as_ref());
             }
-            writer.lock().add_document(doc)?;
+            writer.add_document(doc)?;
         }
         progress_bar.lock().inc(1);
     }

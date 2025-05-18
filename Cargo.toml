@@ -81,7 +81,7 @@ walkdir = "2.5.0"
 xz = "0.1.0"
 zar = "0.1.4"
 zeroize = { version = "1.8.1", features = ["derive", "zeroize_derive"] }
-zip = "2.6.1"
+zip = "3.0.0"
 zstd = "0.13.3"
 
 [dev-dependencies]

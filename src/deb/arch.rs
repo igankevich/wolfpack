@@ -21,6 +21,7 @@ define_str_enum! {
     (S390x, "s390x"),
     (Sparc32, "sparc32"),
     (Sparc64, "sparc64"),
+    (Riscv64, "riscv64"),
     (All, "all"),
 }
 

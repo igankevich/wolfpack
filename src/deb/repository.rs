@@ -33,6 +33,7 @@ use crate::hash::Md5Hash;
 use crate::hash::MultiHashReader;
 use crate::hash::Sha1Hash;
 use crate::hash::Sha256Hash;
+use crate::hash::Sha512Hash;
 use crate::hash::UpperHex;
 use crate::sign::PgpCleartextSigner;
 
@@ -58,7 +59,7 @@ impl Repository {
             let (hash, size) = reader.digest()?;
             let mut filename = PathBuf::new();
             filename.push("data");
-            filename.push(hash.sha2.to_string());
+            filename.push(hash.sha256.to_string());
             create_dir_all(output_dir.as_ref().join(&filename))?;
             filename.push(path.file_name().ok_or(ErrorKind::InvalidData)?);
             let new_path = output_dir.as_ref().join(&filename);
@@ -68,7 +69,8 @@ impl Repository {
                 size,
                 md5: Some(hash.md5.into()),
                 sha1: Some(hash.sha1),
-                sha256: Some(hash.sha2),
+                sha256: Some(hash.sha256),
+                sha512: Some(hash.sha512),
                 filename,
             };
             packages
@@ -296,12 +298,16 @@ pub struct ExtendedPackage {
     pub md5: Option<Md5Hash>,
     pub sha1: Option<Sha1Hash>,
     pub sha256: Option<Sha256Hash>,
+    pub sha512: Option<Sha512Hash>,
     pub filename: PathBuf,
     pub size: u64,
 }
 
 impl ExtendedPackage {
     pub fn hash(&self) -> Option<AnyHash> {
+        if let Some(hash) = self.sha512.as_ref() {
+            return Some(hash.clone().into());
+        }
         if let Some(hash) = self.sha256.as_ref() {
             return Some(hash.clone().into());
         }
@@ -329,6 +335,9 @@ impl Display for ExtendedPackage {
         if let Some(sha256) = self.sha256.as_ref() {
             writeln!(f, "SHA256: {}", sha256)?;
         }
+        if let Some(sha512) = self.sha512.as_ref() {
+            writeln!(f, "SHA512: {}", sha512)?;
+        }
         Ok(())
     }
 }
@@ -341,6 +350,7 @@ impl FromStr for ExtendedPackage {
             md5: inner.other.remove_some("md5sum")?,
             sha1: inner.other.remove_some("sha1")?,
             sha256: inner.other.remove_some("sha256")?,
+            sha512: inner.other.remove_some("sha512")?,
             filename: inner.other.remove_any("filename")?.try_into()?,
             size: inner.other.remove("size")?,
             inner,
@@ -374,13 +384,11 @@ impl PackageContents {
                 .ok_or_else(|| Error::other("No file path"))?
                 .trim();
             for token in packages.split(',') {
-                let mut tokens = token.splitn(2, '/');
-                let _category = tokens
-                    .next()
-                    .ok_or_else(|| Error::other(format!("No category in {:?}", line)))?;
+                let mut tokens = token.rsplit('/');
                 let package_name = tokens
                     .next()
                     .ok_or_else(|| Error::other(format!("No package name in {:?}", line)))?;
+                // Ignore category.
                 table
                     .entry(package_name.to_string())
                     .or_default()

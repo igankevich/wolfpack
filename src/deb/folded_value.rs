@@ -33,9 +33,6 @@ impl FoldedValue {
         if value.is_empty() {
             return Err(ErrorKind::InvalidData.into());
         }
-        if value.starts_with(char::is_whitespace) {
-            return Err(ErrorKind::InvalidData.into());
-        }
         if value
             .split('\n')
             .skip(1)

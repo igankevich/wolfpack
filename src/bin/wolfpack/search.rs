@@ -7,7 +7,7 @@ use crate::Config;
 #[derive(clap::Args)]
 pub struct SearchArgs {
     /// Which field to search by.
-    #[clap(short = 'b', long = "by", value_name = "BY")]
+    #[clap(short = 'b', long = "by", value_name = "BY", default_value = "keyword")]
     by: SearchBy,
     /// Search query.
     #[clap(

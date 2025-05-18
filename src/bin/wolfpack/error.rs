@@ -45,7 +45,7 @@ pub enum Error {
     NoHash,
     #[error("Task error: {0}")]
     Join(#[from] tokio::task::JoinError),
-    #[error("Task error: {0}")]
+    #[error("Task channel error: {0}")]
     OneShot(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("Signing error")]
     Sign,
@@ -59,6 +59,12 @@ pub enum Error {
     Command(#[from] command_error::Error),
     #[error("Directory traversing error: {0}")]
     WalkDir(#[from] walkdir::Error),
+    #[error("Tantivy error: {0}")]
+    Tantivy(#[from] tantivy::TantivyError),
+    #[error("Tantivy open directory error: {0}")]
+    TantivyDir(#[from] tantivy::directory::error::OpenDirectoryError),
+    #[error("Tantivy query parse error: {0}")]
+    TantivyQueryParse(#[from] tantivy::query::QueryParserError),
     #[error("{0}")]
     Other(String),
 }

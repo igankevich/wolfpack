@@ -1,11 +1,9 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::ffi::OsStr;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
-use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::SystemTime;
@@ -24,6 +22,7 @@ use crate::hash::MultiHash;
 use crate::hash::MultiHashReader;
 use crate::hash::Sha1Hash;
 use crate::hash::Sha256Hash;
+use crate::hash::Sha512Hash;
 
 // https://wiki.debian.org/DebianRepository/Format#A.22Release.22_files
 pub struct Release {
@@ -35,6 +34,7 @@ pub struct Release {
     md5: HashMap<PathBuf, (Md5Hash, u64)>,
     sha1: HashMap<PathBuf, (Sha1Hash, u64)>,
     sha256: HashMap<PathBuf, (Sha256Hash, u64)>,
+    sha512: HashMap<PathBuf, (Sha512Hash, u64)>,
 }
 
 impl Release {
@@ -61,10 +61,12 @@ impl Release {
         let mut md5 = HashMap::new();
         let mut sha1 = HashMap::new();
         let mut sha256 = HashMap::new();
+        let mut sha512 = HashMap::new();
         for (path, checksum) in checksums.into_iter() {
             md5.insert(path.clone(), (checksum.hash.md5.into(), checksum.size));
             sha1.insert(path.clone(), (checksum.hash.sha1, checksum.size));
-            sha256.insert(path, (checksum.hash.sha2, checksum.size));
+            sha256.insert(path.clone(), (checksum.hash.sha256, checksum.size));
+            sha512.insert(path, (checksum.hash.sha512, checksum.size));
         }
         Ok(Self {
             date: Some(SystemTime::now()),
@@ -75,20 +77,16 @@ impl Release {
             md5,
             sha1,
             sha256,
+            sha512,
         })
     }
 
-    pub fn get_files<P: AsRef<Path>>(
-        &self,
-        prefix: P,
-        file_stem: &str,
-    ) -> Vec<(PathBuf, AnyHash, u64)> {
-        let prefix = prefix.as_ref();
-        let file_stem = OsStr::new(file_stem);
+    pub fn get_files(&self, file_prefix: &str) -> Vec<(PathBuf, AnyHash, u64)> {
         let mut files = Vec::new();
-        get_files(&self.md5, prefix, file_stem, &mut files);
-        get_files(&self.sha1, prefix, file_stem, &mut files);
-        get_files(&self.sha256, prefix, file_stem, &mut files);
+        get_files(&self.md5, file_prefix, &mut files);
+        get_files(&self.sha1, file_prefix, &mut files);
+        get_files(&self.sha256, file_prefix, &mut files);
+        get_files(&self.sha512, file_prefix, &mut files);
         files.sort_by(|a, b| {
             let a_size = a.2;
             let b_size = b.2;
@@ -142,6 +140,7 @@ impl Display for Release {
         let mut md5 = String::new();
         let mut sha1 = String::new();
         let mut sha256 = String::new();
+        let mut sha512 = String::new();
         for (path, (hash, size)) in self.md5.iter() {
             write!(&mut md5, "\n {} {} {}", hash, size, path.display())?;
         }
@@ -151,9 +150,13 @@ impl Display for Release {
         for (path, (hash, size)) in self.sha256.iter() {
             write!(&mut sha256, "\n {} {} {}", hash, size, path.display())?;
         }
+        for (path, (hash, size)) in self.sha512.iter() {
+            write!(&mut sha512, "\n {} {} {}", hash, size, path.display())?;
+        }
         writeln!(f, "MD5Sum: {}", md5)?;
         writeln!(f, "SHA1: {}", sha1)?;
         writeln!(f, "SHA256: {}", sha256)?;
+        writeln!(f, "SHA512: {}", sha512)?;
         Ok(())
     }
 }
@@ -171,6 +174,7 @@ impl FromStr for Release {
             md5: fields.remove_hashes("md5sum")?,
             sha1: fields.remove_hashes("sha1")?,
             sha256: fields.remove_hashes("sha256")?,
+            sha512: fields.remove_hashes("sha512")?,
         };
         Ok(control)
     }
@@ -183,13 +187,13 @@ struct Checksums {
 
 fn get_files<H: Into<AnyHash> + Clone>(
     hashes: &HashMap<PathBuf, (H, u64)>,
-    prefix: &Path,
-    file_stem: &OsStr,
+    file_prefix: &str,
     files: &mut Vec<(PathBuf, AnyHash, u64)>,
 ) {
     files.extend(hashes.iter().filter_map(|(path, (hash, size))| {
-        if path.starts_with(prefix) && path.file_stem() == Some(file_stem) {
-            Some((path.clone(), hash.clone().into(), *size))
+        let path = path.to_str()?;
+        if path.starts_with(file_prefix) {
+            Some((path.into(), hash.clone().into(), *size))
         } else {
             None
         }

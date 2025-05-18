@@ -635,8 +635,6 @@ impl Repo for DebRepo {
                     QueryParser::for_index(&index, vec![name, description, homepage]);
                 let query = query_parser.parse_query(keyword)?;
                 let docs = searcher.search(&query, &TopDocs::with_limit(10_000))?;
-                // TODO Some documents and indexed mutliple times.
-                let mut package_ids = HashSet::new();
                 let mut matches = Vec::new();
                 for (_score, doc_address) in docs.into_iter() {
                     let doc: TantivyDocument = searcher.doc(doc_address)?;
@@ -644,9 +642,6 @@ impl Repo for DebRepo {
                     else {
                         continue;
                     };
-                    if !package_ids.insert(package_id) {
-                        continue;
-                    }
                     matches.extend(
                         db_conn
                             .lock()

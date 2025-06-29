@@ -286,7 +286,11 @@ impl FromStr for PerArchPackages {
             if chunk.is_empty() {
                 continue;
             }
-            packages.push(chunk.parse()?);
+            packages.push(
+                chunk
+                    .parse::<ExtendedPackage>()
+                    .map_err(|e| Error::InvalidPackage(chunk.to_string(), e.to_string()))?,
+            );
         }
         Ok(Self { packages })
     }

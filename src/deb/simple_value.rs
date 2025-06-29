@@ -132,10 +132,10 @@ impl TryFrom<&str> for SimpleValue {
 
 fn validate_simple_value(value: &str) -> Result<(), Error> {
     if !value.as_bytes().iter().all(is_valid_char) {
-        return Err(ErrorKind::InvalidData.into());
+        return Err(Error::InvalidChars);
     }
     if value.is_empty() || value.chars().all(char::is_whitespace) {
-        return Err(ErrorKind::InvalidData.into());
+        return Err(Error::EmptyValue);
     }
     if value.chars().next().iter().all(|ch| ch.is_whitespace()) {
         return Err(ErrorKind::InvalidData.into());

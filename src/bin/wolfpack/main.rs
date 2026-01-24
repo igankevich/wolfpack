@@ -6,6 +6,7 @@ mod do_main;
 mod download;
 mod download_file;
 mod error;
+#[cfg(target_os = "linux")]
 mod exec;
 mod key;
 mod logger;
@@ -20,6 +21,7 @@ use self::do_main::*;
 use self::download::*;
 use self::download_file::*;
 use self::error::*;
+#[cfg(target_os = "linux")]
 use self::exec::*;
 use self::key::*;
 use self::logger::*;

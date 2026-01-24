@@ -173,10 +173,10 @@ mod tests {
     #[test]
     fn test_deb() {
         let master_secret_key = MasterSecretKey::new([123_u8; MASTER_SECRET_KEY_LEN]);
-        let gen = SigningKeyGenerator::new(&master_secret_key);
-        let (signing_key_1, verifying_key_1) = gen.deb().unwrap();
-        let gen = SigningKeyGenerator::new(&master_secret_key);
-        let (signing_key_2, verifying_key_2) = gen.deb().unwrap();
+        let generator = SigningKeyGenerator::new(&master_secret_key);
+        let (signing_key_1, verifying_key_1) = generator.deb().unwrap();
+        let generator = SigningKeyGenerator::new(&master_secret_key);
+        let (signing_key_2, verifying_key_2) = generator.deb().unwrap();
         assert_eq!(
             signing_key_1.to_armored_string().unwrap(),
             signing_key_2.to_armored_string().unwrap(),

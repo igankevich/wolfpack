@@ -9,6 +9,7 @@ use tempfile::TempDir;
 
 use crate::db::Connection;
 use crate::download;
+#[cfg(target_os = "linux")]
 use crate::exec;
 use crate::search;
 use crate::Config;

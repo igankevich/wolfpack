@@ -63,7 +63,7 @@ impl Release {
         let mut sha256 = HashMap::new();
         let mut sha512 = HashMap::new();
         for (path, checksum) in checksums.into_iter() {
-            md5.insert(path.clone(), (checksum.hash.md5.into(), checksum.size));
+            md5.insert(path.clone(), (checksum.hash.md5, checksum.size));
             sha1.insert(path.clone(), (checksum.hash.sha1, checksum.size));
             sha256.insert(path.clone(), (checksum.hash.sha256, checksum.size));
             sha512.insert(path, (checksum.hash.sha512, checksum.size));

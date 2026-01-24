@@ -14,7 +14,7 @@ impl Hasher for md5::Context {
     }
 
     fn finalize(self) -> Self::Output {
-        Md5Hash::new(self.compute().into())
+        Md5Hash::new(self.finalize().into())
     }
 }
 

@@ -31,6 +31,12 @@ pub enum Error {
     InvalidMd5,
     #[error("Invalid {0:?}: {1:?}")]
     InvalidField(&'static str, String),
+    #[error("Invalid package {0:?}: {1}")]
+    InvalidPackage(String, String),
+    #[error("Empty value")]
+    EmptyValue,
+    #[error("Contains invalid characters")]
+    InvalidChars,
     #[error("{0}")]
     Other(String),
 }

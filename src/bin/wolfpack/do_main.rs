@@ -9,11 +9,13 @@ use tempfile::TempDir;
 
 use crate::db::Connection;
 use crate::download;
+#[cfg(target_os = "linux")]
 use crate::exec;
 use crate::search;
 use crate::Config;
 use crate::DownloadArgs;
 use crate::Error;
+#[cfg(target_os = "linux")]
 use crate::ExecArgs;
 use crate::Logger;
 use crate::MasterSecretKey;
@@ -87,6 +89,7 @@ enum Command {
     /// Build a new repository.
     BuildRepo(BuildRepoArgs),
     /// Execute foreign binary.
+    #[cfg(target_os = "linux")]
     Exec(ExecArgs),
     /// Download package archive, but don't install it.
     Download(DownloadArgs),
@@ -214,6 +217,7 @@ pub fn do_main() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Command::BuildPackage(more_args) => build_package(more_args),
         Command::BuildRepo(more_args) => build_repo(more_args),
         Command::Key(more_args) => key(more_args),
+        #[cfg(target_os = "linux")]
         Command::Exec(more_args) => Ok(exec(more_args)?),
         Command::Download(more_args) => download(config, more_args),
         Command::Optimize => optimize(config),

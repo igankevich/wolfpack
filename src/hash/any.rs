@@ -137,7 +137,7 @@ impl Hasher for AnyHasher {
     fn finalize(self) -> Self::Output {
         use AnyHasher::*;
         match self {
-            Md5(hasher) => hasher.finalize().into(),
+            Md5(hasher) => AnyHash::Md5(hasher.finalize().0.into()),
             Sha1(hasher) => hasher.finalize().into(),
             Sha256(hasher) => hasher.finalize().into(),
             Sha512(hasher) => hasher.finalize().into(),

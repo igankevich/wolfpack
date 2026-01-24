@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use parking_lot::Mutex;
 use parking_lot::MutexGuard;
 
-pub fn prevent_concurrency(bucket: &str) -> MutexGuard<()> {
+pub fn prevent_concurrency(bucket: &str) -> MutexGuard<'_, ()> {
     for (name, mutex) in BUCKETS.iter() {
         if name == &bucket {
             return mutex.lock();

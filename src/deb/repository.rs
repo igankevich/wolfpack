@@ -67,7 +67,7 @@ impl Repository {
             let package = ExtendedPackage {
                 inner: package,
                 size,
-                md5: Some(hash.md5.into()),
+                md5: Some(hash.md5),
                 sha1: Some(hash.sha1),
                 sha256: Some(hash.sha256),
                 sha512: Some(hash.sha512),
@@ -286,7 +286,11 @@ impl FromStr for PerArchPackages {
             if chunk.is_empty() {
                 continue;
             }
-            packages.push(chunk.parse()?);
+            packages.push(
+                chunk
+                    .parse::<ExtendedPackage>()
+                    .map_err(|e| Error::InvalidPackage(chunk.to_string(), e.to_string()))?,
+            );
         }
         Ok(Self { packages })
     }

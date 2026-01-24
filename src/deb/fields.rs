@@ -183,12 +183,19 @@ impl ParserStatus {
                     ParserStatus::Reading(name, value.into(), 1, false)
                 } else {
                     // Simple value.
-                    let value = Value::Simple(value.parse()?);
-                    match fields.fields.entry(name) {
-                        Occupied(o) => return Err(Error::DuplicateField(o.key().to_string())),
-                        Vacant(v) => {
-                            v.insert(value);
+                    match value.parse() {
+                        Ok(value) => {
+                            let value = Value::Simple(value);
+                            match fields.fields.entry(name) {
+                                Occupied(o) => {
+                                    return Err(Error::DuplicateField(o.key().to_string()))
+                                }
+                                Vacant(v) => {
+                                    v.insert(value);
+                                }
+                            }
                         }
+                        Err(e) => log::warn!("Failed to parse {line:?}: {e}"),
                     }
                     ParserStatus::Initial
                 }

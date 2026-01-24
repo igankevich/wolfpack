@@ -108,8 +108,8 @@ impl Connection {
             .query_row((url,), |row| {
                 let etag: Option<Vec<u8>> = row.get(0)?;
                 let last_modified: Option<Vec<u8>> = row.get(1)?;
-                let expires: Option<u64> = row.get(2)?;
-                let file_size: Option<u64> = row.get(3)?;
+                let expires: Option<i64> = row.get(2)?;
+                let file_size: Option<i64> = row.get(3)?;
                 Ok(DownloadedFile {
                     etag: match etag {
                         Some(x) => x.try_into().ok(),
@@ -120,10 +120,10 @@ impl Connection {
                         None => None,
                     },
                     expires: match expires {
-                        Some(x) => SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(x)),
+                        Some(x) => SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(x as u64)),
                         None => None,
                     },
-                    file_size,
+                    file_size: file_size.map(|x| x as u64),
                 })
             })
             .optional()
@@ -152,7 +152,13 @@ impl Connection {
                     expires = excluded.expires, \
                     file_size = excluded.file_size",
             )?
-            .execute((url, etag, last_modified, expires, file_size))
+            .execute((
+                url,
+                etag,
+                last_modified,
+                expires,
+                file_size.map(|x| x as i64),
+            ))
             .ensure_num_rows_modified(1)?;
         Ok(())
     }

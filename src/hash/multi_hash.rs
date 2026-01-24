@@ -1,5 +1,6 @@
 use crate::hash::Hasher;
 use crate::hash::HashingReader;
+use crate::hash::Md5Hash;
 use crate::hash::Sha1;
 use crate::hash::Sha1Hash;
 use crate::hash::Sha256;
@@ -16,7 +17,7 @@ pub struct MultiHasher {
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct MultiHash {
-    pub md5: md5::Digest,
+    pub md5: Md5Hash,
     pub sha1: Sha1Hash,
     pub sha256: Sha256Hash,
     pub sha512: Sha512Hash,
@@ -43,7 +44,7 @@ impl Hasher for MultiHasher {
 
     fn finalize(self) -> Self::Output {
         MultiHash {
-            md5: self.md5.compute(),
+            md5: Md5Hash::new(self.md5.finalize().into()),
             sha1: Sha1Hash::new(sha1::Digest::finalize(self.sha1).into()),
             sha256: Sha256Hash::new(sha2::Digest::finalize(self.sha256).into()),
             sha512: Sha512Hash::new(sha2::Digest::finalize(self.sha512).into()),

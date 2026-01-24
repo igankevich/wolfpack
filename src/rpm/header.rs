@@ -68,7 +68,7 @@ where
         }
         let num_entries = num_entries as u32;
         let store_len = store_len as u32;
-        debug_assert!(0 == (num_entries * ENTRY_LEN as u32) % ALIGN);
+        debug_assert!((num_entries * ENTRY_LEN as u32).is_multiple_of(ALIGN));
         writer.write_all(&HEADER_MAGIC[..])?;
         num_entries.write(writer.by_ref())?;
         store_len.write(writer.by_ref())?;

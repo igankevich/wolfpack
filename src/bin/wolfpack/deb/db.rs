@@ -115,7 +115,10 @@ impl Connection {
                     package.inner.version.to_string(),
                     package.inner.architecture.as_str(),
                     package.inner.description.as_str(),
-                    package.inner.installed_size.map(|s| s.saturating_mul(1024)), // Convert from KiB.
+                    package
+                        .inner
+                        .installed_size
+                        .map(|s| s.saturating_mul(1024) as i64), // Convert from KiB.
                     if !all_dependencies.is_empty() {
                         Some(all_dependencies.to_string())
                     } else {

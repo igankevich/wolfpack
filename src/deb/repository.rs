@@ -67,7 +67,7 @@ impl Repository {
             let package = ExtendedPackage {
                 inner: package,
                 size,
-                md5: Some(hash.md5.into()),
+                md5: Some(hash.md5),
                 sha1: Some(hash.sha1),
                 sha256: Some(hash.sha256),
                 sha512: Some(hash.sha512),

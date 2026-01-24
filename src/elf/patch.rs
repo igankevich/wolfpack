@@ -42,7 +42,7 @@ where
     } else {
         patcher.remove_interpreter()?;
     }
-    patcher.set_library_search_path(DynamicTag::Runpath, c_rpath.as_c_str())?;
+    patcher.set_dynamic_tag(DynamicTag::Runpath, c_rpath.as_c_str())?;
     patcher.finish()?;
     Ok(())
 }
